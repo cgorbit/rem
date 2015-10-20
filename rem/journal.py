@@ -12,22 +12,18 @@ class TagEvent(object):
     def __init__(self, tagname):
         self.tagname = tagname
 
-    def Redo(self, *args, **kws):
-        raise NotImplementedError
+    def Redo(self, journal):
+        self.DoRedo(journal.tagRef.AcquireTag(self.tagname))
 
 
 class SetTagEvent(TagEvent):
-    def Redo(self, tag_logger):
-        tagRef = tag_logger.tagRef
-        if tagRef.IsRemoteName(self.tagname):
-            tagRef.SetRemoteTag(self.tagname)
-        else:
-            tagRef.SetTag(self.tagname)
+    def DoRedo(self, tag):
+        tag._Set()
 
 
 class UnsetTagEvent(TagEvent):
-    def Redo(self, tag_logger):
-        tag_logger.tagRef.UnsetTag(self.tagname)
+    def DoRedo(self, tag):
+        tag._Unset()
 
 
 class ResetTagEvent(TagEvent, Unpickable(message=str)):
@@ -35,8 +31,8 @@ class ResetTagEvent(TagEvent, Unpickable(message=str)):
         super(ResetTagEvent, self).__init__(tagname)
         self.message = message
 
-    def Redo(self, tag_logger):
-        tag_logger.tagRef.ResetTag(self.tagname, self.message)
+    def DoRedo(self, tag):
+        tag._Reset(self.message)
 
 
 class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):

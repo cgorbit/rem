@@ -209,13 +209,6 @@ class TagStorage(object):
     def SetTag(self, tagname):
         self.AcquireTag(tagname).Set()
 
-    def SetRemoteTag(self, tagname):
-        tag = self.AcquireTag(tagname)
-        if not isinstance(tag, RemoteTag):
-            logging.error("Expected RemoteTag, got %r", tag)
-            return
-        tag.SetRemote()
-
     def UnsetTag(self, tagname):
         self.AcquireTag(tagname).Unset()
 
