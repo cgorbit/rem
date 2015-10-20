@@ -11,6 +11,7 @@ from collections import deque
 from xmlrpcmethodnotsupported import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported
 from common import *
 from callbacks import Tag, ICallbackAcceptor, TagEvent
+import fork_locking
 
 PROTOCOL_VERSION = 2
 
@@ -58,6 +59,7 @@ class ClientInfo(Unpickable(events=Deque,
         getattr(super(ClientInfo, self), "__init__")(*args, **kws)
         self.update(*args, **kws)
         self.lastError = None
+        self._send_events_lock = fork_locking.Lock()
 
     def Connect(self):
         self.connection = XMLRPCServerProxy(self.systemUrl, allow_none=True)
@@ -100,7 +102,7 @@ class ClientInfo(Unpickable(events=Deque,
     def SetPeerVersion(self, version):
         self.peerVersion = version
 
-    def _SendEventsIfNeed(self):
+    def _DoSendEventsIfNeed(self):
         tosend = self.events[:self.MAX_TAGS_BULK]
         if not tosend:
             return
@@ -122,6 +124,10 @@ class ClientInfo(Unpickable(events=Deque,
             send_as_set_tags()
 
         self.events.pop(len(tosend))
+
+    def _SendEventsIfNeed(self):
+        with self._send_events_lock: # ATW this lock is redundant
+            self._DoSendEventsIfNeed()
 
     def _SendSubscriptionsIfNeed(self, local_server_network_name):
         tosend = list(self.subscriptions)[:self.MAX_TAGS_BULK]
@@ -175,7 +181,7 @@ class ClientInfo(Unpickable(events=Deque,
 
         self._Communicate(impl)
 
-    def TryInitializeConnection(self):
+    def TryInitializePeersVersions(self):
         def impl():
             self.TryUpdatePeerVersion()
             self.TrySendMyVersion()
@@ -184,6 +190,7 @@ class ClientInfo(Unpickable(events=Deque,
     def __getstate__(self):
         sdict = self.__dict__.copy()
         sdict.pop("connection", None)
+        sdict.pop("_send_events_lock", None)
         return getattr(super(ClientInfo, self), "__getstate__", lambda: sdict)()
 
     def __repr__(self):
@@ -324,7 +331,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
         for client in self.topologyInfo.servers.values():
             if client.active:
-                client.TryInitializeConnection()
+                client.TryInitializePeersVersions()
 
         self.alive = True
         self.InitXMLRPCServer()
