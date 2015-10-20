@@ -123,14 +123,14 @@ class ClientInfo(Unpickable(events=Deque,
 
         self.events.pop(len(tosend))
 
-    def _SendSubscriptionsIfNeed(self, my_network_name):
+    def _SendSubscriptionsIfNeed(self, local_server_network_name):
         tosend = list(self.subscriptions)[:self.MAX_TAGS_BULK]
         if not tosend:
             return
 
         logging.debug("SendData to %s: %d subscriptions", self.name, len(tosend))
 
-        self.connection.register_share(tosend, my_network_name)
+        self.connection.register_share(tosend, local_server_network_name)
         self.subscriptions.difference_update(tosend)
 
     def TryUpdatePeerVersion(self):
@@ -162,7 +162,7 @@ class ClientInfo(Unpickable(events=Deque,
         except Exception as e:
             logging.error("SendData to %s: failed: %s", self.name, e)
 
-    def SendDataIfNeed(self, my_network_name):
+    def SendDataIfNeed(self, local_server_network_name):
         if not self.subscriptions and not self.events:
             return
 
@@ -171,7 +171,7 @@ class ClientInfo(Unpickable(events=Deque,
                 self.TryUpdatePeerVersion()
 
             self._SendEventsIfNeed()
-            self._SendSubscriptionsIfNeed(my_network_name)
+            self._SendSubscriptionsIfNeed(local_server_network_name)
 
         self._Communicate(impl)
 
