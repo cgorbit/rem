@@ -150,9 +150,9 @@ class ClientInfo(Unpickable(events=Deque,
         self.SetVersion(version)
         return True
 
-    def TrySendMyVersion(self):
+    def TrySendMyVersion(self, local_server_network_name):
         try:
-            self.connection.set_client_version(self.name, PROTOCOL_VERSION)
+            self.connection.set_client_version(local_server_network_name, PROTOCOL_VERSION)
         except XMLRPCMethodNotSupported:
             pass
 
@@ -184,10 +184,10 @@ class ClientInfo(Unpickable(events=Deque,
 
         self._Communicate(impl)
 
-    def TryInitializePeersVersions(self):
+    def TryInitializePeersVersions(self, local_server_network_name):
         def impl():
             self.TryUpdatePeerVersion()
-            self.TrySendMyVersion()
+            self.TrySendMyVersion(local_server_network_name)
         self._Communicate(impl)
 
     def __getstate__(self):
@@ -334,7 +334,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
         for client in self.topologyInfo.servers.values():
             if client.active and client.name != self.network_name:
-                client.TryInitializePeersVersions()
+                client.TryInitializePeersVersions(self.network_name)
 
         self.alive = True
         self.InitXMLRPCServer()
