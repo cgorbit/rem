@@ -7,9 +7,10 @@ import shutil
 import sys
 import tempfile
 import unittest
+import json
 from ConfigParser import ConfigParser
 
-sys.path.insert(0, os.path.join(os.path.dirname(sys.argv[0]), "client"))
+sys.path.insert(0, os.path.join(os.path.abspath(os.path.dirname(__file__)), "client"))
 import remclient
 import testdir
 
@@ -51,12 +52,30 @@ class ClientInfo(object):
 
 
 class Configuration(object):
+    @staticmethod
+    def __get_notify_email():
+        def _load_config(filename):
+            with open(filename) as in_:
+                return json.load(in_)
+
+        email = os.environ.get('REM_TESTS_NOTIFY_EMAIL', None)
+        if email is not None:
+            return email
+
+        home = os.environ.get('HOME', None)
+        if home is not None:
+            config_filename = home + '/.remrc'
+            if os.path.exists(config_filename):
+                return _load_config(config_filename).get('tests', {}).get('notify_email', None)
+
     @classmethod
     def GetLocalConfig(cls):
         config = cls()
         config.server1 = ClientInfo("local-01", "local://./local-01/", "localhost")
         config.server2 = ClientInfo("local-02", "local://./local-02/", "localhost")
-        config.notify_email = "eugene.krokhalev@gmail.com"
+        config.notify_email = cls.__get_notify_email()
+        if not config.notify_email:
+            raise RuntimeError("Can't determine notify_email for tests")
         return config
 
     @staticmethod
