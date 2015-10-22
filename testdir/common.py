@@ -26,26 +26,24 @@ Config = SharedValue()
 def _toPacketInfoIfNeed(pck):
     return pck.conn.PacketInfo(pck) if isinstance(pck, remclient.JobPacket) else pck
 
-def WaitForExecution(pck, fin_states=("SUCCESSFULL", "ERROR"), fail_states=(), timeout=1.0):
+def WaitForExecution(pck, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
     while True:
         pck.update()
         cur_state = pck.state
 
         if cur_state in fin_states:
             break
-        elif cur_state in fail_states:
-            raise RuntimeError("Packet %s in wrong state %s" % (pck.pck_id, cur_state))
 
         logging.info("packet state: %s", cur_state)
         time.sleep(timeout)
 
     return cur_state
 
-def WaitForStates(some, fin_states=("SUCCESSFULL", "ERROR"), fail_states=(), timeout=1.0):
+def WaitForStates(some, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
     if isinstance(some, list):
         WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, timeout)
     else:
-        return WaitForExecution(_toPacketInfoIfNeed(some), fin_states, fail_states, timeout)
+        return WaitForExecution(_toPacketInfoIfNeed(some), fin_states, timeout)
 
 def PrintPacketResults(pckInfo):
     for job in pckInfo.jobs:
