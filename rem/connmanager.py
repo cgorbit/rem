@@ -52,7 +52,7 @@ class ClientInfo(Unpickable(events=Deque,
                             name=str,
                             subscriptions=set,
                             errorsCnt=(int, 0),
-                            peerVersion=(int, PROTOCOL_VERSION),
+                            version=(int, PROTOCOL_VERSION),
                             send_events_lock=PickableLock,
                             active=(bool, True))):
     MAX_TAGS_BULK = 100
@@ -102,7 +102,7 @@ class ClientInfo(Unpickable(events=Deque,
         self.active = False
 
     def SetPeerVersion(self, version):
-        self.peerVersion = version
+        self.version = version
 
     def _DoSendEventsIfNeed(self):
         tosend = self.events[:self.MAX_TAGS_BULK]
@@ -116,13 +116,13 @@ class ClientInfo(Unpickable(events=Deque,
                 self.connection.register_tags_events(tosend)
                 return True
             except XMLRPCMethodNotSupported:
-                self.peerVersion = 1
+                self.version = 1
                 return False
 
         def send_as_set_tags():
             self.connection.set_tags(_get_tags_to_set(tosend))
 
-        if self.peerVersion < 2 or not send_as_events():
+        if self.version < 2 or not send_as_events():
             send_as_set_tags()
 
         self.events.pop(len(tosend))
