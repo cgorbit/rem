@@ -6,12 +6,45 @@ import subprocess
 import remclient
 from testdir import *
 
+def all_eq(value, iterable):
+    return all(item == value for item in iterable)
+
 class T10(unittest.TestCase):
     """Check remote tags"""
 
     def setUp(self):
         self.remA = RemServerWrapper(Config.Get().server1)
         self.remB = RemServerWrapper(Config.Get().server2)
+
+    def _wait_successful(self, pck):
+        if isinstance(pck, list):
+            self.assertTrue(all_eq('SUCCESSFULL', WaitForStates(pck)))
+        else:
+            self.assertEqual(WaitForStates(pck), 'SUCCESSFULL')
+
+    def _wait_suspended(self, pck):
+        fin_states = ['SUSPENDED', 'ERROR']
+
+        if isinstance(pck, list):
+            self.assertTrue(all_eq('SUSPENDED', WaitForStates(pck, fin_states)))
+        else:
+            self.assertEqual(WaitForStates(pck, fin_states), 'SUSPENDED')
+
+    def _check_tag_set(self, tag, rem):
+        self.assertTrue(tag.AsNative(rem).Check())
+
+    def _check_tag_not_set(self, tag, rem):
+        self.assertTrue(not tag.AsNative(rem).Check())
+
+    def _sync_tags(self, src, dst):
+        self.assertTrue(src.name != dst.name)
+
+        marker = src.Tag('send_marker', digits=6)
+        self._check_tag_not_set(marker, dst)
+        marker.Set()
+
+        pck = dst.SuccessfullPacket(wait=marker)
+        self._wait_successful(pck)
 
     def get_rems(self):
         return self.remA, self.remB
@@ -62,23 +95,66 @@ class T10(unittest.TestCase):
     def testManyRemoteTags(self):
         remA, remB = self.get_rems()
 
-        remote_tags = []
+        class Side(object):
+            def __init__(self):
+                self.packets = []
+                self.tags = []
+
+        starter = remB.Tag("mass_remote_ancestor")
+        sideA = Side()
+        sideB = Side()
+
         for i in xrange(400):
             tagA = remA.Tag("mass_remote_tag_1_%d" % i)
             tagB = remB.Tag("mass_remote_tag_2_%d" % i)
 
-            remote_tags.append(tagB)
+            sideB.tags.append(tagB)
 
-            remA.SuccessfullPacket("pck1_%d" % i, set=tagA)
-            remB.SuccessfullPacket("pck2_%d" % i, set=tagB, wait=tagA)
+            sideA.packets.append(
+                remA.SuccessfullPacket("pck1_%d" % i, set=tagA, wait=starter))
+
+            sideB.packets.append(
+                remB.SuccessfullPacket("pck2_%d" % i, set=tagB, wait=[tagA, starter]))
 
         logging.debug(remA.admin_connector.ListDeferedTags(remA.name))
         logging.debug(remA.admin_connector.ListDeferedTags(remB.name))
 
-        pck = remA.SuccessfullPacket("pck_many", wait=remote_tags)
+        end_pck = remA.SuccessfullPacket("pck_many", wait=sideB.tags)
 
-        self.assertEqual(WaitForStates(pck), "SUCCESSFULL")
+        def wait_successfull():
+            for p in [sideA.packets, sideB.packets, end_pck]:
+                self._wait_successful(p)
 
+        def wait_suspended():
+            for p in [sideA.packets, sideB.packets, end_pck]:
+                self._wait_suspended(p)
+
+        def sync():
+            self._sync_tags(remA, remB)
+
+        wait_suspended()
+
+        starter.Set()
+        sync()
+        wait_successfull()
+
+        starter.Unset()
+        sync()
+        time.sleep(3)
+        wait_successfull()
+
+        starter.Reset('reason')
+        sync()
+        wait_suspended()
+
+        starter.Unset()
+        sync()
+        time.sleep(3)
+        wait_suspended()
+
+        starter.Set()
+        sync()
+        wait_successfull()
 
     def testSubscribing(self):
         remA, remB = self.get_rems()
@@ -120,42 +196,18 @@ class T10(unittest.TestCase):
 
 
     def testAllEventType(self):
-        def wait_successful(pck):
-            self.assertEqual(WaitForStates(pck), 'SUCCESSFULL')
-
-        def wait_suspended(pck):
-            self.assertEqual(
-                WaitForStates(pck, ['SUSPENDED', 'SUCCESSFULL', 'ERROR']),
-                'SUSPENDED')
-
-        def check_tag_set(tag, rem):
-            self.assertTrue(tag.AsNative(rem).Check())
-
-        def check_tag_not_set(tag, rem):
-            self.assertTrue(not tag.AsNative(rem).Check())
-
-        def sync_tags(src, dst):
-            self.assertTrue(src.name != dst.name)
-
-            marker = src.Tag('send_marker', digits=6)
-            check_tag_not_set(marker, dst)
-            marker.Set()
-
-            pck = dst.SuccessfullPacket(wait=marker)
-            wait_successful(pck)
-
         remA, remB = self.get_rems()
 
         tagA = remA.Tag('events')
 
         def sync():
-            sync_tags(remA, remB)
+            self._sync_tags(remA, remB)
 
         def test_set():
             tagA.Set()
             sync()
-            wait_successful(pck)
-            check_tag_set(tagA, remB)
+            self._wait_successful(pck)
+            self._check_tag_set(tagA, remB)
 
         def unset():
             tagA.Unset()
@@ -164,24 +216,24 @@ class T10(unittest.TestCase):
         def test_reset():
             tagA.Reset('some reason')
             sync()
-            wait_suspended(pck)
-            check_tag_not_set(tagA, remB)
+            self._wait_suspended(pck)
+            self._check_tag_not_set(tagA, remB)
 
         pck = remB.SuccessfullPacket('pck_events', wait=tagA)
 
-        wait_suspended(pck)
+        self._wait_suspended(pck)
 
         test_set()
 
         unset()
-        check_tag_not_set(tagA, remB)
-        wait_successful(pck)
+        self._check_tag_not_set(tagA, remB)
+        self._wait_successful(pck)
 
         test_reset()
 
         unset()
-        check_tag_not_set(tagA, remB)
-        wait_suspended(pck)
+        self._check_tag_not_set(tagA, remB)
+        self._wait_suspended(pck)
 
         test_set()
 

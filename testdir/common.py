@@ -41,7 +41,7 @@ def WaitForExecution(pck, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
 
 def WaitForStates(some, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
     if isinstance(some, list):
-        WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, timeout)
+        return WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, timeout)
     else:
         return WaitForExecution(_toPacketInfoIfNeed(some), fin_states, timeout)
 
@@ -56,7 +56,7 @@ def WaitForExecutionList(pckList, fin_states=("SUCCESSFULL", "ERROR"), timeout=1
         waitPckCount = sum(1 for pck in pckList if pck.state not in fin_states)
         logging.info("wait for %d packets, current states: %s", waitPckCount, [pck.state for pck in pckList])
         if waitPckCount == 0:
-            return
+            return [pck.state for pck in pckList]
         time.sleep(timeout)
 
 
