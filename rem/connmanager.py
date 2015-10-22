@@ -11,9 +11,11 @@ from collections import deque
 from xmlrpcmethodnotsupported import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported
 from common import *
 from callbacks import Tag, ICallbackAcceptor, TagEvent
-import fork_locking
 
 PROTOCOL_VERSION = 2
+
+def _get_tags_to_set(events):
+    return list(set(ev[0] for ev in events if ev[1] == TagEvent.Set))
 
 class Deque(object):
     # Thread-affinity: just as needed for ClientInfo
@@ -51,6 +53,7 @@ class ClientInfo(Unpickable(events=Deque,
                             subscriptions=set,
                             errorsCnt=(int, 0),
                             peerVersion=(int, PROTOCOL_VERSION),
+                            send_events_lock=PickableLock,
                             active=(bool, True))):
     MAX_TAGS_BULK = 100
     PENALTY_FACTOR = 6
@@ -59,7 +62,6 @@ class ClientInfo(Unpickable(events=Deque,
         getattr(super(ClientInfo, self), "__init__")(*args, **kws)
         self.update(*args, **kws)
         self.lastError = None
-        self._send_events_lock = fork_locking.Lock()
 
     def Connect(self):
         self.connection = XMLRPCServerProxy(self.systemUrl, allow_none=True)
@@ -70,8 +72,8 @@ class ClientInfo(Unpickable(events=Deque,
     def Subscribe(self, tagname):
         self.subscriptions.add(tagname)
 
-    def GetEventsAsTagSet(self):
-        return set(ev[0] for ev in self.events.as_list())
+    def GetEventsAsTagsToSet(self):
+        return _get_tags_to_set(self.events.as_list())
 
     def GetEventsAsList(self):
         return self.events.as_list()
@@ -118,7 +120,7 @@ class ClientInfo(Unpickable(events=Deque,
                 return False
 
         def send_as_set_tags():
-            self.connection.set_tags([ev[0] for ev in tosend if ev[1] == TagEvent.Set])
+            self.connection.set_tags(_get_tags_to_set(tosend))
 
         if self.peerVersion < 2 or not send_as_events():
             send_as_set_tags()
@@ -126,7 +128,7 @@ class ClientInfo(Unpickable(events=Deque,
         self.events.pop(len(tosend))
 
     def _SendEventsIfNeed(self):
-        with self._send_events_lock: # ATW this lock is redundant
+        with self.send_events_lock: # ATW this lock is redundant
             self._DoSendEventsIfNeed()
 
     def _SendSubscriptionsIfNeed(self, local_server_network_name):
@@ -162,7 +164,7 @@ class ClientInfo(Unpickable(events=Deque,
             self.errorsCnt = 0
             logging.debug("SendData to %s: ok", self.name)
         except IOError as e:
-            logging.warning("SendData to %s: failed", self.name)
+            logging.warning("SendData to %s: failed: %s", self.name, e)
             self.lastError = e
             self.errorsCnt += 1
         except Exception as e:
@@ -190,7 +192,6 @@ class ClientInfo(Unpickable(events=Deque,
     def __getstate__(self):
         sdict = self.__dict__.copy()
         sdict.pop("connection", None)
-        sdict.pop("_send_events_lock", None)
         return getattr(super(ClientInfo, self), "__getstate__", lambda: sdict)()
 
     def __repr__(self):
@@ -330,7 +331,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         self.ReloadConfig()
 
         for client in self.topologyInfo.servers.values():
-            if client.active:
+            if client.active and client.name != self.network_name:
                 client.TryInitializePeersVersions()
 
         self.alive = True
@@ -457,7 +458,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         data = set()
         for server in self.topologyInfo.servers.values():
             if name_prefix is None or server.name.startswith(name_prefix):
-                data.update(server.GetEventsAsTagSet())
+                data.update(server.GetEventsAsTagsToSet())
         return list(data)
 
     @traced_rpc_method()
@@ -507,7 +508,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     @traced_rpc_method()
     def list_shares(self, clientname):
         client = self.topologyInfo.GetClient(clientname)
-        return client.GetEventsAsList()
+        return _get_tags_to_set(client.GetEventsAsList())
 
     @traced_rpc_method()
     def list_subscriptions(self, clientname):
