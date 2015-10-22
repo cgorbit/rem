@@ -307,6 +307,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         self.rpcserver.register_function(self.unregister_share, "unregister_share")
         self.rpcserver.register_function(self.get_client_info, "get_client_info")
         self.rpcserver.register_function(self.list_shares, "list_shares")
+        self.rpcserver.register_function(self.list_shared_events, "list_shared_events")
         self.rpcserver.register_function(self.list_subscriptions, "list_subscriptions")
         self.rpcserver.register_function(self.check_connection, "check_connection")
         self.rpcserver.register_function(self.ping, "ping")
@@ -509,6 +510,11 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     def list_shares(self, clientname):
         client = self.topologyInfo.GetClient(clientname)
         return _get_tags_to_set(client.GetEventsAsList())
+
+    @traced_rpc_method()
+    def list_shared_events(self, clientname):
+        client = self.topologyInfo.GetClient(clientname)
+        return client.GetEventsAsList()
 
     @traced_rpc_method()
     def list_subscriptions(self, clientname):
