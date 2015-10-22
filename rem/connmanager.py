@@ -101,7 +101,8 @@ class ClientInfo(Unpickable(events=Deque,
     def Suspend(self):
         self.active = False
 
-    def SetPeerVersion(self, version):
+    def SetVersion(self, version):
+        logging.debug("set client '%s' version to %s" % (self.name, version))
         self.version = version
 
     def _DoSendEventsIfNeed(self):
@@ -146,7 +147,7 @@ class ClientInfo(Unpickable(events=Deque,
             version = self.connection.get_client_version()
         except XMLRPCMethodNotSupported:
             return False
-        self.SetPeerVersion(version)
+        self.SetVersion(version)
         return True
 
     def TrySendMyVersion(self):
@@ -428,7 +429,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     @traced_rpc_method()
     def set_client_version(self, clientname, version):
         logging.debug("set client version for %s to %s", (clientname, version))
-        self.topologyInfo.GetClient(clientname, checkname=True).SetPeerVersion(int(version))
+        self.topologyInfo.GetClient(clientname, checkname=True).SetVersion(int(version))
         return True
 
     @traced_rpc_method()
