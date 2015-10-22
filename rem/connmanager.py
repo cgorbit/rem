@@ -117,7 +117,7 @@ class ClientInfo(Unpickable(events=Deque,
                 self.connection.register_tags_events(tosend)
                 return True
             except XMLRPCMethodNotSupported:
-                self.version = 1
+                self.SetVersion(1)
                 return False
 
         def send_as_set_tags():
