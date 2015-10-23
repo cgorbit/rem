@@ -146,6 +146,7 @@ class ClientInfo(Unpickable(events=Deque,
         try:
             version = self.connection.get_client_version()
         except XMLRPCMethodNotSupported:
+            self.SetVersion(1)
             return False
         self.SetVersion(version)
         return True
@@ -154,7 +155,7 @@ class ClientInfo(Unpickable(events=Deque,
         try:
             self.connection.set_client_version(local_server_network_name, PROTOCOL_VERSION)
         except XMLRPCMethodNotSupported:
-            pass
+            self.SetVersion(1)
 
     def _Communicate(self, f):
         self.Connect()
