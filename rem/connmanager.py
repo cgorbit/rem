@@ -121,7 +121,10 @@ class ClientInfo(Unpickable(events=Deque,
                 return False
 
         def send_as_set_tags():
-            self.connection.set_tags(_get_tags_to_set(tosend))
+            tags = _get_tags_to_set(tosend)
+            if not tags:
+                return
+            self.connection.set_tags(tags)
 
         if self.version < 2 or not send_as_events():
             send_as_set_tags()
