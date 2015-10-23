@@ -6,146 +6,238 @@ import subprocess
 import remclient
 from testdir import *
 
+def all_eq(value, iterable):
+    return all(item == value for item in iterable)
 
 class T10(unittest.TestCase):
     """Check remote tags"""
 
     def setUp(self):
-        self.connector1 = Config.Get().server1.connector
-        self.connector2 = Config.Get().server2.connector
-        self.admin_connector = Config.Get().server1.admin_connector
-        self.servername1 = Config.Get().server1.name
-        self.servername2 = Config.Get().server2.name
-        self.srvdir1 = Config.Get().server1.projectDir
-        self.srvdir2 = Config.Get().server2.projectDir
+        self.remA = RemServerWrapper(Config.Get().server1)
+        self.remB = RemServerWrapper(Config.Get().server2)
+
+    def _wait_successful(self, pck):
+        if isinstance(pck, list):
+            self.assertTrue(all_eq('SUCCESSFULL', WaitForStates(pck)))
+        else:
+            self.assertEqual(WaitForStates(pck), 'SUCCESSFULL')
+
+    def _wait_suspended(self, pck):
+        fin_states = ['SUSPENDED', 'ERROR']
+
+        if isinstance(pck, list):
+            self.assertTrue(all_eq('SUSPENDED', WaitForStates(pck, fin_states)))
+        else:
+            self.assertEqual(WaitForStates(pck, fin_states), 'SUSPENDED')
+
+    def _check_tag_set(self, tag, rem):
+        self.assertTrue(tag.AsNative(rem).Check())
+
+    def _check_tag_not_set(self, tag, rem):
+        self.assertTrue(not tag.AsNative(rem).Check())
+
+    def _sync_tags(self, src, dst):
+        self.assertTrue(src.name != dst.name)
+
+        marker = src.Tag('send_marker', digits=6)
+        self._check_tag_not_set(marker, dst)
+        marker.Set()
+
+        pck = dst.SuccessfullPacket(wait=marker)
+        self._wait_successful(pck)
+
+    def get_rems(self):
+        return self.remA, self.remB
 
     def testNetworkUnavailableSubscribe(self):
-        tag = "nonetwork-tag-%.0f-" % time.time()
-        remote_tag1 = "%s:%s1" % (self.servername1, tag)
-        tag1 = "%s1" % tag
-        pck = self.connector1.Packet("pck-%.0f" % time.time(), set_tag=tag1)
-        self.connector1.Queue(TestingQueue.Get()).AddPacket(pck)
-        with ServiceTemporaryShutdown(self.srvdir1):
-            pck2 = self.connector2.Packet("pck-%.0f" % time.time(), wait_tags=[remote_tag1])
-            self.connector2.Queue(TestingQueue.Get()).AddPacket(pck2)
+        remA, remB = self.get_rems()
+
+        tagA = remA.Tag("nonetwork-tag")
+
+        tagA.Set()
+
+        with remA.TemporaryShutdown():
+            pck = remB.SuccessfullPacket(wait=tagA)
             time.sleep(4)
-        pckInfo = self.connector2.PacketInfo(pck2.id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=1.0), "SUCCESSFULL")
+
+        self.assertEqual(WaitForStates(pck), "SUCCESSFULL")
+
 
     def testNetworkUnavailableSetTag(self):
-        tag = "network-tag-%.0f-" % time.time()
-        remote_tag1 = "%s:%s1" % (self.servername1, tag)
-        tag1 = "%s1" % tag
+        remA, remB = self.get_rems()
 
-        pck2 = self.connector2.Packet("pck-%.0f" % time.time(), wait_tags=[remote_tag1])
-        self.connector2.Queue(TestingQueue.Get()).AddPacket(pck2)
+        tagA = remA.Tag("network-tag")
 
-        time.sleep(2)
-        with ServiceTemporaryShutdown(self.srvdir2):
-            pck = self.connector1.Packet("pck-%.0f" % time.time(), set_tag=tag1)
-            self.connector1.Queue(TestingQueue.Get()).AddPacket(pck)
-            time.sleep(2)
+        pck = remB.SuccessfullPacket(wait=tagA)
 
-        pckInfo = self.connector2.PacketInfo(pck2.id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=1.0), "SUCCESSFULL")
+        with remB.TemporaryShutdown():
+            tagA.Set()
+            time.sleep(4)
+
+        self.assertEqual(WaitForStates(pck), "SUCCESSFULL")
+
 
     def testRemoteTag(self):
-        tag = "remotetag-%.0f-" % time.time()
-        remote_tag1 = "%s:%s1" % (self.servername1, tag)
-        remote_tag2 = "%s:%s2" % (self.servername2, tag)
-        tag1 = "%s1" % tag
-        tag2 = "%s2" % tag
-        pck = self.connector1.Packet("pck-%.0f" % time.time(), set_tag=tag1)
-        self.connector1.Queue(TestingQueue.Get()).AddPacket(pck)
+        remA, remB = self.get_rems()
 
-        pck2 = self.connector2.Packet("pck-%.0f" % time.time(), set_tag=tag2, wait_tags=[remote_tag1])
-        self.connector2.Queue(TestingQueue.Get()).AddPacket(pck2)
+        tagA = remA.Tag("remotetag1")
+        tagB = remB.Tag("remotetag2")
 
-        pck3 = self.connector1.Packet("pck-%.0f" % time.time(), wait_tags=[remote_tag2])
-        self.connector1.Queue(TestingQueue.Get()).AddPacket(pck3)
+        pck01 = remA.SuccessfullPacket(set=tagA)
 
-        pckInfo = self.connector1.PacketInfo(pck3.id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=1.0), "SUCCESSFULL")
+        pck02 = remB.SuccessfullPacket(wait=tagA, set=tagB)
+
+        pck03 = remA.SuccessfullPacket(wait=tagB)
+
+        self.assertEqual(WaitForStates(pck03), "SUCCESSFULL")
+
 
     def testManyRemoteTags(self):
-        tag = "mass-remote-tag-%.0f" % time.time()
+        remA, remB = self.get_rems()
 
-        NUMBER_OF_TAGS = 404
-        remote_tags = []
-        for i in xrange(NUMBER_OF_TAGS):
-            tag1 = "(1)%s-%d" % (tag, i)
-            remote_tag1 = self.servername1 + ":" + tag1
+        class Side(object):
+            def __init__(self):
+                self.packets = []
+                self.tags = []
 
-            tag2 = "(2)%s-%d" % (tag, i)
-            remote_tag2 = self.servername2 + ":" + tag2
-            remote_tags.append(remote_tag2)
+        starter = remB.Tag("mass_remote_ancestor")
+        sideA = Side()
+        sideB = Side()
 
-            pck1 = self.connector1.Packet("pck1-%d-%.0f" % (i, time.time()), set_tag=tag1)
-            self.connector1.Queue(TestingQueue.Get()).AddPacket(pck1)
+        for i in xrange(400):
+            tagA = remA.Tag("mass_remote_tag_1_%d" % i)
+            tagB = remB.Tag("mass_remote_tag_2_%d" % i)
 
-            pck2 = self.connector2.Packet("pck2-%d-%.0f" % (i, time.time()), set_tag=tag2, wait_tags=[remote_tag1])
-            self.connector2.Queue(TestingQueue.Get()).AddPacket(pck2)
+            sideB.tags.append(tagB)
 
-        pckMany = self.connector1.Packet("pckMany-%.0f" % time.time(), wait_tags=remote_tags)
-        self.connector1.Queue(TestingQueue.Get()).AddPacket(pckMany)
+            sideA.packets.append(
+                remA.SuccessfullPacket("pck1_%d" % i, set=tagA, wait=starter))
 
-        logging.debug(self.admin_connector.ListDeferedTags(self.servername1))
-        logging.debug(self.admin_connector.ListDeferedTags(self.servername2))
+            sideB.packets.append(
+                remB.SuccessfullPacket("pck2_%d" % i, set=tagB, wait=[tagA, starter]))
 
-        pckInfo = self.connector1.PacketInfo(pckMany.id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=1.0), "SUCCESSFULL")
+        logging.debug(remA.admin_connector.ListDeferedTags(remA.name))
+        logging.debug(remA.admin_connector.ListDeferedTags(remB.name))
+
+        end_pck = remA.SuccessfullPacket("pck_many", wait=sideB.tags)
+
+        def wait_successfull():
+            for p in [sideA.packets, sideB.packets, end_pck]:
+                self._wait_successful(p)
+
+        def wait_suspended():
+            for p in [sideA.packets, sideB.packets, end_pck]:
+                self._wait_suspended(p)
+
+        def sync():
+            self._sync_tags(remA, remB)
+
+        wait_suspended()
+
+        starter.Set()
+        sync()
+        wait_successfull()
+
+        starter.Unset()
+        sync()
+        time.sleep(3)
+        wait_successfull()
+
+        starter.Reset('reason')
+        sync()
+        wait_suspended()
+
+        starter.Unset()
+        sync()
+        time.sleep(3)
+        wait_suspended()
+
+        starter.Set()
+        sync()
+        wait_successfull()
 
     def testSubscribing(self):
-        tag1 = "subscription-tag-%.0f-1" % time.time()
-        tag2 = "subscription-tag-%.0f-2" % time.time()
-        remote_tag1 = self.servername1 + ":" + tag1
-        remote_tag2 = self.servername1 + ":" + tag2
+        remA, remB = self.get_rems()
 
-        # self.admin_connector.RegisterShare(tag1, "servername2")
-        # self.assertEqual(self.admin_connector.UnregisterShare(tag1, "servername2"), True)
-        # self.assertEqual(self.admin_connector.UnregisterShare(tag1, "servername2"), False)
-        # self.admin_connector.RegisterShare(tag1, "servername2")
-        RestartService(self.srvdir1)
+        tag01 = remA.Tag("subscription-tag-1")
+        tag02 = remA.Tag("subscription-tag-2")
 
-        pck = self.connector1.Packet("pck-%.0f" % time.time(), set_tag=tag1)
-        self.connector1.Queue(TestingQueue.Get()).AddPacket(pck)
+        remA.Restart()
 
-        pck = self.connector1.Packet("pck-%.0f" % time.time(), set_tag=tag2)
-        self.connector1.Queue(TestingQueue.Get()).AddPacket(pck)
+        remA.SuccessfullPacket(set=tag01)
+        remA.SuccessfullPacket(set=tag02)
 
-        pck1 = self.connector2.Packet("pck1-%.0f" % time.time(), wait_tags=[remote_tag1])
-        self.connector2.Queue(TestingQueue.Get()).AddPacket(pck1)
-
-        pck2 = self.connector2.Packet("pck3-%.0f" % time.time(), wait_tags=[remote_tag2])
-        self.connector2.Queue(TestingQueue.Get()).AddPacket(pck2)
+        pck1 = remB.SuccessfullPacket("pck1", wait=tag01)
+        pck2 = remB.SuccessfullPacket("pck2", wait=tag02)
 
         time.sleep(2)
-        RestartService(self.srvdir1)
-        # self.admin_connector.RegisterShare(tag2, "servername2")
-        RestartService(self.srvdir1)
 
-        pckInfo1 = self.connector2.PacketInfo(pck1.id)
-        pckInfo2 = self.connector2.PacketInfo(pck2.id)
-        WaitForExecutionList([pckInfo1, pckInfo2], timeout=1.0)
+        remA.Restart()
+
+        WaitForStates([pck1, pck2])
+
 
     def testRestoringTagFromFile(self):
-        tag = "restoring-tag-%.0f-1" % time.time()
-        remote_tag = self.servername1 + ":" + tag
-        self.connector1.Tag(tag).Set()
-        self.connector1.Tag(tag).Unset()
-        RestartService(self.srvdir1)
-        pck = self.connector2.Packet("restoring-pck-%.0f" % time.time(), wait_tags=[remote_tag])
-        self.connector2.Queue(TestingQueue.Get()).AddPacket(pck)
-        time.sleep(3)
-        self.connector1.Tag(tag).Set()
-        pckInfo = self.connector2.PacketInfo(pck.id)
-        self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
+        remA, remB = self.get_rems()
 
-        # def testWrongServername(self):
-        # tag = "wrongserver:tag-wrong-servername-%.f" % time.time()
-        # pck = "pck-wrong-servername-%.f" % time.time()
-        # self.connector1.Packet(pck, time.time(), wait_tags=[tag])
-        # self.Queue(TestingQueue.Get()).AddPacket(pck)
+        tagA = remA.Tag("restoring-tag")
+
+        tagA.Set()
+        tagA.Unset()
+
+        remA.Restart()
+
+        pck = remB.SuccessfullPacket(wait=tagA)
+
+        time.sleep(3)
+        tagA.Set()
+
+        self.assertEqual(WaitForStates(pck), "SUCCESSFULL")
+
+
+    def testAllEventType(self):
+        remA, remB = self.get_rems()
+
+        tagA = remA.Tag('events')
+
+        def sync():
+            self._sync_tags(remA, remB)
+
+        def test_set():
+            tagA.Set()
+            sync()
+            self._wait_successful(pck)
+            self._check_tag_set(tagA, remB)
+
+        def unset():
+            tagA.Unset()
+            sync()
+
+        def test_reset():
+            tagA.Reset('some reason')
+            sync()
+            self._wait_suspended(pck)
+            self._check_tag_not_set(tagA, remB)
+
+        pck = remB.SuccessfullPacket('pck_events', wait=tagA)
+
+        self._wait_suspended(pck)
+
+        test_set()
+
+        unset()
+        self._check_tag_not_set(tagA, remB)
+        self._wait_successful(pck)
+
+        test_reset()
+
+        unset()
+        self._check_tag_not_set(tagA, remB)
+        self._wait_suspended(pck)
+
+        test_set()
+
+        test_reset()
 
     def testCheckConnection(self):
-        self.assertTrue(self.admin_connector.CheckConnection(self.servername2))
+        self.assertTrue(self.remA.admin_connector.CheckConnection(self.remB.name))

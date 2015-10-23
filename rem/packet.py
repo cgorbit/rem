@@ -458,6 +458,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
             with self.lock:
                 self.ProcessJobStart(ref)
 
+    def OnUndone(self, ref):
+        pass
+
     def OnDone(self, ref):
         if isinstance(ref, Job):
             logging.debug("job %s\tdone [%s]", ref.shell, ref.Result())

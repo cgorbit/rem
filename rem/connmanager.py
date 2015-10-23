@@ -1,20 +1,59 @@
+#coding: utf-8
 import threading
-import xmlrpclib
 import select
 import bsddb3
 from SimpleXMLRPCServer import SimpleXMLRPCServer
 from ConfigParser import ConfigParser
 import cPickle
 import subprocess
+from collections import deque
 
+from xmlrpcmethodnotsupported import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported
 from common import *
-from callbacks import Tag, ICallbackAcceptor
+from callbacks import Tag, ICallbackAcceptor, TagEvent
 
+PROTOCOL_VERSION = 2
 
-class ClientInfo(Unpickable(taglist=set,
+def _get_tags_to_set(events):
+    return list(set(ev[0] for ev in events if ev[1] == TagEvent.Set))
+
+class Deque(object):
+    # Thread-affinity: just as needed for ClientInfo
+
+    def __init__(self, rhs=None):
+        self._impl = rhs._impl if rhs else deque()
+
+    def pop(self, count=1):
+        for _ in xrange(count):
+            self._impl.popleft()
+
+    def push(self, el):
+        self._impl.append(el)
+
+    def as_list(self):
+        return list(self._impl)
+
+    def __getslice__(self, start, end):
+        ret = list()
+        for idx in xrange(start, min(end, len(self._impl))):
+            ret.append(self._impl[idx])
+        return ret
+
+    def __repr__(self):
+        return repr(self._impl)
+
+    def __len__(self):
+        return len(self._impl)
+
+    def __nonzero__(self):
+        return bool(self._impl)
+
+class ClientInfo(Unpickable(events=Deque,
                             name=str,
                             subscriptions=set,
                             errorsCnt=(int, 0),
+                            version=(int, PROTOCOL_VERSION),
+                            send_events_lock=PickableLock,
                             active=(bool, True))):
     MAX_TAGS_BULK = 100
     PENALTY_FACTOR = 6
@@ -25,13 +64,19 @@ class ClientInfo(Unpickable(taglist=set,
         self.lastError = None
 
     def Connect(self):
-        self.connection = xmlrpclib.ServerProxy(self.systemUrl)
+        self.connection = XMLRPCServerProxy(self.systemUrl, allow_none=True)
 
-    def SetTag(self, tagname):
-        self.taglist.add(tagname)
+    def RegisterTagEvent(self, tag, event, message=None):
+        self.events.push((tag, event, message))
 
     def Subscribe(self, tagname):
         self.subscriptions.add(tagname)
+
+    def GetEventsAsTagsToSet(self):
+        return _get_tags_to_set(self.events.as_list())
+
+    def GetEventsAsList(self):
+        return self.events.as_list()
 
     def update(self, name=None, url=None, systemUrl=None):
         if name:
@@ -42,6 +87,13 @@ class ClientInfo(Unpickable(taglist=set,
             self.systemUrl = systemUrl
             self.Connect()
 
+    def __setstate__(self, sdict):
+        taglist = sdict.pop('taglist', None) # old backup
+        super(ClientInfo, self).__setstate__(sdict)
+        if taglist:
+            for tag in taglist:
+                self.RegisterTagEvent(tag, TagEvent.Set)
+
     def Resume(self):
         self.Connect()
         self.active = True
@@ -49,9 +101,101 @@ class ClientInfo(Unpickable(taglist=set,
     def Suspend(self):
         self.active = False
 
+    def SetVersion(self, version):
+        logging.debug("set client '%s' version to %s" % (self.name, version))
+        self.version = version
+
+    def _DoSendEventsIfNeed(self):
+        tosend = self.events[:self.MAX_TAGS_BULK]
+        if not tosend:
+            return
+
+        logging.debug("SendData to %s: %d events", self.name, len(tosend))
+
+        def send_as_events():
+            try:
+                self.connection.register_tags_events(tosend)
+                return True
+            except XMLRPCMethodNotSupported:
+                self.SetVersion(1)
+                return False
+
+        def send_as_set_tags():
+            tags = _get_tags_to_set(tosend)
+            if not tags:
+                return
+            self.connection.set_tags(tags)
+
+        if self.version < 2 or not send_as_events():
+            send_as_set_tags()
+
+        self.events.pop(len(tosend))
+
+    def _SendEventsIfNeed(self):
+        with self.send_events_lock: # ATW this lock is redundant
+            self._DoSendEventsIfNeed()
+
+    def _SendSubscriptionsIfNeed(self, local_server_network_name):
+        tosend = list(self.subscriptions)[:self.MAX_TAGS_BULK]
+        if not tosend:
+            return
+
+        logging.debug("SendData to %s: %d subscriptions", self.name, len(tosend))
+
+        self.connection.register_share(tosend, local_server_network_name)
+        self.subscriptions.difference_update(tosend)
+
+    def TryUpdatePeerVersion(self):
+        try:
+            version = self.connection.get_client_version()
+        except XMLRPCMethodNotSupported:
+            self.SetVersion(1)
+            return False
+        self.SetVersion(version)
+        return True
+
+    def TrySendMyVersion(self, local_server_network_name):
+        try:
+            self.connection.set_client_version(local_server_network_name, PROTOCOL_VERSION)
+        except XMLRPCMethodNotSupported:
+            self.SetVersion(1)
+
+    def _Communicate(self, f):
+        self.Connect()
+
+        try:
+            f()
+
+            self.errorsCnt = 0
+            logging.debug("SendData to %s: ok", self.name)
+        except IOError as e:
+            logging.warning("SendData to %s: failed: %s", self.name, e)
+            self.lastError = e
+            self.errorsCnt += 1
+        except Exception as e:
+            logging.error("SendData to %s: failed: %s", self.name, e)
+
+    def SendDataIfNeed(self, local_server_network_name):
+        if not self.subscriptions and not self.events:
+            return
+
+        def impl():
+            if self.errorsCnt:
+                self.TryUpdatePeerVersion()
+
+            self._SendEventsIfNeed()
+            self._SendSubscriptionsIfNeed(local_server_network_name)
+
+        self._Communicate(impl)
+
+    def TryInitializePeersVersions(self, local_server_network_name):
+        def impl():
+            self.TryUpdatePeerVersion()
+            self.TrySendMyVersion(local_server_network_name)
+        self._Communicate(impl)
+
     def __getstate__(self):
         sdict = self.__dict__.copy()
-        sdict["taglist"] = self.taglist.copy()
         sdict.pop("connection", None)
         return getattr(super(ClientInfo, self), "__getstate__", lambda: sdict)()
 
@@ -111,6 +255,42 @@ class TopologyInfo(Unpickable(servers=dict, location=str)):
         return getattr(super(TopologyInfo, self), "__getstate__", lambda: sdict)()
 
 
+class MapSetDB(object):
+    def __init__(self, filename):
+        self.db = bsddb3.btopen(filename, "c")
+        #self.lock = fork_locking.Lock()
+
+    def get(self, key):
+        if self.db.has_key(key):
+            data = self.db[key]
+            return cPickle.loads(data)
+        return set()
+
+    def _modify(self, key, f):
+        #with self.lock:
+        if True: # locked in ConnectionManager
+            values = self.get(key)
+            if f(values):
+                self.db[key] = cPickle.dumps(values)
+                self.db.sync()
+
+    def add(self, key, value):
+        def impl(values):
+            if value in values:
+                return False
+            values.add(value)
+            return True
+        self._modify(key, impl)
+
+    def remove(self, key, value):
+        def impl(values):
+            if value not in values:
+                return False
+            values.discard(value)
+            return True
+        self._modify(key, impl)
+
+
 class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                                    scheduledTasks=TimedSet.create,
                                    lock=PickableLock,
@@ -119,7 +299,10 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                         ICallbackAcceptor):
     def InitXMLRPCServer(self):
         self.rpcserver = SimpleXMLRPCServer(("", self.port), allow_none=True)
+        self.rpcserver.register_function(self.set_client_version, "set_client_version")
+        self.rpcserver.register_function(self.get_client_version, "get_client_version")
         self.rpcserver.register_function(self.set_tags, "set_tags")
+        self.rpcserver.register_function(self.register_tags_events, "register_tags_events")
         self.rpcserver.register_function(self.list_clients, "list_clients")
         self.rpcserver.register_function(self.list_tags, "list_tags")
         self.rpcserver.register_function(self.suspend_client, "suspend_client")
@@ -129,6 +312,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         self.rpcserver.register_function(self.unregister_share, "unregister_share")
         self.rpcserver.register_function(self.get_client_info, "get_client_info")
         self.rpcserver.register_function(self.list_shares, "list_shares")
+        self.rpcserver.register_function(self.list_shared_events, "list_shared_events")
         self.rpcserver.register_function(self.list_subscriptions, "list_subscriptions")
         self.rpcserver.register_function(self.check_connection, "check_connection")
         self.rpcserver.register_function(self.ping, "ping")
@@ -139,7 +323,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         self.tags_file = context.remote_tags_db_file
         self.port = context.system_port
         if self.tags_file:
-            self.acceptors = bsddb3.btopen(self.tags_file, "c")
+            self.acceptors = MapSetDB(self.tags_file)
         self.topologyInfo.UpdateContext(context)
         self.max_remotetags_resend_delay = context.max_remotetags_resend_delay
 
@@ -149,10 +333,17 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                             "network_name: %s, remote_tags_db_file: %s, system_port: %r",
                             self.network_name, self.tags_file, self.port)
             return
+
         self.ReloadConfig()
+
+        for client in self.topologyInfo.servers.values():
+            if client.active and client.name != self.network_name:
+                client.TryInitializePeersVersions(self.network_name)
+
         self.alive = True
         self.InitXMLRPCServer()
         threading.Thread(target=self.ServerLoop).start()
+
         for client in self.topologyInfo.servers.values():
             self.scheduler.ScheduleTaskT(0, self.SendData, client, skip_logging=True)
 
@@ -167,30 +358,9 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                 self.rpcserver.handle_request()
 
     def SendData(self, client):
-        if (len(client.subscriptions) > 0 or len(client.taglist) > 0) and client.active and self.alive:
-            client.Connect()
-            numTags = 1 if client.errorsCnt > 0 else client.MAX_TAGS_BULK
-            tags = list(client.taglist)[:numTags]
-            subscriptions = list(client.subscriptions)[:numTags]
-            try:
-                if len(tags) > 0:
-                    logging.debug("SendData to %s: %d tags", client.name, len(tags))
-                    client.connection.set_tags(tags)
-                    client.taglist.difference_update(tags)
+        if self.alive and client.active:
+            client.SendDataIfNeed(self.network_name)
 
-                if len(subscriptions) > 0:
-                    logging.debug("SendData to %s: %d subscriptions", client.name, len(subscriptions))
-                    client.connection.register_share(subscriptions, self.network_name)
-                    client.subscriptions.difference_update(subscriptions)
-
-                client.errorsCnt = 0
-                logging.debug("SendData to %s: ok", client.name)
-            except IOError as e:
-                logging.warning("SendData to %s: failed", client.name)
-                client.lastError = e
-                client.errorsCnt += 1
-            except Exception as e:
-                logging.error("SendData to %s: failed: %s", client.name, e)
         if hasattr(self, "scheduler"):
             self.scheduler.ScheduleTaskT(
                 min(client.PENALTY_FACTOR ** client.errorsCnt, self.max_remotetags_resend_delay),
@@ -199,27 +369,43 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                 skip_logging=True
             )
 
+
+    # XXX The order of events for clients may differ from order of Tag.done modifications
+
     def OnDone(self, tag):
+        self.RegisterTagEvent(tag, TagEvent.Set)
+
+    def OnUndone(self, tag):
+        self.RegisterTagEvent(tag, TagEvent.Unset)
+
+    def OnReset(self, (tag, message)):
+        self.RegisterTagEvent(tag, TagEvent.Reset, message)
+
+
+    def RegisterTagEvent(self, tag, event, message=None):
         if not self.alive:
             return
         if not isinstance(tag, Tag):
             logging.error("%s is not Tag class instance", tag.GetName())
             return
+        if tag.IsRemote():
+            return
+
         tagname = tag.GetName()
-        if not tag.IsRemote():
-            acceptors = self.GetTagAcceptors(tagname)
+        with self.lock: # see register_share
+            acceptors = self.acceptors.get(tagname)
             if acceptors:
                 logging.debug("ondone connmanager %s with acceptors list %s", tagname, acceptors)
                 for clientname in acceptors:
-                    self.SetTag(tagname, clientname)
+                    self.RegisterTagEventForClient(clientname, tagname, event, message)
 
-    def SetTag(self, tagname, clientname):
+    def RegisterTagEventForClient(self, clientname, tagname, event, message=None):
         logging.debug("set remote tag %s on host %s", tagname, clientname)
         client = self.topologyInfo.GetClient(clientname, checkname=False)
         if client is None:
             logging.error("unknown client %s appeared", clientname)
             return False
-        client.SetTag("%s:%s" % (self.network_name, tagname))
+        client.RegisterTagEvent("%s:%s" % (self.network_name, tagname), event, message)
 
     def ReloadConfig(self, filename=None):
         old_servers = set(self.topologyInfo.servers.keys())
@@ -230,29 +416,6 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
             for client in new_servers:
                 self.scheduler.ScheduleTaskT(0, self.SendData, self.topologyInfo.servers[client], skip_logging=True)
 
-    def GetTagAcceptors(self, tagname):
-        if self.acceptors.has_key(tagname):
-            data = self.acceptors[tagname]
-            return cPickle.loads(data)
-        return set()
-
-    def AddTagAcceptor(self, tagname, clientname):
-        with self.lock:
-            subscribers = self.GetTagAcceptors(tagname)
-            subscribers.add(clientname)
-            self.acceptors[tagname] = cPickle.dumps(subscribers)
-            self.acceptors.sync()
-
-    def RemoveTagAcceptor(self, tagname, clientname):
-        with self.lock:
-            subscribers = self.GetTagAcceptors(tagname)
-            if clientname not in subscribers:
-                return False
-            subscribers.discard(clientname)
-            self.acceptors[tagname] = cPickle.dumps(subscribers)
-            self.acceptors.sync()
-            return True
-
     def Subscribe(self, tag):
         if tag.IsRemote():
             client = self.topologyInfo.GetClient(tag.GetRemoteHost(), checkname=True)
@@ -261,10 +424,27 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         return False
 
     @traced_rpc_method()
-    def set_tags(self, tags):
+    def set_tags(self, tags): # obsolete
         logging.debug("set %d remote tags", len(tags))
         for tagname in tags:
-            self.scheduler.tagRef.SetRemoteTag(tagname)
+            self.scheduler.tagRef.AcquireTag(tagname).CheckRemote()._Set()
+        return True
+
+    @traced_rpc_method()
+    def set_client_version(self, clientname, version):
+        logging.debug("set client version for %s to %s", (clientname, version))
+        self.topologyInfo.GetClient(clientname, checkname=True).SetVersion(int(version))
+        return True
+
+    @traced_rpc_method()
+    def get_client_version(self):
+        return PROTOCOL_VERSION
+
+    @traced_rpc_method()
+    def register_tags_events(self, events):
+        logging.debug("update %d remote tags", len(events))
+        for event in events:
+            self.scheduler.tagRef.AcquireTag(event[0]).CheckRemote()._Modify(*event[1:])
         return True
 
     @traced_rpc_method()
@@ -274,8 +454,9 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                  "url": client.url,
                  "systemUrl": client.systemUrl,
                  "active": client.active,
+                 "version": client.version,
                  "errorsCount": client.errorsCnt,
-                 "tagsCount": len(client.taglist),
+                 "tagsCount": len(client.events),
                  "subscriptionsCount": len(client.subscriptions),
                  "lastError": str(client.lastError)} for client in self.topologyInfo.servers.values()]
 
@@ -284,7 +465,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         data = set()
         for server in self.topologyInfo.servers.values():
             if name_prefix is None or server.name.startswith(name_prefix):
-                data.update(server.taglist)
+                data.update(server.GetEventsAsTagsToSet())
         return list(data)
 
     @traced_rpc_method()
@@ -303,16 +484,20 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     @traced_rpc_method()
     def register_share(self, tags, clientname):
-        if not isinstance(tags, list):
-            tags = [tags]
         for tagname in tags:
-            self.AddTagAcceptor(tagname, clientname)
-            if self.scheduler.tagRef.CheckTag(tagname):
-                self.SetTag(tagname, clientname)
+            # XXX
+            # 1. this lock only guarantee eventual-consistency of tag's history
+            # 2. clients of self may see duplicates of events (even Reset)
+            # 3. also guard self.acceptors
+            with self.lock:
+                self.acceptors.add(tagname, clientname)
+                if self.scheduler.tagRef.CheckTag(tagname):
+                    self.RegisterTagEventForClient(clientname, tagname, TagEvent.Set)
 
     @traced_rpc_method()
     def unregister_share(self, tagname, clientname):
-        return self.RemoveTagAcceptor(tagname, clientname)
+        with self.lock:
+            return self.acceptors.remove(tagname, clientname)
 
     @traced_rpc_method()
     def get_client_info(self, clientname):
@@ -321,8 +506,9 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                "url": client.url,
                "systemUrl": client.systemUrl,
                "active": client.active,
+               "version": client.version,
                "errorsCount": client.errorsCnt,
-               "deferedTagsCount": len(client.taglist),
+               "deferedTagsCount": len(client.events),
                "subscriptionsCount": len(client.subscriptions),
                "lastError": str(client.lastError)}
         return res
@@ -330,7 +516,12 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     @traced_rpc_method()
     def list_shares(self, clientname):
         client = self.topologyInfo.GetClient(clientname)
-        return list(client.taglist)
+        return _get_tags_to_set(client.GetEventsAsList())
+
+    @traced_rpc_method()
+    def list_shared_events(self, clientname):
+        client = self.topologyInfo.GetClient(clientname)
+        return client.GetEventsAsList()
 
     @traced_rpc_method()
     def list_subscriptions(self, clientname):

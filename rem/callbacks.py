@@ -3,6 +3,10 @@ import logging
 import itertools
 from common import *
 
+class TagEvent(object):
+    Unset = 0
+    Set   = 1
+    Reset = 2
 
 class ICallbackAcceptor(object):
     def AcceptCallback(self, reference, event):
@@ -59,24 +63,41 @@ class Tag(CallbackHolder):
         self.done = False
         self.name = tagname
 
-    def Set(self):
+    def IsSet(self):
+        return self.done
+
+    def _Set(self):
         logging.debug("tag %s\tset", self.name)
         self.done = True
         self.FireEvent("done")
 
-    def IsSet(self):
-        return self.done
-
-    def Unset(self):
+    def _Unset(self):
         """unset function without event firing"""
         logging.debug("tag %s\tunset", self.name)
         self.done = False
         self.FireEvent("undone")
 
-    def Reset(self, message):
+    def _Reset(self, message):
         logging.debug("tag %s\treset", self.name)
         self.done = False
         self.FireEvent("reset", (self, message))
+
+    def Set(self):
+        self._Set()
+
+    def Unset(self):
+        self._Unset()
+
+    def Reset(self, message):
+        self._Reset(message)
+
+    def _Modify(self, event, message=None):
+        if event == TagEvent.Set:
+            self._Set()
+        elif event == TagEvent.Unset:
+            self._Unset()
+        elif event == TagEvent.Reset:
+            self._Reset(message)
 
     def GetName(self):
         return self.name
@@ -86,6 +107,11 @@ class Tag(CallbackHolder):
 
     def IsRemote(self):
         return False
+
+    def CheckRemote(self):
+        if not self.IsRemote():
+            raise RuntimeError("Tag is not RemoteTag")
+        return self
 
     def GetListenersIds(self):
         return [k.id for k in self.callbacks.iterkeys()]
@@ -99,11 +125,11 @@ class RemoteTag(Tag):
     def Set(self):
         raise RuntimeError("Attempt to set RemoteTag %r", self)
 
+    def Unset(self, message):
+        raise RuntimeError("Attempt to unset RemoteTag %r", self)
+
     def Reset(self, message):
         raise RuntimeError("Attempt to reset RemoteTag %r", self)
-
-    def SetRemote(self):
-        return super(RemoteTag, self).Set()
 
     def GetRemoteHost(self):
         return self.remotehost
