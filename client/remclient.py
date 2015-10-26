@@ -361,10 +361,17 @@ class JobPacketInfo(object):
         self.proxy.pck_resume(self.pck_id)
         self.update()
 
-    def Restart(self):
+    def Restart(self, suspend=False, files=None):
         """рестарт выполнения (перезапустит все job'ы, в том числе выполняющиеся и уже выполненные"""
-        self.proxy.pck_reset(self.pck_id)
-        self.proxy.pck_resume(self.pck_id)
+        if suspend or files:
+            self.proxy.pck_reset(self.pck_id, True)
+            if files:
+                self.AddFiles(files)
+            if not suspend:
+                self.proxy.pck_resume(self.pck_id)
+        else:
+            self.proxy.pck_reset(self.pck_id)
+            self.proxy.pck_resume(self.pck_id)
         self.update()
         return True
 

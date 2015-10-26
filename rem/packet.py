@@ -440,9 +440,13 @@ class JobPacket(Unpickable(lock=PickableRLock,
         PacketCustomLogic(self).DoChangeStateAction()
         return True
 
-    def Reinit(self, context):
+    def Reinit(self, context, suspend=False):
         self.Init(context)
-        self.Resume()
+
+        if self.CheckFlag(PacketFlag.USER_SUSPEND) or suspend:
+            self.changeState(PacketState.SUSPENDED)
+        else:
+            self.Resume()
 
     def OnStart(self, ref):
         if not hasattr(self, "waitJobs"):
@@ -689,7 +693,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         for job in self.GetWorkingJobs():
             job.Terminate()
 
-    def Reset(self):
+    def Reset(self, suspend=False):
         self.changeState(PacketState.NONINITIALIZED)
         self.KillJobs()
         self._wait_working_empty()
@@ -702,7 +706,11 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self.done.clear()
         for job in self.jobs.values():
             job.results = []
-        self.FireEvent("packet_reinit_request")
+
+        def reinit(ctx):
+            self.Reinit(ctx, suspend=suspend)
+
+        self.FireEvent("packet_reinit_request", reinit)
 
     def OnReset(self, (ref, message)):
         if isinstance(ref, Tag):

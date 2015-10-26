@@ -579,5 +579,5 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def OnTaskPending(self, ref):
         self.Notify(ref)
 
-    def OnPacketReinitRequest(self, pck):
-        pck.Reinit(self.context)
+    def OnPacketReinitRequest(self, code):
+        code(self.context)

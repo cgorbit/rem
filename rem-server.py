@@ -267,13 +267,10 @@ def pck_delete(pck_id):
 
 
 @traced_rpc_method("info")
-def pck_reset(pck_id):
+def pck_reset(pck_id, suspend=False):
     pck = _scheduler.GetPacket(pck_id)
     if pck is not None:
-        wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in pck.waitTags]
-        result = pck.Reset()
-        pck.SetWaitingTags(wait_tags)
-        return result
+        return pck.Reset(suspend=suspend)
     raise AttributeError("nonexisted packet id: %s" % pck_id)
 
 
