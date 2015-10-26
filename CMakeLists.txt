@@ -1,7 +1,4 @@
-OWNER(
-    ekrokhalev
-    trofimenkov
-)
+OWNER(trofimenkov)
 
 RECURSE(
     lib
