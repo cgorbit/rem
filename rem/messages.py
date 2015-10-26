@@ -178,7 +178,7 @@ class ResetNotification(IMessageHelper):
         print >>mbuf, "may be your packet '%(pname)s' had to reset, but haven't" % {"pname": self.pck.name}
         if not self.pck.isResetable:
             print >>mbuf, "... because your packet doesn't allow automatical resets"
-        print >>mbuf, "reset reason:", self.reason
+        print >>mbuf, "reset reason:", utf8ifunicode(self.reason)
         print >>mbuf
         self._outputExtendedPacketStatus(mbuf, self.pck.id, self.pck.Status())
         return mbuf.getvalue()
