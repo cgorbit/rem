@@ -100,11 +100,6 @@ import itertools
 import datetime
 from constants import DEFAULT_DUPLICATE_NAMES_POLICY, IGNORE_DUPLICATE_NAMES_POLICY, DENY_DUPLICATE_NAMES_POLICY, KILL_JOB_DEFAULT_TIMEOUT, NOTIFICATION_TIMEOUT, WARN_DUPLICATE_NAMES_POLICY
 
-try:
-    import bsddb3
-except ImportError, e:
-    bsddb3 = None
-
 __all__ = [
     "AdminConnector", "Connector",
     "DEFAULT_DUPLICATE_NAMES_POLICY", "IGNORE_DUPLICATE_NAMES_POLICY", "DENY_DUPLICATE_NAMES_POLICY", "WARN_DUPLICATE_NAMES_POLICY"
@@ -289,6 +284,7 @@ class JobPacket(object):
         принимает один параметр files - полностью аналогичный одноименному параметру для AddJob"""
         JobPacketInfo(self.conn, self.id).AddFiles(files, retries)
 
+
 class JobPacketInfo(object):
     """прокси объект для манипулирования пакетом задач в REM
     Объекты этого класса не нужно создавать вручную, правильный способ их получать - метод Queue.ListPackets"""
@@ -396,8 +392,8 @@ class JobPacketInfo(object):
         except xmlrpclib.Fault, inst:
             raise RuntimeError(inst.faultString)
 
-    @staticmethod
-    def _CalcFileChecksum(path):
+    @classmethod
+    def _CalcFileChecksum(cls, path):
         BUF_SIZE = 256 * 1024
         with open(path, "r") as reader:
             cs_calc = hashlib.md5()
@@ -408,37 +404,39 @@ class JobPacketInfo(object):
                 cs_calc.update(buff)
             return cs_calc.hexdigest()
 
-
     def _GetFileChecksum(self, path, db_path=None):
-        mtime = int(os.stat(path).st_mtime)
-
-        def calc():
+        if db_path is None:
             return self._CalcFileChecksum(path)
 
-        def get():
-            try:
-                rec = self.conn._checksums_cacher.get(path, None)
-            except Exception as e:
-                print >>sys.stderr, "Failed to get record from cacher: %s" % e
-                return calc()
-
-            if rec is None:
-                return calc()
-
-            (checksum, ts) = rec.split('\t')
-            if mtime <= int(ts) <= time.time():
-                return checksum
-
-            return calc()
-
-        checksum = get()
-
         try:
-            self.conn._checksums_cacher[path] = '%s\t%d' % (checksum, mtime)
-        except Exception as e:
-            print >>sys.stderr, "Failed to set record to cacher: %s" % e
+            import bsddb3
+        except ImportError, e:
+            if self.conn.verbose:
+                print >>sys.stderr, "Can't import bsddb3 module: %r" % e
+            return self._CalcFileChecksum(path)
 
-        return checksum
+        db = None
+        try:
+            db = bsddb3.btopen(db_path, 'c')
+
+            last_modified = int(os.stat(path).st_mtime)
+            val = db.get(path, None)
+            if val is not None:
+                (checksum, ts) = val.split('\t')
+                if last_modified <= int(ts) <= time.time():
+                    return checksum
+
+            last_modified = int(os.stat(path).st_mtime)
+            checksum = self._CalcFileChecksum(path)
+            db[path] = '%s\t%d' % (checksum, last_modified)
+            return checksum
+        except bsddb3.db.DBError, e:
+            if self.conn.verbose:
+                print >>sys.stderr, "Failed obtaining checksum from bsddb3 db: %r" % e
+            return self._CalcFileChecksum(path)
+        finally:
+            if db is not None:
+                db.close()
 
     def _TryCheckBinaryAndLock(self, checksum, localPath):
         try:
@@ -457,7 +455,7 @@ class JobPacketInfo(object):
             if not os.path.isfile(fpath):
                 raise AttributeError("can't find file \"%s\"" % fpath)
 
-            checksum = self._GetFileChecksum(fpath)
+            checksum = self._GetFileChecksum(fpath, self.conn.checksumDbPath)
             if not self._TryCheckBinaryAndLock(checksum, fpath):
                 data = open(fpath, 'r').read()
                 checksum2 = hashlib.md5(data).hexdigest()
@@ -608,57 +606,16 @@ class TagsBulk(object):
     def GetTags(self):
         return self.tags
 
-class DbChecksumCacher(object):
-    def __init__(self, db_path):
-        self.db_path = db_path
-
-    def _do_with_db(self, code, *args, **kwargs):
-        try:
-            db = bsddb3.btopen(self.db_path, 'c')
-            return code(db, *args, **kwargs)
-        finally:
-            if db is not None:
-                db.close()
-
-    def _get(self, db, key, default):
-        return db.get(key, default)
-
-    def get(self, key, default=None):
-        return self._do_with_db(self._get, key, default)
-
-    def _set(self, db, key, value):
-        db[path] = value
-
-    def set(self, key, value):
-        self._do_with_db(self._set, key, value)
-
-    def __setitem__(self, key, value):
-        self.set(key, value)
 
 class Connector(object):
     """объект коннектор, для работы с REM"""
 
-    def __init__(self, url, conn_retries=5, verbose=False, checksumDbPath=None, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY, logger_name=None, rem_server=None):
+    def __init__(self, url, conn_retries=5, verbose=False, checksumDbPath=None, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY, logger_name=None):
         """конструктор коннектора
         принимает один параметр - url REM сервера"""
-
-        self.url = url
-
-        if rem_server:
-            if not isinstance(rem_server, types.ModuleType):
-                raise RuntimeError()
-            self.proxy = rem_server
-        else:
-            self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose, allow_none=True)
-
+        self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose, allow_none=True)
         self.verbose = verbose
-
-        self._checksums_cacher = {}
-        if checksumDbPath:
-            if not bsddb3:
-                raise RuntimeError("Can't import bsddb3 module")
-            self._checksums_cacher = DbChecksumCacher(checksumDbPath)
-
+        self.checksumDbPath = checksumDbPath
         self.packet_name_policy = packet_name_policy
         if logger_name is None:
             self.logger = logging.getLogger('remclient.default')
@@ -669,11 +626,10 @@ class Connector(object):
         return self
 
     def __exit__(self, eType, eVal, eTb):
-        if not isinstance(self.proxy, types.ModuleType):
-            self.proxy('close')()
+        self.proxy._ServerProxy__transport.close()
 
     def GetURL(self):
-        return self.url
+        return self.proxy._RetriableXMLRPCProxy__uri
 
     def Queue(self, qname):
         """возвращает объект для работы с очередью c именем qname (см. класс Queue)"""
@@ -736,11 +692,10 @@ class ServerInfo(object):
 
 class AdminConnector(object):
     def __init__(self, url, conn_retries=5, verbose=False):
-        self.url = url
         self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose, allow_none=True)
 
     def GetURL(self):
-        return self.url
+        return self.proxy._RetriableXMLRPCProxy__uri
 
     def ListDeferedTags(self, name):
         """возвращает список тэгов, которые локально уже установились, но не все клиенты получили уведомление"""
