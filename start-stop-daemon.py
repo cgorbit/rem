@@ -7,6 +7,7 @@ import optparse
 import signal
 import time
 import subprocess
+import shutil
 
 
 INFINITY = float('inf')
@@ -19,11 +20,12 @@ def cwd_to_path():
 
 def parse_args():
     parser = optparse.OptionParser()
-    modes = ("check-start", "restart", "start", "status", "stop")
+    modes = ("check-start", "restart", "start", "status", "stop", "clear")
     parser.set_defaults()
     parser.add_option("--restart", dest="mode", action="store_const", const="restart", help="restart service")
     parser.add_option("--stop", dest="mode", action="store_const", const="stop", help="stop service")
     parser.add_option("--start", dest="mode", action="store_const", const="start", help="start service")
+    parser.add_option("--clear", dest="mode", action="store_const", const="clear", help="delete all queues and tags")
     parser.add_option("--check-start", dest="mode", action="store_const", const="check-start",
                       help="check service and start if needed (default)")
     parser.add_option("--status", dest="mode", action="store_const", const="status", help="print service work status")
@@ -250,8 +252,9 @@ class REMService(Service):
 
 
 def dispatch_work(service, opt, args):
+    pid = service.CheckProcess()
+
     if opt.mode in ("status", ):
-        pid = service.CheckProcess()
         if pid:
             print "%s is running as pid %s." % (service.name, pid)
             sys.stdout.write("Functionality check result:")
@@ -261,13 +264,20 @@ def dispatch_work(service, opt, args):
             else:
                 LogPrinter.error()
             sys.exit(0)
-        print "can't find runned %s" % service.name
-        sys.exit(1)
-    if opt.mode in ("stop", "restart"):
-        pid = service.CheckProcess()
+        else:
+            print "can't find runned %s" % service.name
+            sys.exit(1)
+
+    if opt.mode in ("stop", "restart", "clear"):
         if pid:
             service.Stop(timeout=INFINITY)
-    if opt.mode in ("start", "restart", "check-start") and not service.CheckProcess():
+
+    if opt.mode in ("clear",):
+        shutil.rmtree('packets')
+        shutil.rmtree('bin')
+        shutil.rmtree('backups')
+
+    if (opt.mode in ("restart",)) or (opt.mode in ("start", "check-start") and not pid) or (opt.mode in ("clear",) and pid):
         service.StartDaemon(timeout=INFINITY)
 
 

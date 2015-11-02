@@ -8,38 +8,20 @@ import signal
 import socket
 import time
 import threading
-from SimpleXMLRPCServer import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
-from SocketServer import ThreadingMixIn
-import Queue as StdQueue
+from SimpleXMLRPCServer import SimpleXMLRPCRequestHandler
 import xmlrpclib
 import datetime
 
 from rem import constants, osspec
 from rem import traced_rpc_method
 from rem import CheckEmailAddress, DefaultContext, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
+from rem import AsyncXMLRPCServer
+
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
         super(DuplicatePackageNameException, self).__init__(*args, **kwargs)
         self.message = 'DuplicatePackageNameException: Packet with name %s already exists in REM[%s]' % (pck_name, serv_name)
-
-
-class AsyncXMLRPCServer(ThreadingMixIn, SimpleXMLRPCServer):
-    def __init__(self, poolsize, *args, **kws):
-        if socket.has_ipv6:
-            self.address_family = socket.AF_INET6
-        SimpleXMLRPCServer.__init__(self, *args, **kws)
-        self.poolsize = poolsize
-        self.requests = StdQueue.Queue(poolsize)
-
-    def handle_request(self):
-        try:
-            request = self.get_request()
-        except socket.error:
-            logging.error("XMLRPCServer: socket error")
-            return
-        if self.verify_request(*request):
-            self.requests.put(request)
 
 
 class AuthRequestHandler(SimpleXMLRPCRequestHandler):

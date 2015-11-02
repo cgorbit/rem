@@ -2,7 +2,6 @@
 import threading
 import select
 import bsddb3
-from SimpleXMLRPCServer import SimpleXMLRPCServer
 from ConfigParser import ConfigParser
 import cPickle
 import subprocess
@@ -11,6 +10,7 @@ from collections import deque
 from xmlrpcmethodnotsupported import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported
 from common import *
 from callbacks import Tag, ICallbackAcceptor, TagEvent
+from rpcserver import SimpleXMLRPCServer
 
 PROTOCOL_VERSION = 2
 

@@ -1,42 +1,14 @@
 #!/usr/bin/env python
 import time
 import optparse
+import ConfigParser
+import json
+
 import remclient
 
-
-def parse_args():
-    parser = optparse.OptionParser("""%prog [options] action
-possible actions:
-    list     - list rem objects (queues (by default), packets (if --queue set) or tags(if --tags set))
-    update   - update packet data (adds binary file) or working limit for queue
-    suspend  - suspend object execution (--queue or --packet have to been set)
-    stop     - stop packet execution (suspend and kill all jobs, --packet have to been set)
-    resume   - resume object execution  (--queue or --packet have to been set)
-    restart  - restart object execution (only for errored packets, --packet have to been set)
-    reset    - reset tag (--tag have to been set)
-    status   - print object status (--queue, --packet or --tag have to been set)
-    delete   - delete concrete packet""")
-    parser.add_option("-u", "--url", dest="url", default="http://localhost:8104/", help="set REM server url")
-    parser.add_option("-q", "--queue", dest="queue", help="set target queue name")
-    parser.add_option("-p", "--packet", dest="packet", help="set target packet id")
-    parser.add_option("-f", "--file", dest="files", action="append", default=[], help="set file for packet updating")
-    parser.add_option("-t", "--tag", dest="tag", help="set tag name")
-    parser.add_option("--tags", dest="list_tags", action="store_const", const=True, help="list tags, makes sense only with list action")
-    parser.add_option("--alltags", dest="list_all_tags", action="store_const", const=True, help="list tags (including tags not in memory), makes sense only with list action")
-    parser.add_option("-F", "--filter", dest="filter", default="all", help="set targets filter (for listing packets in queue")
-    parser.add_option("-N", "--name", dest="name", help="name regexp for filtering list of tags or packets")
-    parser.add_option("-P", "--prefix", dest="prefix", help="name prefix for filtering list of tags or packets")
-    parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
-    parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
-    opt, args = parser.parse_args()
-    if len(args) != 1:
-        parser.error("")
-    return opt, args
-
-
 class ICommander(object):
-    def __init__(self, opt, args):
-        self.type = args[0]
+    def __init__(self, opt, action):
+        self.type = action
         self.options = opt
 
     def __enter__(self):
@@ -112,7 +84,8 @@ class LifeCommander(ICommander):
             object = self.conn.Queue(self.options.queue)
         else:
             raise CommandExecutionError("unknown target for command: %s" % self.type)
-        if self.type == "suspend":  
+
+        if self.type == "suspend":
             object.Suspend()
         elif self.type == "stop":
             if not isinstance(object, remclient.JobPacketInfo):
@@ -127,11 +100,40 @@ class LifeCommander(ICommander):
                 object.Restart()
             else:
                 object.RestartFromErrors()
+        elif self.type == "retry":
+            if not isinstance(object, remclient.Queue):
+                raise CommandExecutionError("retry is only for queue")
+            for pack in object.ListPackets("errored"):
+                pack.RestartFromErrors()
         elif self.type == "delete":
-            object.Delete()
+            if isinstance(object, remclient.Queue):
+                self.delete_queue(object, self.conn.GetURL())
+            else:
+                object.Delete()
         else:
             raise CommandExecutionError("unknown command: %s" % self.type)
 
+    @staticmethod
+    def delete_queue(queue, uri):
+        pause = 3
+        print """\
+WARNING!
+Going to delete queue "{}" from "{}" in {} seconds:
+- stop all packets;
+- delete all packets;
+- delete queue itself.
+""".format(queue.name, uri, pause)
+        time.sleep(pause)
+
+        queue.Suspend()
+        packets = queue.ListPackets("all")
+        for pack in packets:
+            if pack.state not in ['ERROR', 'SUCCESSFULL', 'HISTORIED']:
+                pack.Stop()
+        for pack in packets:
+            pack.Delete()
+        queue.Delete()
+        print 'Queue {} deleted.'.format(queue.name)
 
 class StatusCommander(ICommander):
     def __call__(self):
@@ -170,15 +172,77 @@ class MoveCommander(ICommander):
         pck.MoveToQueue(src_q, dest_q)
 
 
+_DISP_COMMANDS = {
+    "list":     (ListCommander,     "list rem objects (queues (by default), packets (if --queue set) or tags(if --tags set))"),
+    "status":   (StatusCommander,   "print object status (--queue, --packet or --tag have to been set)"),
+    "update":   (UpdateCommander,   "update packet data (with --packet and --file) or working limit for queue (with --queue and --working-limit)"),
+    "move":     (MoveCommander,     "move packet between queues, see --relloc-path"),
+    "suspend":  (LifeCommander,     "suspend object execution (--queue or --packet have to been set)"),
+    "resume":   (LifeCommander,     "resume object execution  (--queue or --packet have to been set)"),
+    "retry":    (LifeCommander,     "restart all errored packets of queue (requires --queue), see also restart action"),
+    "restart":  (LifeCommander,     "restart errored packet (requires --packet), see also retry action"),
+    "delete":   (LifeCommander,     "delete object (requires -q (--queue) or -p (--packet))"),
+    "stop":     (LifeCommander,     "stop packet execution (suspend and kill all jobs, --packet have to been set)"),
+    "set":      (TagManipCommander, "set tag (--tag have to been set)"),
+    "unset":    (TagManipCommander, "unset tag (--tag have to been set)"),
+    "reset":    (TagManipCommander, "reset tag (--tag have to been set)"),
+}
+
+def rem_url_from_cfg(path):
+    cfg = ConfigParser.SafeConfigParser()
+    cfg.read(path)
+    return 'http://{}:{}/'.format(cfg.get('server', 'network_hostname'), cfg.get('server', 'port'))
+
+def parse_args():
+    descr = "%prog [options] action\npossible actions:"
+    for action in sorted(_DISP_COMMANDS.keys()):
+        descr += '\n    {:8} - {}'.format(action, _DISP_COMMANDS[action][1])
+
+    parser = optparse.OptionParser(descr)
+    parser.add_option("-u", "--url", help="set REM server url")
+    parser.add_option('--rem-cfg', help='pathname of REM configuration file')
+    parser.add_option("-q", "--queue", dest="queue", help="set target queue name")
+    parser.add_option("-p", "--packet", dest="packet", help="set target packet id")
+    parser.add_option("-f", "--file", dest="files", action="append", default=[], help="set file for packet updating")
+    parser.add_option("-t", "--tag", dest="tag", help="set tag name")
+    parser.add_option("--tags", dest="list_tags", action="store_const", const=True, help="list tags, makes sense only with list action")
+    parser.add_option("--alltags", dest="list_all_tags", action="store_const", const=True, help="list tags (including tags not in memory), makes sense only with list action")
+    parser.add_option("-F", "--filter", dest="filter", default="all", help="set targets filter (for listing packets in queue")
+    parser.add_option("-N", "--name", dest="name", help="name regexp for filtering list of tags or packets")
+    parser.add_option("-P", "--prefix", dest="prefix", help="name prefix for filtering list of tags or packets")
+    parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
+    parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
+    opt, args = parser.parse_args()
+
+    if not args:
+        parser.error('need action')
+    if len(args) > 1:
+        parser.error('only one action at a time')
+    action = args[0]
+    if not action in _DISP_COMMANDS:
+        parser.error('unknown action "{}", use one of: {}'.format(action, ', '.join(sorted(_DISP_COMMANDS.keys()))))
+
+    if opt.url:
+        if opt.rem_cfg:
+            parser.error("options -u (--url) and --rem-cfg are mutually exclusive")
+    else:
+        if opt.rem_cfg:
+            opt.url = rem_url_from_cfg(opt.rem_cfg)
+        else:
+            """
+            Leave intact for production.
+            For local/testing REM you could use one of "opt.url =" lines in
+            order to shorten command line of rem-tool call.
+            """
+            parser.error('specify -u (--url) or --rem-cfg')
+            # opt.url = 'http://localhost:8104/'
+            # opt.url = rem_url_from_cfg('./rem.cfg')
+
+    return opt, action
+
 def main():
-    opt, args = parse_args()
-    disp_commands = {"list": ListCommander, "suspend": LifeCommander, "resume": LifeCommander, "restart": LifeCommander,
-                     "status": StatusCommander, "update": UpdateCommander, "delete": LifeCommander,
-                     "set": TagManipCommander,
-                     "unset": TagManipCommander,
-                     "reset": TagManipCommander,
-                     "move": MoveCommander, "stop": LifeCommander}
-    with disp_commands[args[0]](opt, args) as commander:
+    opt, action = parse_args()
+    with _DISP_COMMANDS[action][0](opt, action) as commander:
         commander()
 
 

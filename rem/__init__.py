@@ -5,6 +5,7 @@ from callbacks import Tag
 from scheduler import Queue, Scheduler
 from context import Context
 from common import CheckEmailAddress, traced_rpc_method
+from rpcserver import AsyncXMLRPCServer
 
 
 def DefaultContext(execMode=None):
