@@ -449,8 +449,27 @@ class JobPacketInfo(object):
     def _AddFiles(self, files):
         """добавляет или изменяет файлы, необходимые для работы пакета
         принимает один параметр files - полностью идентичный одноименному параметру для JobPacket.AddJob"""
+
+        def make_files_dict(iterable):
+            def expand(descr):
+                if isinstance(descr, tuple):
+                    dirname = descr[0]
+                    for basename in descr[1]:
+                        yield basename, os.path.join(dirname, basename)
+                else:
+                    yield os.path.basename(descr), descr
+
+            ret = {}
+            for descr in iterable:
+                for name, filename in expand(descr):
+                    if name in ret:
+                        raise ValueError("Duplicate file name '%s'" % name)
+                    ret[name] = filename
+            return ret
+
         if not isinstance(files, dict):
-            files = dict((os.path.split(file)[-1], file) for file in files)
+            files = make_files_dict(files)
+
         for fname, fpath in files.iteritems():
             if not os.path.isfile(fpath):
                 raise AttributeError("can't find file \"%s\"" % fpath)
