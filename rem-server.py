@@ -423,6 +423,8 @@ class RemServer(object):
 
 class RemDaemon(object):
     def __init__(self, scheduler, context):
+        threading.stack_size()
+
         self.scheduler = scheduler
         self.api_servers = [
             RemServer(context.manager_port, context.xmlrpc_pool_size, scheduler,
@@ -491,6 +493,8 @@ class RemDaemon(object):
 
         for server in self.api_servers:
             server.start()
+
+        threading.stack_size(256 << 10) # for rem.job stderr readers
 
         logging.debug("rem-server\tall_started")
 

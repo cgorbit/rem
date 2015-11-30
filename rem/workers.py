@@ -8,10 +8,6 @@ import osspec
 from callbacks import CallbackHolder
 
 
-STACK_SZ = 1 << 18 # 4MB default stack size for threads
-threading.stack_size(STACK_SZ)
-
-
 class KillableWorker(threading.Thread):
     def __init__(self):
         super(KillableWorker, self).__init__()
