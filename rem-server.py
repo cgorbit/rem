@@ -247,13 +247,18 @@ def pck_delete(pck_id):
         return pck.changeState(PacketState.HISTORIED)
     raise AttributeError("nonexisted packet id: %s" % pck_id)
 
-
 @traced_rpc_method("info")
-def pck_reset(pck_id, suspend=False):
+def pck_reset(pck_id, suspend=False, reset_tag=False, reset_message=None):
     pck = _scheduler.GetPacket(pck_id)
-    if pck is not None:
-        return pck.Reset(suspend=suspend)
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    if pck is None:
+        raise AttributeError("nonexisted packet id: %s" % pck_id)
+
+    if reset_tag:
+        tag = pck.done_indicator
+        if tag:
+            tag.Reset(reset_message)
+
+    pck.Reset(suspend=suspend)
 
 
 @traced_rpc_method()
