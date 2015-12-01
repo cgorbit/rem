@@ -15,6 +15,8 @@ class T08(unittest.TestCase):
     def setUp(self):
         self.connector = Config.Get().server1.connector
         self.srvdir = Config.Get().server1.projectDir
+        self.remA = RemServerWrapper(Config.Get().server1)
+        self.remB = RemServerWrapper(Config.Get().server2)
 
     def testOneTry(self):
         """Test for jobs with retries=1"""
@@ -57,22 +59,64 @@ class T08(unittest.TestCase):
         # # self.assertEqual(pck.state, "SUCCESSFULL")
         # pck.Delete()
 
-    def testRestartSuccessfullPacket(self):
-        pck1 = self.connector.Packet("pck-successfull-1")
-        j = pck1.AddJob("sleep 3")
-        self.connector.Queue(TestingQueue.Get()).AddPacket(pck1)
-        pckInfo1 = self.connector.PacketInfo(pck1.id)
+    def testRestartPacketAddFiles(self):
+        rem = self.remA
 
-        self.assertEqual(WaitForExecution(pckInfo1, timeout=1.0), "SUCCESSFULL")
+        def do_test(suspend, add_files, reset_tag):
+            if add_files and reset_tag:
+                return
 
-        pckInfo1.Restart()
-        time.sleep(2)
-        self.assertNotEqual(pckInfo1.state, "SUCCESSFULL")
-        self.assertEqual(WaitForExecution(pckInfo1, timeout=1.0), "SUCCESSFULL")
-        # for pck in [pckInfo1, pckInfo2]:
-        # # self.assertEqual(pck.state, "SUCCESSFULL")
-        # pck.Delete()
+            parent_tag = rem.Tag("pck_reset_parent", digits=6)
+            child_tag = rem.Tag("pck_reset_child", digits=6)
+            if reset_tag:
+                parent_tag.Set()
+                pck_setup = rem.PacketSetup("pck-restart-indirect", wait=parent_tag, set=child_tag, digits=6)
+                with pck_setup as child_pck:
+                    child_pck.AddJob("false", tries=1)
 
+                self.assertEqual(WaitForStates(child_pck, timeout=1.0), "ERROR")
+            child_tag.Set()
+            parent_tag.Unset()
+
+            with rem.PacketSetup("pck-restart", set=parent_tag, digits=6) as pck:
+                sleep = pck.AddJob("sleep 3", tries=1)
+                pck.AddJob("./true" if add_files else '/bin/true', tries=1, parents=[sleep])
+
+            pck = rem.PacketInfo(pck)
+
+            self.assertEqual(WaitForStates(pck, timeout=1.0), "ERROR" if add_files else "SUCCESSFULL")
+
+            pck.Restart(
+                files=['/bin/true'] if add_files else None,
+                suspend=suspend,
+                reset_tag=reset_tag,
+                reset_message="Reset message" if reset_tag else None,
+            )
+
+            time.sleep(2)
+
+            state_to_wait = 'SUSPENDED' if suspend else 'WORKABLE'
+            self.assertEqual(
+                WaitForStates(
+                    pck,
+                    ['SUCCESSFULL', 'ERROR', state_to_wait],
+                    timeout=1.0
+                ),
+                state_to_wait
+            )
+
+            if suspend:
+                pck.Resume()
+
+            self.assertEqual(WaitForStates(pck, timeout=1.0), "SUCCESSFULL")
+
+            self.assertTrue(bool(reset_tag) != bool(child_tag.IsSet()))
+
+        bools = [False, True]
+        for suspend in bools:
+            for add_files in bools:
+                for reset_tag in bools:
+                    do_test(suspend, add_files, reset_tag)
 
     def testRestoringDirectory(self):
         tag = "tag-start-%.0f" % time.time()

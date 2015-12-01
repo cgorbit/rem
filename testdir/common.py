@@ -118,24 +118,45 @@ class RemServerWrapper(object):
     def tag_local_name(self, tag):
         return tag.local_name_for(self)
 
-    def SuccessfullPacket(self, prefix=None, wait=None, set=None):
+    def _create_packet(self, prefix=None, wait=None, set=None, digits=0):
         if prefix is None:
             name = 'pck_%08x_%.6f' % (random.getrandbits(32), time.time())
         else:
-            name = prefix + '-%.0f' % time.time()
+            name = prefix + ('-%.' + str(digits) + 'f') % time.time()
 
         if wait and not isinstance(wait, list):
             wait = [wait]
 
-        pck = self.connector.Packet(
+        return self.connector.Packet(
             name,
             set_tag=self.tag_local_name(set) if set is not None else None,
             wait_tags=map(self.tag_local_name, wait) if wait is not None else [],
         )
 
+    def _add_packet_to_queue(self, pck):
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
 
+    def SuccessfullPacket(self, prefix=None, wait=None, set=None):
+        pck = self._create_packet(prefix, wait, set)
+        self._add_packet_to_queue(pck)
         return pck
+
+    def PacketSetup(self, *args, **kwargs):
+        pck = self._create_packet(*args, **kwargs)
+        rem = self
+
+        class ctor(object):
+            def __enter__(self):
+                return pck
+
+            def __exit__(self, type, value, tb):
+                if not type:
+                    rem._add_packet_to_queue(pck)
+
+        return ctor()
+
+    def PacketInfo(self, pck):
+        return _toPacketInfoIfNeed(pck)
 
     class TagWrapper(object):
         def __init__(self, name, rem):
@@ -151,6 +172,9 @@ class RemServerWrapper(object):
 
         def Reset(self, message=None):
             self._impl.Reset(message)
+
+        def IsSet(self):
+            return self._impl.Check()
 
         def local_name_for(self, rem):
             return self.name if self.rem.name == rem.name \
