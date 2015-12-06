@@ -1,5 +1,4 @@
 from __future__ import with_statement
-import subprocess
 import logging
 import os
 import time
@@ -7,19 +6,14 @@ import datetime
 import threading
 
 from callbacks import CallbackHolder
-from common import FuncRunner, SendEmail, Unpickable, safeint, nullobject, zeroint
+from rem.common import FuncRunner, SendEmail, Unpickable, safeint, nullobject, zeroint
 import osspec
 import packet
 import constants
+from rem.profile import ProfiledThread
+import runner
 
 DUMMY_COMMAND_CREATOR = None
-
-def cut_message(msg, BEG_LEN=None, FIN_LEN=None):
-    BEG_LEN = BEG_LEN or 1000
-    FIN_LEN = FIN_LEN or 1000
-    if msg and len(msg) > BEG_LEN + FIN_LEN + 5:
-        msg = msg[:BEG_LEN] + "\n...\n" + msg[-FIN_LEN:]
-    return msg or ""
 
 
 class IResult(Unpickable(type=str,
@@ -42,16 +36,14 @@ class IResult(Unpickable(type=str,
     def __str__(self):
         return "%s: %s" % (self.type, self.code) + (", \"%s\"" % self.message if self.message else "")
 
-
 class CommandLineResult(IResult):
     time_format = "%Y/%m/%d %H:%M:%S"
 
-    def __init__(self, code, start_time, fin_time, err, max_err_len=None):
+    def __init__(self, code, start_time, fin_time, err):
         IResult.__init__(self, "OS exit code", code, "started: %s; finished: %s;%s" \
                                                      % (
             time.strftime(self.time_format, start_time), time.strftime(self.time_format, fin_time),
-            "\n" + cut_message(err, max_err_len / 2 if max_err_len else None,
-                               max_err_len / 2 if max_err_len else None) if err else ""))
+            "\n" + (err or "")))
 
 
 class JobStartErrorResult(CommandLineResult):
@@ -120,54 +112,42 @@ class Job(Unpickable(err=nullobject,
         self.AddCallbackListener(self.packetRef)
         self.output_to_status = output_to_status
 
-    @staticmethod
-    def __read_stream(fh, buffer):
-        buffer.append(fh.read())
+    #@staticmethod
+    #def __read_stream(fh, buffer):
+        #buffer.append(fh.read())
 
-    #copy-paste from multiprocessing/forking.py
-    def popen_wait(self, process, timeout=None):
-        if timeout is None:
-            return process.poll()
-        deadline = time.time() + timeout
-        delay = 0.0005
-        res = None
-        while 1:
-            res = process.poll()
-            if res is not None:
-                break
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                break
-            delay = min(delay * 2, remaining, constants.JOB_WATCHER_MAX_DELAY)
-            time.sleep(delay)
-        return res
+    def __wait_process(self, process):
+        #out = []
+        #stderrReadThread = ProfiledThread(name_prefix='JobStderr', target=Job.__read_stream, args=(err_pipe, out))
+        #stderrReadThread = threading.Thread(target=Job.__read_stream, args=(err_pipe, out))
+        #stderrReadThread.setDaemon(True)
+        #stderrReadThread.start()
 
-    def __wait_process(self, process, err_pipe):
-        out = []
-        stderrReadThread = threading.Thread(target=Job.__read_stream, args=(err_pipe, out))
-        stderrReadThread.setDaemon(True)
-        stderrReadThread.start()
-        if process.stdin:
-            process.stdin.close()
-        last_update_time = time.time()
-        working_time = 0
-        poll = process.poll
-        _time = time.time
-        while poll() is None:
-            working_time += _time() - last_update_time
-            last_update_time = _time()
-            if working_time < self.notify_timeout < self.max_working_time and not self._notified:
-                if self.popen_wait(process, self.notify_timeout - working_time) is None:
-                    self._timeoutNotify(working_time + _time() - last_update_time)
+        start_time = time.time() # FIXME set earlier
 
-            elif working_time < self.max_working_time:
-                if self.popen_wait(process, self.max_working_time - working_time) is None:
-                    process.kill()
-                    self.results.append(TimeOutExceededResult(self.id))
-                    break
-            time.sleep(0.001)
-        stderrReadThread.join()
-        return "", out[0]
+        #if process.stdin:
+            #process.stdin.close()
+
+        code = None
+
+        if self.notify_timeout < self.max_working_time: # FIXME bullshit?
+            code = process.poll(deadline=start_time + self.notify_timeout)
+
+            if code is None:
+                self._timeoutNotify(time.time() - start_time)
+            else:
+                return code
+
+        code = process.poll(deadline=start_time + self.max_working_time)
+
+        if code is None:
+            process.kill() # TODO
+            self.results.append(TimeOutExceededResult(self.id)) # TODO
+
+        #stderrReadThread.join()
+        #return "", out[0]
+
+        return process.wait()
 
     def _timeoutNotify(self, working_time):
         self.cached_working_time = working_time
@@ -210,8 +190,10 @@ class Job(Unpickable(err=nullobject,
 
     def Run(self, worker_trace_pids=None):
         self.alive = True
-        self.input = self.output = None
-        self.errPipe = None
+        self.input = None
+        self.output = None
+        self.error_output = None
+        #self.errPipe = None
         jobResult = None
         jobPid = None
         pidTrackers = [self.running_pids] + ([] if worker_trace_pids is None else [worker_trace_pids])
@@ -220,29 +202,44 @@ class Job(Unpickable(err=nullobject,
             self.working_time = 0
             self.FireEvent("start")
             startTime = time.localtime()
-            self.errPipe = map(os.fdopen, os.pipe(), 'rw')
+            #self.errPipe = map(os.fdopen, os.pipe(), 'rw')
 
             run_args = DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
                        else self._make_run_args()
 
             logging.debug("out: %s, in: %s", self.output, self.input)
-            process = subprocess.Popen(run_args, stdout=self.output.fileno(), stdin=self.input.fileno(),
-                                       stderr=self.errPipe[1].fileno(), close_fds=True, cwd=self.packetRef.directory,
-                                       preexec_fn=os.setpgrp)
+            #process = subprocess.Popen(run_args, stdout=self.output.fileno(), stdin=self.input.fileno(),
+                                       #stderr=self.errPipe[1].fileno(), close_fds=True, cwd=self.packetRef.directory,
+                                       #preexec_fn=os.setpgrp)
+            process = runner.Popen(
+                run_args,
+                stdout=self.output.name,
+                stdin=self.input.name,
+                #stderr=self.errPipe[1].fileno(),
+                stderr=self.error_output.name,
+                cwd=self.packetRef.directory,
+                setpgrp=True
+            )
+
             jobPid = process.pid
+
+            for tracker in pidTrackers:
+                tracker.add(jobPid)
+
+            #self.errPipe[1].close()
+
             #in case when we stopped during start implicitly kill himself
-            if jobPid is not None:
-                for tracker in pidTrackers: tracker.add(jobPid)
-            self.errPipe[1].close()
             if not self.alive:
                 self.Terminate()
-            _, err = self.__wait_process(process, self.errPipe[0])
-            retCode = process.poll()
-            if retCode is None:
-                #can't determine exit code for killed process because of asynchronous nature of process.kill()
-                retCode = 666
-            jobResult = CommandLineResult(retCode, startTime, time.localtime(), err,
-                                       getattr(self, "max_err_len", None))
+
+            #_, err = self.__wait_process(process, self.errPipe[0])
+            retCode = self.__wait_process(process)
+
+            err = self._produce_legacy_stderr_output(
+                self.error_output.name, self.max_err_len or 2000)
+
+            jobResult = CommandLineResult(retCode, startTime, time.localtime(), err)
+
         except Exception, e:
             if not jobPid:
                 jobResult = JobStartErrorResult(None, str(e))
@@ -252,6 +249,21 @@ class Job(Unpickable(err=nullobject,
             self._finalize_job_iteration(jobPid, jobResult, pidTrackers)
             self.CloseStreams()
             self.FireEvent("done")
+
+    @staticmethod
+    def _produce_legacy_stderr_output(filename, max_err_len):
+        full_size = os.stat(filename).st_size
+
+        with open(filename) as input:
+            if full_size > max_err_len + 5:
+                msg = input.read(max_err_len / 2)
+                msg += '\n...\n'
+                input.seek(-(max_err_len / 2), os.SEEK_END)
+                msg += input.read()
+            else:
+                msg = input.read()
+
+        return msg
 
     def CloseStreams(self):
         if self.output_to_status and self.output:
@@ -276,8 +288,9 @@ class Job(Unpickable(err=nullobject,
         closingStreamGenerators = (
             lambda: self.input,
             lambda: self.output,
-            lambda: self.errPipe[0] if self.errPipe else None,
-            lambda: self.errPipe[1] if self.errPipe else None
+            lambda: self.error_output,
+            #lambda: self.errPipe[0] if self.errPipe else None,
+            #lambda: self.errPipe[1] if self.errPipe else None
         )
 
         for fn in closingStreamGenerators:

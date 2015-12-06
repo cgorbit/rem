@@ -5,11 +5,16 @@ import logging
 import os
 import signal
 import stat
-import subprocess
 import sys
 import time
+import ctypes
 
 import fork_locking
+import rem.runner as runner
+
+libc = ctypes.CDLL('libc.so.6')
+def gettid():
+    return libc.syscall(186)
 
 def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
     exception_list = exception_list or []
@@ -124,16 +129,14 @@ def get_shell_location(_cache=[]):
 
 @should_execute_maker(20, 5, Exception)
 def send_email(emails, subject, message):
-    sender = subprocess.Popen(["sendmail"] + map(str, emails), stdin=subprocess.PIPE)
-    print >> sender.stdin, \
+    stdin = \
         """Subject: %(subject)s
 To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-    sender.stdin.close()
-    sender.communicate()
-    return sender.poll()
+    sender = runner.Popen(["sendmail"] + map(str, emails), stdin_content=stdin)
+    return sender.poll(timeout=0) # XXX FIXME Change semantics in rem.runner
 
 
 def set_process_title(proc_title):

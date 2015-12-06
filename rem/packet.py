@@ -256,6 +256,7 @@ class JobPacketImpl(object):
     def ProcessJobStart(self, job):
         job.input = self.createInput(job.id)
         job.output = self.createOutput(job.id)
+        job.error_output = self.createOutput(job.id, "err")
         self._add_working(job)
 
     def _add_working(self, job):
@@ -409,12 +410,12 @@ class JobPacket(Unpickable(lock=PickableRLock,
             return stream
         raise RuntimeError("alien job input request")
 
-    def createOutput(self, jid):
+    def createOutput(self, jid, type="out"):
         if jid in self.jobs:
-            filename = self.stream_file(jid, "out")
+            filename = self.stream_file(jid, type)
             if filename is None:
-                filename = os.path.join(self.directory, "out-%s" % jid)
-            stream = self.streams[("out", jid)] = open(filename, "w")
+                filename = os.path.join(self.directory, "%s-%s" % (type, jid))
+            stream = self.streams[(type, jid)] = open(filename, "w")
             return stream
         raise RuntimeError("alien job output request")
 

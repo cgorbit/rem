@@ -1,5 +1,10 @@
 #!/usr/bin/env python
+
 from __future__ import with_statement
+
+import rem.runner
+rem.runner.CreateDefaultRunner()
+
 import logging
 import os
 import re
@@ -16,7 +21,7 @@ from rem import constants, osspec
 from rem import traced_rpc_method
 from rem import CheckEmailAddress, DefaultContext, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
 from rem import AsyncXMLRPCServer
-
+from rem.profile import ProfiledThread
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -341,6 +346,11 @@ def get_backupable_state():
     return {"backup-flag": _scheduler.backupable, "child-flag": _scheduler.backupInChild}
 
 
+@traced_rpc_method()
+def shutdown():
+    return _daemon.stop()
+
+
 @traced_rpc_method("warning")
 def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
@@ -351,6 +361,7 @@ class RemServer(object):
         self.readonly = readonly
         self.allow_backup_method = allow_backup_method
         self.rpcserver = AsyncXMLRPCServer(poolsize, ("", port), AuthRequestHandler, allow_none=True)
+        self.port = port
         self.rpcserver.register_multicall_functions()
         self.register_all_functions()
 
@@ -402,6 +413,7 @@ class RemServer(object):
         self.register_function(queue_set_error_lifetime, "queue_set_error_lifetime")
         self.register_function(set_backupable_state, "set_backupable_state")
         self.register_function(get_backupable_state, "get_backupable_state")
+        self.register_function(shutdown, "shutdown")
         if self.allow_backup_method:
             self.register_function(do_backup, "do_backup")
 
@@ -416,14 +428,15 @@ class RemServer(object):
         self.xmlrpcworkers = [XMLRPCWorker(self.rpcserver.requests, self.rpcserver.process_request_thread)
                               for _ in xrange(self.rpcserver.poolsize)]
         self.alive = True
-        self.main_thread = threading.Thread(target=self.request_processor)
+        self.main_thread = ProfiledThread(target=self.request_processor, name_prefix='Listen-%d' % self.port)
         for worker in self.xmlrpcworkers:
             worker.start()
         self.main_thread.start()
 
     def stop(self):
         self.alive = False
-        map(lambda worker: worker.Kill(), self.xmlrpcworkers)
+        for w in self.xmlrpcworkers:
+            w.Kill()
 
 
 class RemDaemon(object):
@@ -449,6 +462,7 @@ class RemDaemon(object):
         while self.scheduler.alive:
             if time.time() >= nextBackupTime:
                 try:
+                    #pass
                     self.scheduler.RollBackup()
                 except:
                     pass
@@ -459,27 +473,34 @@ class RemDaemon(object):
                     % datetime.datetime.fromtimestamp(nextBackupTime).strftime('%H:%M'))
 
             time.sleep(max(self.scheduler.backupPeriod, 0.01))
+            #time.sleep(5)
 
-    def signal_handler(self, signum, frame):
-        logging.warning("rem-server\tsignal %s has gotten", signum)
+    def stop(self):
+        logging.debug("rem-server\tenter_stop")
         if self.scheduler.alive:
             self.permitFinalBackup = False
             for server in self.api_servers:
                 server.stop()
+            logging.debug("rem-server\trpc_stopped")
             if self.timeWorker:
                 self.timeWorker.Kill()
+            logging.debug("rem-server\ttime_worker_stopped")
             self.scheduler.Stop()
             for method in [ThreadJobWorker.Suspend, ThreadJobWorker.Kill, ThreadJobWorker.join]:
                 for worker in self.regWorkers:
                     method(worker)
+            logging.debug("rem-server\tworkers_stopped")
             self.permitFinalBackup = True
             import multiprocessing
             logging.debug("%s children founded after custom kill", len(multiprocessing.active_children()))
             for proc in multiprocessing.active_children():
                 proc.terminate()
-
         else:
             logging.warning("rem-server\talredy dead scheduler, wait for a minute")
+
+    def signal_handler(self, signum, frame):
+        logging.warning("rem-server\tsignal %s has gotten", signum)
+        self.stop()
 
     def start_workers(self):
         self.permitFinalBackup = False
@@ -508,6 +529,7 @@ class RemDaemon(object):
         while not self.permitFinalBackup:
             time.sleep(0.01)
 
+        logging.debug("rem-server\tstart_final_backup")
         self.scheduler.RollBackup()
 
 
@@ -568,10 +590,15 @@ def scheduler_test():
 
 
 if __name__ == "__main__":
+    logging.debug("rem-server\tenter_main")
     _context = DefaultContext()
     osspec.set_process_title("[remd]%s" % ((" at " + _context.network_name) if _context.network_name else ""))
+    logging.debug("rem-server\tbefore_create_scheduler")
     _scheduler = CreateScheduler(_context)
+    logging.debug("rem-server\tafter_create_scheduler")
     if _context.execMode == "test":
         scheduler_test()
     elif _context.execMode == "start":
         RemDaemon(_scheduler, _context).start()
+    logging.debug("rem-server\texit_main")
+    rem.runner.DestroyDefaultRunnerIfNeed()
