@@ -113,6 +113,7 @@ def deserialize(stream):
 
 class _Server(object):
     def __init__(self, channel):
+        self._sig_chld_handler_pid = os.getpid() # WTF
         signal.signal(signal.SIGCHLD, self._sig_chld_handler)
         for sig in [signal.SIGINT, signal.SIGTERM]:
             signal.signal(sig, signal.SIG_IGN)
@@ -170,9 +171,6 @@ class _Server(object):
     def _start_process(self, task):
         exec_err_rd, exec_err_wr = os.pipe()
 
-        #logging.debug('RUN %r' % task.__dict__)
-        #os.write(2, 'RUN %r\n' % task.__dict__)
-
         running_task = None
         try:
             t0 = time.time()
@@ -184,6 +182,13 @@ class _Server(object):
             _fork_time = time.time() - t0
         except OSError as e:
             return None, str(e)
+
+        #if not pid:
+            #signal.signal(signal.SIGCHLD, signal.SIG_DFL)
+
+        # XXX This call lead to run _sig_chld_handler triggered for parent _in child_
+        #if not pid:
+            #str(list([1]))
 
         if pid:
             logging.debug('fork time %s' % _fork_time)
@@ -225,7 +230,7 @@ class _Server(object):
 
                 if task.stdout is not None:
                     dup2file(task.stdout, 1, write_flags)
-                #else:                                      already
+                #else:
                     #dup2devnull(2, os.O_WRONLY)
 
                 if task.stderr is not None:
@@ -239,7 +244,6 @@ class _Server(object):
                 if task.cwd:
                     os.chdir(task.cwd)
 
-                #os.write(2, '++ RUN %r\n' % task.args)
                 args = task.args
 
                 if isinstance(args, types.StringTypes):
@@ -258,12 +262,14 @@ class _Server(object):
                 os.execvp(args[0], args)
 
             except BaseException as e:
+                exit_code = 1
                 try:
                     with os.fdopen(exec_err_wr, 'w') as out:
                         serialize(out, e)
                         out.flush()
                 except:
                     pass
+            except:
                 exit_code = 1
             os._exit(exit_code)
 
@@ -322,10 +328,10 @@ class _Server(object):
 
             with self._lock:
                 while not send_queue and not (self._should_stop and not self._active):
-                    logging.info('before self._send_queue_not_empty.wait: %r' % dict(
-                        send_queue=len(send_queue), should_stop=self._should_stop,
-                        active=len(self._active), running=self._running_count,
-                    ))
+                    #logging.info('before self._send_queue_not_empty.wait: %r' % dict(
+                        #send_queue=len(send_queue), should_stop=self._should_stop,
+                        #active=len(self._active), running=self._running_count,
+                    #))
                     self._send_queue_not_empty.wait()
 
                 messages = []
@@ -334,7 +340,7 @@ class _Server(object):
 
                 if self._should_stop and not self._active:
                     last_iter = True
-                    logging.debug('_Server._write_loop append(StopServiceResponseMessage)')
+                    logging.info('_Server._write_loop append(StopServiceResponseMessage)')
                     messages.append(StopServiceResponseMessage())
 
             for msg in messages:
@@ -382,10 +388,15 @@ class _Server(object):
         else:
             task.exit_status = exit_status
 
-    def _sig_chld_handler(self, *args):
+    def _sig_chld_handler(self, signum, frame):
+        if os.getpid() != self._sig_chld_handler_pid:
+            os.write(2, 'WRONG_PROCESS_SIG_CHLD\n')
+            return
+
         with self._lock:
             while self._running_count:
-                pid, status = noeintr(lambda : os.waitpid(-1, os.WNOHANG)) # noeintr not actually need
+                #pid, status = noeintr(lambda : os.waitpid(-1, os.WNOHANG)) # noeintr not actually need
+                pid, status = os.waitpid(-1, os.WNOHANG)
 
                 if pid == 0:
                     break
