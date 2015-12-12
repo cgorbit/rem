@@ -44,7 +44,8 @@ class _FutureState(object):
             return True
 
         with self._lock:
-            self._set_event.wait(timeout)
+            if not self._is_ready:
+                self._set_event.wait(timeout)
 
         return self._is_ready
 
