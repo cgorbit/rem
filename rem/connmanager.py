@@ -343,7 +343,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
         self.alive = True
         self.InitXMLRPCServer()
-        ProfiledThread(target=self.ServerLoop, name_prefix='ConnectionManager').start()
+        ProfiledThread(target=self.ServerLoop, name_prefix='ConnManager').start()
 
         for client in self.topologyInfo.servers.values():
             self.scheduler.ScheduleTaskT(0, self.SendData, client, skip_logging=True)

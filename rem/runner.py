@@ -13,6 +13,7 @@ from subprocess import CalledProcessError, MAXFD
 import atexit
 
 from future import Promise
+from profile import ProfiledThread
 
 #class Messages(object):
 class ProcessStartMessage(object):
@@ -126,8 +127,8 @@ class _Executor(object):
         self._running_not_empty = threading.Condition(self._lock)
         self._send_queue = deque()
         self._send_queue_not_empty = threading.Condition(self._lock)
-        self._read_thread = threading.Thread(target=self._read_loop)
-        self._write_thread = threading.Thread(target=self._write_loop)
+        self._read_thread = ProfiledThread(target=self._read_loop, name_prefix='RunnerSrvRd')
+        self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='RunnerSrvWr')
         self._read_thread.start()
         self._write_thread.start()
 
@@ -387,8 +388,18 @@ class _Popen(object):
         self._send_signal = send_signal
         self.returncode = None
 
-    # XXX default semantics changed
-    def poll(self, timeout=None, deadline=None):
+    def _handle_exitstatus(self, sts, _WIFSIGNALED=os.WIFSIGNALED,
+            _WTERMSIG=os.WTERMSIG, _WIFEXITED=os.WIFEXITED,
+            _WEXITSTATUS=os.WEXITSTATUS):
+        if _WIFSIGNALED(sts):
+            return -_WTERMSIG(sts)
+        elif _WIFEXITED(sts):
+            return _WEXITSTATUS(sts)
+        else:
+            # Should never happen
+            raise RuntimeError("Unknown child exit status!")
+
+    def _poll(self, timeout=None, deadline=None):
         if self.returncode is not None:
             return self.returncode
 
@@ -404,19 +415,11 @@ class _Popen(object):
 
         return self.returncode
 
-    def _handle_exitstatus(self, sts, _WIFSIGNALED=os.WIFSIGNALED,
-            _WTERMSIG=os.WTERMSIG, _WIFEXITED=os.WIFEXITED,
-            _WEXITSTATUS=os.WEXITSTATUS):
-        if _WIFSIGNALED(sts):
-            return -_WTERMSIG(sts)
-        elif _WIFEXITED(sts):
-            return _WEXITSTATUS(sts)
-        else:
-            # Should never happen
-            raise RuntimeError("Unknown child exit status!")
+    def poll(self):
+        return self._poll(timeout=0)
 
-    def wait(self):
-        return self.poll()
+    def wait(self, timeout=None, deadline=None):
+        return self._poll(timeout=timeout, deadline=deadline)
 
     def send_signal(self, sig):
         os.kill(self.pid, sig)
@@ -452,8 +455,8 @@ class _Interface(object):
         self._should_stop = False
         self._next_task_id = 1
         self._tasks = {}
-        self._write_thread = threading.Thread(target=self._write_loop)
-        self._read_thread = threading.Thread(target=self._read_loop)
+        self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='RunnerClnWr')
+        self._read_thread = ProfiledThread(target=self._read_loop, name_prefix='RunnerClnRd')
         self._write_thread.start()
         self._read_thread.start()
 

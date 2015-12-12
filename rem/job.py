@@ -131,14 +131,14 @@ class Job(Unpickable(err=nullobject,
         code = None
 
         if self.notify_timeout < self.max_working_time: # FIXME bullshit?
-            code = process.poll(deadline=start_time + self.notify_timeout)
+            code = process.wait(deadline=start_time + self.notify_timeout)
 
             if code is None:
                 self._timeoutNotify(time.time() - start_time)
             else:
                 return code
 
-        code = process.poll(deadline=start_time + self.max_working_time)
+        code = process.wait(deadline=start_time + self.max_working_time)
 
         if code is None:
             process.kill() # TODO

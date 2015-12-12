@@ -10,11 +10,33 @@ import time
 import ctypes
 
 import fork_locking
-import rem.runner as runner
 
-libc = ctypes.CDLL('libc.so.6')
-def gettid():
-    return libc.syscall(186)
+def __get_gettid():
+    if sys.platform.startswith('linux'):
+        try:
+            libc = ctypes.CDLL('libc.so.6')
+
+            # TODO
+            # def impl():
+                #return libc.syscall(fork_locking.SYS_gettid)
+
+            pid = os.getpid()
+
+            for syscall in [186, 224]:
+                def gettid():
+                    return libc.syscall(syscall)
+
+                if gettid() == pid:
+                    return gettid
+
+        except:
+            pass
+
+    return lambda : None
+
+gettid = __get_gettid()
+
+import rem.runner as runner
 
 def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
     exception_list = exception_list or []
@@ -136,7 +158,7 @@ To: %(email-list)s
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
     sender = runner.Popen(["sendmail"] + map(str, emails), stdin_content=stdin)
-    return sender.poll(timeout=0) # XXX FIXME Change semantics in rem.runner
+    return sender.wait()
 
 
 def set_process_title(proc_title):

@@ -37,7 +37,7 @@ class ThreadJobWorker(KillableWorker):
     TICK_PERIOD = 0.0
 
     def __init__(self, scheduler):
-        super(ThreadJobWorker, self).__init__(name_prefix='JobWorker')
+        super(ThreadJobWorker, self).__init__(name_prefix='JobWrk')
         self.pids = None
         self.scheduler = scheduler
         self.suspended = False
@@ -74,7 +74,7 @@ class XMLRPCWorker(KillableWorker):
     WAIT_PERIOD = 1
 
     def __init__(self, requests, func):
-        super(XMLRPCWorker, self).__init__(name_prefix='XMLRPCWorker')
+        super(XMLRPCWorker, self).__init__(name_prefix='RPCWrk')
         self.requests = requests
         self.func = func
 
