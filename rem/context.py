@@ -103,7 +103,10 @@ class Context(object):
                 os.path.join(self.logs_directory, config.get("log", "filename")),
                 when="midnight", backupCount=config.getint("log", "rollcount"))
             logHandler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(module)s:\t%(message)s"))
+            prev_handlers = logger.handlers[:]
             logger.addHandler(logHandler)
+            for h in prev_handlers:
+                logger.removeHandler(h)
         logger.setLevel(logLevel)
 
     def registerScheduler(self, scheduler):

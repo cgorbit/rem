@@ -588,7 +588,6 @@ def scheduler_test():
 
 
 if __name__ == "__main__":
-    logging.debug("rem-server\tenter_main")
     _context = DefaultContext()
     osspec.set_process_title("[remd]%s" % ((" at " + _context.network_name) if _context.network_name else ""))
     logging.debug("rem-server\tbefore_create_scheduler")
