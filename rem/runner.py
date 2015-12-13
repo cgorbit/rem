@@ -826,25 +826,23 @@ class RunnerPool(object):
 
 DEFAULT_RUNNER = None
 
-def CreateDefaultRunner():
+def ResetDefaultRunner(size=1):
     global DEFAULT_RUNNER
 
-    if DEFAULT_RUNNER:
-        raise RuntimeError()
+    if size <= 0:
+        raise ValueError("size must be greater than 0");
 
-    DEFAULT_RUNNER = Runner()
+    DEFAULT_RUNNER = Runner() if size == 1 else RunnerPool(size)
+
+def DestroyDefaultRunner():
+    global DEFAULT_RUNNER
+    DEFAULT_RUNNER = None
 
 def Popen(*args, **kwargs):
     return DEFAULT_RUNNER.Popen(*args, **kwargs)
 
 def start(*args, **kwargs):
     return DEFAULT_RUNNER.start(*args, **kwargs)
-
-def DestroyDefaultRunnerIfNeed():
-    global DEFAULT_RUNNER
-    if DEFAULT_RUNNER:
-        DEFAULT_RUNNER.stop()
-        DEFAULT_RUNNER = None
 
 # XXX Copy-pasted from subprocess.py
 
