@@ -520,8 +520,6 @@ class RemDaemon(object):
         for server in self.api_servers:
             server.start()
 
-        threading.stack_size(256 << 10) # for rem.job stderr readers
-
         logging.debug("rem-server\tall_started")
 
         self.process_backups()
