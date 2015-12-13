@@ -5,16 +5,16 @@ class _FutureState(object):
         self._val = None
         self._exc = None
         self._ready_callbacks = []
-        self._is_ready = False
+        self._is_set = False
         self._lock = threading.Lock()
         self._set_event = threading.Condition(self._lock)
 
     def set(self, val=None, exc=None):
         to_run = []
         with self._lock:
-            if self._is_ready:
+            if self._is_set:
                 raise RuntimeError("Future state already set")
-            self._is_ready = True
+            self._is_set = True
             self._val = val
             self._exc = exc
             to_run, self._ready_callbacks = self._ready_callbacks, to_run
@@ -27,27 +27,27 @@ class _FutureState(object):
         for f in to_run:
             f(future)
 
-    def is_ready(self):
-        return self._is_ready
+    def is_set(self):
+        return self._is_set
 
     def subscribe(self, code):
         to_run = []
         with self._lock:
-            if self._is_ready:
+            if self._is_set:
                 to_run.append(code)
             else:
                 self._ready_callbacks.append(code)
         self._run(to_run)
 
     def wait(self, timeout=None):
-        if self._is_ready:
+        if self._is_set:
             return True
 
         with self._lock:
-            if not self._is_ready:
+            if not self._is_set:
                 self._set_event.wait(timeout)
 
-        return self._is_ready
+        return self._is_set
 
     def get_raw(self):
         self.wait()
@@ -63,8 +63,8 @@ class Future(object):
     def __init__(self, state):
         self._state = state
 
-    def is_ready(self):
-        return self._state.is_ready()
+    def is_set(self):
+        return self._state.is_set()
 
     def wait(self, timeout=None):
         return self._state.wait(timeout)
@@ -84,6 +84,9 @@ class Promise(object):
 
     def set(self, val=None, exc=None):
         self._state.set(val, exc)
+
+    def is_set(self):
+        return self._state.is_set()
 
     def get_future(self):
         return Future(self._state)
