@@ -112,21 +112,8 @@ class Job(Unpickable(err=nullobject,
         self.AddCallbackListener(self.packetRef)
         self.output_to_status = output_to_status
 
-    #@staticmethod
-    #def __read_stream(fh, buffer):
-        #buffer.append(fh.read())
-
     def __wait_process(self, process):
-        #out = []
-        #stderrReadThread = ProfiledThread(name_prefix='JobStderr', target=Job.__read_stream, args=(err_pipe, out))
-        #stderrReadThread = threading.Thread(target=Job.__read_stream, args=(err_pipe, out))
-        #stderrReadThread.setDaemon(True)
-        #stderrReadThread.start()
-
         start_time = time.time() # FIXME set earlier
-
-        #if process.stdin:
-            #process.stdin.close()
 
         code = None
 
@@ -141,11 +128,8 @@ class Job(Unpickable(err=nullobject,
         code = process.wait(deadline=start_time + self.max_working_time)
 
         if code is None:
-            process.kill() # TODO
+            process.kill()
             self.results.append(TimeOutExceededResult(self.id)) # TODO
-
-        #stderrReadThread.join()
-        #return "", out[0]
 
         return process.wait()
 
@@ -193,7 +177,6 @@ class Job(Unpickable(err=nullobject,
         self.input = None
         self.output = None
         self.error_output = None
-        #self.errPipe = None
         jobResult = None
         jobPid = None
         pidTrackers = [self.running_pids] + ([] if worker_trace_pids is None else [worker_trace_pids])
@@ -202,20 +185,16 @@ class Job(Unpickable(err=nullobject,
             self.working_time = 0
             self.FireEvent("start")
             startTime = time.localtime()
-            #self.errPipe = map(os.fdopen, os.pipe(), 'rw')
 
             run_args = DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
                        else self._make_run_args()
 
             logging.debug("out: %s, in: %s", self.output, self.input)
-            #process = subprocess.Popen(run_args, stdout=self.output.fileno(), stdin=self.input.fileno(),
-                                       #stderr=self.errPipe[1].fileno(), close_fds=True, cwd=self.packetRef.directory,
-                                       #preexec_fn=os.setpgrp)
+
             process = runner.Popen(
                 run_args,
                 stdout=self.output.name,
                 stdin=self.input.name,
-                #stderr=self.errPipe[1].fileno(),
                 stderr=self.error_output.name,
                 cwd=self.packetRef.directory,
                 setpgrp=True
@@ -226,13 +205,10 @@ class Job(Unpickable(err=nullobject,
             for tracker in pidTrackers:
                 tracker.add(jobPid)
 
-            #self.errPipe[1].close()
-
             #in case when we stopped during start implicitly kill himself
             if not self.alive:
                 self.Terminate()
 
-            #_, err = self.__wait_process(process, self.errPipe[0])
             retCode = self.__wait_process(process)
 
             err = self._produce_legacy_stderr_output(
@@ -289,8 +265,6 @@ class Job(Unpickable(err=nullobject,
             lambda: self.input,
             lambda: self.output,
             lambda: self.error_output,
-            #lambda: self.errPipe[0] if self.errPipe else None,
-            #lambda: self.errPipe[1] if self.errPipe else None
         )
 
         for fn in closingStreamGenerators:

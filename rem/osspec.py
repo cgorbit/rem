@@ -151,13 +151,13 @@ def get_shell_location(_cache=[]):
 
 @should_execute_maker(20, 5, Exception)
 def send_email(emails, subject, message):
-    stdin = \
+    body = \
         """Subject: %(subject)s
 To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-    sender = runner.Popen(["sendmail"] + map(str, emails), stdin_content=stdin)
+    sender = runner.Popen(["sendmail"] + map(str, emails), stdin_content=body)
     return sender.wait()
 
 

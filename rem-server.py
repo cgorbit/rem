@@ -3,7 +3,7 @@
 from __future__ import with_statement
 
 import rem.runner
-rem.runner.CreateDefaultRunner()
+rem.runner.ResetDefaultRunner()
 
 import logging
 import os
@@ -601,4 +601,3 @@ if __name__ == "__main__":
     elif _context.execMode == "start":
         RemDaemon(_scheduler, _context).start()
     logging.debug("rem-server\texit_main")
-    rem.runner.DestroyDefaultRunnerIfNeed()
