@@ -523,39 +523,7 @@ class _Client(object):
         self._next_task_id = 1
         self._tasks = {}
 
-        def create_fail():
-            errored = self._errored
-            queue_not_empty = self._queue_not_empty
-            channel = self._channel
-            tasks = self._tasks
-
-            def fail():
-                with queue_not_empty:
-                    if errored:
-                        return
-
-                    errored.set()
-
-                    try:
-                        channel.shutdown(socket.SHUT_RDWR)
-                    except:
-                        pass
-
-                    exc = RuntimeError("Runner abnormal termination")
-
-                    for task in tasks.itervalues():
-                        for p in [task.pid, task.term_info]:
-                            if not p.is_set():
-                                try:
-                                    p.set(None, exc)
-                                except:
-                                    pass
-
-                    queue_not_empty.notify_all()
-
-            return fail
-
-        self._fail = create_fail()
+        self._fail = self._create_fail()
 
         self._server_stop = Promise()
 
@@ -576,6 +544,39 @@ class _Client(object):
 
         write_thread.start()
         read_thread.start()
+
+    def _create_fail(self):
+        errored = self._errored
+        queue_not_empty = self._queue_not_empty
+        channel = self._channel
+        tasks = self._tasks
+
+# I forgot what for not to clouse on self
+        def fail():
+            with queue_not_empty:
+                if errored:
+                    return
+
+                errored.set()
+
+                try:
+                    channel.shutdown(socket.SHUT_RDWR)
+                except:
+                    pass
+
+                exc = RuntimeError("Runner abnormal termination")
+
+                for task in tasks.itervalues():
+                    for p in [task.pid, task.term_info]:
+                        if not p.is_set():
+                            try:
+                                p.set(None, exc)
+                            except:
+                                pass
+
+                queue_not_empty.notify_all()
+
+        return fail
 
     def _wait_stop(self):
         for w in [self._write_thread, self._write_thread]:
