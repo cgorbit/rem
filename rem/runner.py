@@ -10,14 +10,13 @@ import time
 from collections import deque
 from tempfile import NamedTemporaryFile
 from subprocess import CalledProcessError, MAXFD
-import atexit
 import types
 import errno
+import weakref
 
 from future import Promise
 from profile import ProfiledThread
 
-#class Messages(object):
 class ProcessStartMessage(object):
     def __init__(self, task_id, pid, error):
         self.task_id = task_id
@@ -48,56 +47,48 @@ class NewTaskParamsMessage(object):
         self.shell = shell # filename or None
 
 def set_cloexec(fd):
+    if not isinstance(fd, int):
+        fd = fd.fileno()
     fcntl.fcntl(fd, fcntl.F_SETFD, fcntl.FD_CLOEXEC | fcntl.fcntl(fd, fcntl.F_GETFD))
 
 def set_nonblock(fd):
+    if not isinstance(fd, int):
+        fd = fd.fileno()
     fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK | fcntl.fcntl(fd, fcntl.F_GETFL))
 
-def noeintr(f):
-    while True:
-        try:
-            return f()
-        except OSError as e:
-            if e.errno != errno.EINTR:
-                raise
-        else:
-            break
+#class PipeEvent(object):
+    #def __init__(self):
+        #self._rd, self._wr = os.pipe()
+        #set_nonblock(self._wr)
 
-'''
-class PipeEvent(object):
-    def __init__(self):
-        self._rd, self._wr = os.pipe()
-        set_nonblock(self._wr)
+    #@property
+    #def fd(self):
+        #return self._rd
 
-    @property
-    def fd(self):
-        return self._rd
+    #def notify(self):
+        #while True:
+            #try:
+                #os.write(self._wr, '\000')
+                #break
+            #except OSError as e:
+                #if e.errno == errno.EINTR:
+                    #continue
+                #elif e.errno == errno.EAGAIN:
+                    #break
+                #else:
+                    #raise
 
-    def notify(self):
-        while True:
-            try:
-                os.write(self._wr, '\000')
-                break
-            except OSError as e:
-                if e.errno == errno.EINTR:
-                    continue
-                elif e.errno == errno.EAGAIN:
-                    break
-                else:
-                    raise
-
-    def wait(self):
-        while True:
-            try:
-                data = os.read(self._rd, 4096)
-                assert len(data)
-                break
-            except OSError as e:
-                if e.errno == errno.EINTR:
-                    continue
-                else:
-                    raise
-'''
+    #def wait(self):
+        #while True:
+            #try:
+                #data = os.read(self._rd, 4096)
+                #assert len(data)
+                #break
+            #except OSError as e:
+                #if e.errno == errno.EINTR:
+                    #continue
+                #else:
+                    #raise
 
 def serialize(stream, data):
     return pickle.dump(data, stream, pickle.HIGHEST_PROTOCOL)
@@ -105,15 +96,27 @@ def serialize(stream, data):
 def deserialize(stream):
     return pickle.load(stream)
 
-#class MsgWriter(object):
-    #def __init__(self, data)
-        #self.msg = serialize_to_string(data)
-        #self.msg_len_str = serialize_to_string(len(self.msg))
-        #self.len_
+def dupfdopen(f, mode):
+    return os.fdopen(os.dup(f.fileno()), mode)
+
+def exit_on_error(func):
+    def impl(self):
+        try:
+            func(self)
+        except BaseException as e:
+            try:
+                os.write(2, str(e))
+            except:
+                pass
+            os._exit(2)
+
+    impl.__name__ = func.__name__
+
+    return impl
 
 class _Server(object):
     def __init__(self, channel):
-        self._sig_chld_handler_pid = os.getpid() # WTF
+        self._sig_chld_handler_pid = os.getpid() # #9535
         signal.signal(signal.SIGCHLD, self._sig_chld_handler)
         for sig in [signal.SIGINT, signal.SIGTERM]:
             signal.signal(sig, signal.SIG_IGN)
@@ -122,9 +125,14 @@ class _Server(object):
             signal.siginterrupt(sig, False)
 
         self._channel = channel
-        self._channel_out = os.fdopen(channel.fileno(), 'w') # FIXME Will throw
-        self._channel_in  = os.fdopen(channel.fileno(), 'r')
-        set_cloexec(self._channel.fileno())
+        set_cloexec(self._channel)
+
+        self._channel_in = dupfdopen(channel, 'r')
+        set_cloexec(self._channel_in)
+
+        self._channel_out = dupfdopen(channel, 'w')
+        set_cloexec(self._channel_out)
+
         self._should_stop = False
         self._lock = threading.Lock()
         self._active = {}
@@ -136,23 +144,11 @@ class _Server(object):
         self._read_thread.start()
         self._write_thread.start()
 
-# TODO
+# FIXME
         self._read_stopped = False
         self._write_stopped = False
 
-    def __del__(self):
-        try:
-            self._channel_out.close()
-        except:
-            pass
-        try:
-            self._channel_in.close()
-        except:
-            pass
-
     def wait(self):
-# TODO
-        #logging.debug('_Server.wait started')
 # Fuck Python
         while not(self._read_stopped and self._write_stopped):
             self._read_thread.join(1) # sleeps for 50ms actually
@@ -167,7 +163,6 @@ class _Server(object):
             self.exit_status = None
             self.exec_errored = False
 
-# TODO TODO TODO REFACTOR
     def _start_process(self, task):
         exec_err_rd, exec_err_wr = os.pipe()
 
@@ -182,13 +177,6 @@ class _Server(object):
             _fork_time = time.time() - t0
         except OSError as e:
             return None, str(e)
-
-        #if not pid:
-            #signal.signal(signal.SIGCHLD, signal.SIG_DFL)
-
-        # XXX This call lead to run _sig_chld_handler triggered for parent _in child_
-        #if not pid:
-            #str(list([1]))
 
         if pid:
             logging.debug('fork time %s' % _fork_time)
@@ -219,7 +207,7 @@ class _Server(object):
                 if task.stdin is not None:
                     dup2file(task.stdin, 0, os.O_RDONLY)
                 elif task.stdin_content is not None:
-                    with NamedTemporaryFile() as tmp: # TODO Remove implementation
+                    with NamedTemporaryFile() as tmp: # TODO Reimplement
                         tmp.write(task.stdin_content)
                         tmp.flush()
                         dup2file(tmp.name, 0, os.O_RDONLY)
@@ -273,7 +261,7 @@ class _Server(object):
                 exit_code = 1
             os._exit(exit_code)
 
-
+    @exit_on_error
     def _read_loop(self):
         channel_in = self._channel_in
         stop_request_received = False
@@ -316,7 +304,9 @@ class _Server(object):
         self._channel.shutdown(socket.SHUT_RD)
     # TODO
         self._read_stopped = True
+        logging.info('_Server._read_loop finished')
 
+    @exit_on_error
     def _write_loop(self):
         channel_out = self._channel_out
         send_queue = self._send_queue
@@ -351,6 +341,7 @@ class _Server(object):
                 break
 
         self._channel.shutdown(socket.SHUT_WR)
+        logging.info('_Server._write_loop finished')
 
     # TODO
         self._write_stopped = True
@@ -389,13 +380,13 @@ class _Server(object):
             task.exit_status = exit_status
 
     def _sig_chld_handler(self, signum, frame):
+        # http://bugs.python.org/issue9535
         if os.getpid() != self._sig_chld_handler_pid:
-            os.write(2, 'WRONG_PROCESS_SIG_CHLD\n')
+            #os.write(2, 'WRONG_PROCESS_SIG_CHLD\n')
             return
 
         with self._lock:
             while self._running_count:
-                #pid, status = noeintr(lambda : os.waitpid(-1, os.WNOHANG)) # noeintr not actually need
                 pid, status = os.waitpid(-1, os.WNOHANG)
 
                 if pid == 0:
@@ -407,51 +398,6 @@ class _Server(object):
                 self._enqueue_term_msg(pid, status)
 
             self._send_queue_not_empty.notify()
-
-
-    #def run(self):
-        #pid_to_task = {}
-
-        #sigchld = PipeEvent()
-        #sigchld_fd = sigchld.fd
-
-        #channel_fd = self.channel.fileno()
-
-        #rin = [channel_fd, sigchld_fd]
-        #win = [channel_fd]
-
-        #stop_request_received = False
-
-        #send_queue = []
-
-
-        #while True:
-            #rout, wout, _ = select.select(rin, win, [], None) # FIXME EINTR
-
-            #if rout:
-                #if sigchld_fd in rout:
-                    #sigchld.wait()
-
-                    #while pid_to_task:
-                        #pid, status = os.waitpid(-1, os.WNOHANG) # FIXME EINTR
-                        #if not pid:
-                            #break
-                        #task_id = pid_to_task.pop(pid)
-                        #send_queue.append(ProcessTerminationMessage(task_id, status))
-
-                #if channel_fd in rout:
-                    #msg = _read_message()
-
-                    #if isinstance(msg, NewTaskParamsMessage):
-                        #ret_msg = self._start_process(msg)
-                        #if ret_msg.pid:
-                            #pid_to_task[ret_msg.pid] = msg.task_id
-                        #send_queue.append(ret_msg)
-                    #elif isinstance(msg, StopServiceRequestMessage):
-                        #stop_request_received = True
-                    #else:
-                        #raise RuntimeError(...)
-
 
 
 class _Popen(object):
@@ -510,51 +456,155 @@ class _Popen(object):
     def pipe_cloexec(self):
         raise NotImplementedError("pipe_cloexec not implemented")
 
+def _weak_method(m):
+    obj = weakref.proxy(m.__self__)
+    func = m.__func__
+
+    def run():
+        return func(obj)
+
+    return run
+
+class Bool(object):
+    def __init__(self):
+        self.__state = False
+
+    def set(self, value=True):
+        self.__state = value
+
+    def unset(self):
+        self.__state = False
+
+    def __nonzero__(self):
+        return self.__state
+
+    def __str__(self):
+        return str(self.__state)
+
+    def __repr__(self):
+        return repr(self.__state)
+
+def fail_on_error(func):
+    def impl(self):
+        try:
+            func(self)
+        except:
+            self._fail()
+            raise
+
+    impl.__name__ = func.__name__
+
+    return impl
+
+
 class _Client(object):
     class Task(object):
         def __init__(self):
             self.pid = Promise()
             self.term_info = Promise()
 
-    def __init__(self, executor_pid, executor_stderr, executor_channel):
-        self._executor_pid = executor_pid
-        self._executor_stderr = executor_stderr # TODO
-        self._channel = executor_channel
-        self._channel_out = os.fdopen(self._channel.fileno(), 'w') # FIXME will throw
-        self._channel_in  = os.fdopen(self._channel.fileno(), 'r')
+    def __init__(self, server_pid, channel): # executor_pid, executor_stderr
+        self._server_pid = server_pid
+        self._server_exit_status = None
+        self._channel = channel
+
+        self._channel_in  = dupfdopen(channel, 'r')
+        self._channel_out = dupfdopen(channel, 'w')
+
+        self._errored = Bool()
         self._input_queue = deque()
         self._lock = threading.Lock()
         self._queue_not_empty = threading.Condition(self._lock)
-        self._write_failed = False
-        self._should_stop = False
+        self._should_stop = Bool()
         self._next_task_id = 1
         self._tasks = {}
-        self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='RunnerClnWr')
-        self._read_thread = ProfiledThread(target=self._read_loop, name_prefix='RunnerClnRd')
-        self._write_thread.start()
-        self._read_thread.start()
+
+        def create_fail():
+            errored = self._errored
+            queue_not_empty = self._queue_not_empty
+            channel = self._channel
+            tasks = self._tasks
+
+            def fail():
+                with queue_not_empty:
+                    if errored:
+                        return
+
+                    errored.set()
+
+                    try:
+                        channel.shutdown(socket.SHUT_RDWR)
+                    except:
+                        pass
+
+                    exc = RuntimeError("Runner abnormal termination")
+
+                    for task in tasks.itervalues():
+                        for p in [task.pid, task.term_info]:
+                            if not p.is_set():
+                                try:
+                                    p.set(None, exc)
+                                except:
+                                    pass
+
+                    queue_not_empty.notify_all()
+
+            return fail
+
+        self._fail = create_fail()
+
+        self._server_stop = Promise()
+
+        write_thread = ProfiledThread(
+            target=_weak_method(self._write_loop),
+            name_prefix='RunnerClnWr')
+
+        self._write_thread = weakref.ref(write_thread)
+
+        read_thread = ProfiledThread(
+            target=_weak_method(self._read_loop),
+            name_prefix='RunnerClnRd')
+
+        self._read_thread = weakref.ref(read_thread)
+
+        write_thread.daemon = True
+        read_thread.daemon = True
+
+        write_thread.start()
+        read_thread.start()
+
+    def _wait_stop(self):
+        for w in [self._write_thread, self._write_thread]:
+            t = w()
+            if t:
+                t.join()
+        _, status = os.waitpid(self._server_pid, 0)
+        logging.info('_Server exited with %s' % status)
+        if status:
+            raise RuntimeError("Runner.Server process exited abnormally %d" % status)
 
     def stop(self):
-        logging.debug('_Client.stop()')
+        do_wait = False
+
         with self._lock:
-            self._should_stop = True
-            self._queue_not_empty.notify()
-        self._write_thread.join()
-        self._read_thread.join()
+            if not self._should_stop:
+                self._should_stop.set()
+                self._queue_not_empty.notify()
+                do_wait = True
+
+        if do_wait:
+            self._server_stop.run_and_set(self._wait_stop)
+
+        self._server_stop.get_future().get()
 
     def __del__(self):
         self.stop()
-        try:
-            self._channel_out.close()
-        except:
-            pass
-        try:
-            self._channel_in.close()
-        except:
-            pass
 
     def start(self, *pargs, **pkwargs):
         with self._lock:
+            if self._errored:
+                raise RuntimeError("Runner in malformed state")
+
             task_id = self._next_task_id
             self._next_task_id += 1
 
@@ -580,22 +630,32 @@ class _Client(object):
     def Popen(self, *pargs, **pkwargs):
         return self.start(*pargs, **pkwargs)()
 
+    @fail_on_error
     def _write_loop(self):
         queue = self._input_queue
         channel_out = self._channel_out
+        lock = self._lock
+        queue_not_empty = self._queue_not_empty
+        channel = self._channel
+        should_stop = self._should_stop
+        errored = self._errored
+        del self # don't use self
 
         logging.debug('_Client._write_loop started')
 
         while True:
-            with self._lock:
-                while not self._should_stop and not queue:
-                    self._queue_not_empty.wait()
+            with lock:
+                while not (should_stop or queue or errored):
+                    queue_not_empty.wait()
+
+                if errored:
+                    raise RuntimeError("Errored in another thread")
 
                 messages = []
                 while queue:
                     messages.append(queue.popleft())
 
-                if self._should_stop:
+                if should_stop:
                     messages.append(StopServiceRequestMessage())
                     logging.debug('_Client._write_loop append(StopServiceRequestMessage)')
 
@@ -603,16 +663,22 @@ class _Client(object):
                 serialize(channel_out, msg)
             channel_out.flush()
 
-            if self._should_stop:
+            if should_stop:
                 break
 
-        self._channel.shutdown(socket.SHUT_WR)
+        channel.shutdown(socket.SHUT_WR)
 
-        logging.debug('_Client._write_loop finished')
+        logging.info('_Client._write_loop finished')
 
+    @fail_on_error
     def _read_loop(self):
-        # TODO read stderr of executor to not lock
         channel_in = self._channel_in
+        lock = self._lock
+        tasks = self._tasks
+        should_stop = self._should_stop
+        channel = self._channel
+        del self # don't use self
+
         stop_response_received = False
 
         logging.debug('_Client._read_loop started')
@@ -631,8 +697,8 @@ class _Client(object):
 
                 pid, error = msg.pid, msg.error
 
-                with self._lock:
-                    task = self._tasks[msg.task_id] if pid else self._tasks.pop(msg.task_id)
+                #with lock:
+                task = tasks[msg.task_id] if pid else tasks.pop(msg.task_id)
 
                 if error:
                     error = RuntimeError(error) # FIXME pickle Exception?
@@ -642,16 +708,16 @@ class _Client(object):
             elif isinstance(msg, ProcessTerminationMessage):
                 #logging.info('_Client._read_loop ProcessTerminationMessage for task_id=%d, received'  % msg.task_id)
 
-                with self._lock:
-                    task = self._tasks.pop(msg.task_id)
-                    task.term_info.set(msg.exit_status)
+                #with lock:
+                task = tasks.pop(msg.task_id)
+                task.term_info.set(msg.exit_status)
 
             elif isinstance(msg, StopServiceResponseMessage):
                 logging.debug('_Client._read_loop StopServiceResponseMessage received')
 
-                if not self._should_stop: # FIXME more fine check
+                if not should_stop: # FIXME more fine check
                     raise RuntimeError('StopServiceResponseMessage received but StopServiceRequestMessage was not send')
-                if self._tasks:
+                if tasks:
                     raise RuntimeError('StopServiceResponseMessage received but not for all process replices was received')
 
                 stop_response_received = True
@@ -662,8 +728,9 @@ class _Client(object):
         if not stop_response_received:
             raise RuntimeError('Socket closed without StopServiceResponseMessage')
 
-        self._channel.shutdown(socket.SHUT_RD)
-        logging.debug('_Client._read_loop finished')
+        channel.shutdown(socket.SHUT_RD)
+        logging.info('_Client._read_loop finished')
+
 
 def dup2file(filename, newfd, flags):
     oldfd = os.open(filename, flags)
@@ -716,7 +783,7 @@ def Runner():
         channel_child.close()
         del channel_child
         logging.debug("_Server pid = %s" % pid)
-        return _Client(pid, child_err_rd, channel_parent)
+        return _Client(pid, channel_parent) # child_err_rd
     else:
         try:
             channel_parent.close()
@@ -752,8 +819,6 @@ def DestroyDefaultRunnerIfNeed():
     if DEFAULT_RUNNER:
         DEFAULT_RUNNER.stop()
         DEFAULT_RUNNER = None
-
-#atexit.register(DestroyDefaultRunnerIfNeed)
 
 # XXX Copy-pasted from subprocess.py
 
