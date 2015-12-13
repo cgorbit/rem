@@ -442,6 +442,9 @@ class _Popen(object):
     def wait(self, timeout=None, deadline=None):
         return self._poll(timeout=timeout, deadline=deadline)
 
+    def check(self):
+        check_retcode(self.wait(), '#TODO args')
+
     def send_signal(self, sig):
         os.kill(self.pid, sig)
 
@@ -858,8 +861,12 @@ def check_call(*args, **kwargs):
         cmd = kwargs.get("args")
         if cmd is None:
             cmd = args[0]
-        raise CalledProcessError(retcode, cmd)
+        check_retcode(retcode, cmd)
     return 0
+
+def check_retcode(retcode, cmd):
+    if retcode:
+        raise CalledProcessError(retcode, cmd)
 
 def check_output(*args, **kwargs):
     raise NotImplementedError('check_output not implemented')
