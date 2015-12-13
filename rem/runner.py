@@ -304,7 +304,7 @@ class _Server(object):
         self._channel.shutdown(socket.SHUT_RD)
     # TODO
         self._read_stopped = True
-        logging.info('_Server._read_loop finished')
+        logging.debug('_Server._read_loop finished')
 
     @exit_on_error
     def _write_loop(self):
@@ -341,7 +341,7 @@ class _Server(object):
                 break
 
         self._channel.shutdown(socket.SHUT_WR)
-        logging.info('_Server._write_loop finished')
+        logging.debug('_Server._write_loop finished')
 
     # TODO
         self._write_stopped = True
@@ -668,7 +668,7 @@ class _Client(object):
 
         channel.shutdown(socket.SHUT_WR)
 
-        logging.info('_Client._write_loop finished')
+        logging.debug('_Client._write_loop finished')
 
     @fail_on_error
     def _read_loop(self):
@@ -729,7 +729,7 @@ class _Client(object):
             raise RuntimeError('Socket closed without StopServiceResponseMessage')
 
         channel.shutdown(socket.SHUT_RD)
-        logging.info('_Client._read_loop finished')
+        logging.debug('_Client._read_loop finished')
 
 
 def dup2file(filename, newfd, flags):
@@ -797,6 +797,32 @@ def Runner():
             os._exit(1)
         _run_executor_wrapper(child_err_wr, channel_child)
 
+class RunnerPool(object):
+    def __init__(self, size):
+        self._impls = [Runner() for _ in xrange(size)]
+        self._counter = 0
+
+# bullshit
+    def _get_impl(self):
+        self._counter += 1
+        return self._impls[self._counter % len(self._impls)]
+
+    def start(self, *args, **kwargs):
+        return self._get_impl().start(*args, **kwargs)
+
+    def Popen(self):
+        return self._get_impl().Popen(*args, **kwargs)
+
+    def stop(self):
+        last_exc = None
+        while len(self._impls):
+            impl = self._impls.pop()
+            try:
+                impl.stop()
+            except Exception as e:
+                last_exc = e
+        if e:
+            raise e
 
 DEFAULT_RUNNER = None
 
