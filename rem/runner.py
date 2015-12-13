@@ -13,6 +13,7 @@ from subprocess import CalledProcessError, MAXFD
 import types
 import errno
 import weakref
+import atexit
 
 from future import Promise
 from profile import ProfiledThread
@@ -810,7 +811,7 @@ class RunnerPool(object):
     def start(self, *args, **kwargs):
         return self._get_impl().start(*args, **kwargs)
 
-    def Popen(self):
+    def Popen(self, *args, **kwargs):
         return self._get_impl().Popen(*args, **kwargs)
 
     def stop(self):
@@ -837,6 +838,8 @@ def ResetDefaultRunner(size=1):
 def DestroyDefaultRunner():
     global DEFAULT_RUNNER
     DEFAULT_RUNNER = None
+
+atexit.register(DestroyDefaultRunner)
 
 def Popen(*args, **kwargs):
     return DEFAULT_RUNNER.Popen(*args, **kwargs)
