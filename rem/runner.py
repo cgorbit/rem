@@ -36,11 +36,10 @@ class StopServiceResponseMessage(object):
     pass
 
 class NewTaskParamsMessage(object):
-    def __init__(self, args, stdin=None, stdin_content=None, stdout=None, stderr=None, setpgrp=False, cwd=None, shell=False):
+    def __init__(self, args, stdin=None, stdout=None, stderr=None, setpgrp=False, cwd=None, shell=False):
         self.task_id = None
         self.args = args
         self.stdin = stdin # string or None
-        self.stdin_content = stdin_content # string or None
         self.stdout = stdout # filename or None
         self.stderr = stderr # filename or None
         self.setpgrp = setpgrp
@@ -207,13 +206,8 @@ class _Server(object):
 
                 if task.stdin is not None:
                     dup2file(task.stdin, 0, os.O_RDONLY)
-                elif task.stdin_content is not None:
-                    with NamedTemporaryFile() as tmp: # TODO Reimplement
-                        tmp.write(task.stdin_content)
-                        tmp.flush()
-                        dup2file(tmp.name, 0, os.O_RDONLY)
-                #else:
-                    #dup2devnull(0, os.O_RDONLY)
+                else:
+                    pass # /dev/null
 
                 write_flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
 
@@ -251,15 +245,15 @@ class _Server(object):
                 os.execvp(args[0], args)
 
             except BaseException as e:
-                exit_code = 1
+                exit_code = 64
                 try:
                     with os.fdopen(exec_err_wr, 'w') as out:
                         serialize(out, e)
                         out.flush()
                 except:
-                    pass
+                    exit_code = 65
             except:
-                exit_code = 1
+                exit_code = 66
             os._exit(exit_code)
 
     @exit_on_error
@@ -553,6 +547,7 @@ class _Client(object):
 
 # I forgot what for not to clouse on self
         def fail():
+    # FIXME lock only notify_all() and use tasks.values()
             with queue_not_empty:
                 if errored:
                     return
@@ -633,7 +628,22 @@ class _Client(object):
         return join_pid
 
     def Popen(self, *pargs, **pkwargs):
-        return self.start(*pargs, **pkwargs)()
+        def start():
+            return self.start(*pargs, **pkwargs)()
+
+        stdin_content = pkwargs.pop('stdin_content', None)
+
+        if stdin_content is None:
+            return start()
+
+        # TODO Reimplement
+        with NamedTemporaryFile() as tmp:
+            tmp.write(stdin_content)
+            tmp.flush()
+
+            pkwargs['stdin'] = tmp.name
+
+            return start()
 
     @fail_on_error
     def _write_loop(self):
