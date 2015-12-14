@@ -18,6 +18,9 @@ import atexit
 from future import Promise
 from profile import ProfiledThread
 
+class ServiceUnavailable(RuntimeError):
+    pass
+
 class ProcessStartMessage(object):
     def __init__(self, task_id, pid, error):
         self.task_id = task_id
@@ -114,6 +117,21 @@ def exit_on_error(func):
 
     return impl
 
+LL_DEBUG = 90
+LL_INFO  = 80
+LOG_LEVEL = 80
+
+def _log(lvl, args):
+    if LOG_LEVEL >= lvl:
+        sys.stderr.write((args[0] % args[1:]) + '\n')
+
+def logging_debug(*args):
+    _log(LL_DEBUG, args)
+def logging_info(*args):
+    _log(LL_INFO, args)
+
+# XXX Don't use logging in _Server
+
 class _Server(object):
     def __init__(self, channel):
         self._sig_chld_handler_pid = os.getpid() # #9535
@@ -137,19 +155,21 @@ class _Server(object):
         self._lock = threading.Lock()
         self._active = {}
         self._running_count = 0
+
         self._send_queue = deque()
         self._send_queue_not_empty = threading.Condition(self._lock)
+
+        self._read_stopped = False
+        self._write_stopped = False
+
         self._read_thread = ProfiledThread(target=self._read_loop, name_prefix='RunnerSrvRd')
         self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='RunnerSrvWr')
         self._read_thread.start()
         self._write_thread.start()
 
-# FIXME
-        self._read_stopped = False
-        self._write_stopped = False
-
     def wait(self):
-# Fuck Python
+        # Fuck Python. Can't wait on mutexes here, because need
+        # sleep, that never restarts on EINTR for _sig_chld_handler to run
         while not(self._read_stopped and self._write_stopped):
             self._read_thread.join(1) # sleeps for 50ms actually
             self._write_thread.join(1)
@@ -179,7 +199,7 @@ class _Server(object):
             return None, str(e)
 
         if pid:
-            logging.debug('fork time %s' % _fork_time)
+            logging_debug('fork time %s' % _fork_time)
 
         if pid:
             os.close(exec_err_wr)
@@ -261,30 +281,31 @@ class _Server(object):
         channel_in = self._channel_in
         stop_request_received = False
 
-        logging.debug('_Server._read_loop started')
+        logging_debug('_Server._read_loop started')
 
         while True:
             try:
                 msg = deserialize(channel_in)
             except EOFError:
-                logging.debug('_Server._read_loop EOFError')
+                logging_debug('_Server._read_loop EOFError')
                 break
 
             if isinstance(msg, NewTaskParamsMessage):
-                #logging.debug('_Server._read_loop NewTaskParamsMessage received')
+                #logging_debug('_Server._read_loop NewTaskParamsMessage received')
 
                 if stop_request_received:
                     raise RuntimeError("Message in channel after StopServiceRequestMessage")
 
                 t0 = time.time()
                 pid, error = self._start_process(msg)
+                logging_debug('_start_process time %s' % (time.time() - t0))
                 with self._lock:
                     self._enqueue_start_msg(msg.task_id, pid, error)
                     self._send_queue_not_empty.notify()
-                logging.debug('_start_process time %s' % (time.time() - t0))
+                logging_debug('after _enqueue_start_msg')
 
             elif isinstance(msg, StopServiceRequestMessage):
-                #logging.debug('_Server._read_loop StopServiceRequestMessage received')
+                #logging_debug('_Server._read_loop StopServiceRequestMessage received')
                 stop_request_received = True
                 with self._lock:
                     self._should_stop = True
@@ -299,21 +320,21 @@ class _Server(object):
         self._channel.shutdown(socket.SHUT_RD)
     # TODO
         self._read_stopped = True
-        logging.debug('_Server._read_loop finished')
+        logging_debug('_Server._read_loop finished')
 
     @exit_on_error
     def _write_loop(self):
         channel_out = self._channel_out
         send_queue = self._send_queue
 
-        logging.debug('_Server._write_loop started')
+        logging_debug('_Server._write_loop started')
 
         while True:
             last_iter = False
 
             with self._lock:
                 while not send_queue and not (self._should_stop and not self._active):
-                    #logging.info('before self._send_queue_not_empty.wait: %r' % dict(
+                    #logging_info('before self._send_queue_not_empty.wait: %r' % dict(
                         #send_queue=len(send_queue), should_stop=self._should_stop,
                         #active=len(self._active), running=self._running_count,
                     #))
@@ -325,7 +346,7 @@ class _Server(object):
 
                 if self._should_stop and not self._active:
                     last_iter = True
-                    logging.info('_Server._write_loop append(StopServiceResponseMessage)')
+                    logging_info('_Server._write_loop append(StopServiceResponseMessage)')
                     messages.append(StopServiceResponseMessage())
 
             for msg in messages:
@@ -336,7 +357,7 @@ class _Server(object):
                 break
 
         self._channel.shutdown(socket.SHUT_WR)
-        logging.debug('_Server._write_loop finished')
+        logging_debug('_Server._write_loop finished')
 
     # TODO
         self._write_stopped = True
@@ -387,7 +408,7 @@ class _Server(object):
                 if pid == 0:
                     break
 
-                #logging.debug('_Server._sig_chld_handler pid = %d, status = %d' % (pid, status))
+                #logging_debug('_Server._sig_chld_handler pid = %d, status = %d' % (pid, status))
 
                 self._running_count -= 1
                 self._enqueue_term_msg(pid, status)
@@ -521,6 +542,9 @@ class _Client(object):
 
         self._server_stop = Promise()
 
+        self._read_thread_inited = threading.Event()
+        self._write_thread_inited = threading.Event()
+
         write_thread = ProfiledThread(
             target=_weak_method(self._write_loop),
             name_prefix='RunnerClnWr')
@@ -539,6 +563,9 @@ class _Client(object):
         write_thread.start()
         read_thread.start()
 
+        self._read_thread_inited.wait()
+        self._write_thread_inited.wait()
+
     def _create_fail(self):
         errored = self._errored
         queue_not_empty = self._queue_not_empty
@@ -547,7 +574,6 @@ class _Client(object):
 
 # I forgot what for not to clouse on self
         def fail():
-    # FIXME lock only notify_all() and use tasks.values()
             with queue_not_empty:
                 if errored:
                     return
@@ -559,9 +585,11 @@ class _Client(object):
                 except:
                     pass
 
-                exc = RuntimeError("Runner abnormal termination")
+                exc = ServiceUnavailable("Runner abnormal termination")
 
-                for task in tasks.itervalues():
+                tasks_values = tasks.values()
+                tasks.clear()
+                for task in tasks_values:
                     for p in [task.pid, task.term_info]:
                         if not p.is_set():
                             try:
@@ -603,7 +631,7 @@ class _Client(object):
     def start(self, *pargs, **pkwargs):
         with self._lock:
             if self._errored:
-                raise RuntimeError("Runner in malformed state")
+                raise ServiceUnavailable("Runner in malformed state")
 
             task_id = self._next_task_id
             self._next_task_id += 1
@@ -654,6 +682,7 @@ class _Client(object):
         channel = self._channel
         should_stop = self._should_stop
         errored = self._errored
+        self._write_thread_inited.set()
         del self # don't use self
 
         logging.debug('_Client._write_loop started')
@@ -692,6 +721,8 @@ class _Client(object):
         tasks = self._tasks
         should_stop = self._should_stop
         channel = self._channel
+        errored = self._errored
+        self._read_thread_inited.set()
         del self # don't use self
 
         stop_response_received = False
@@ -712,19 +743,31 @@ class _Client(object):
 
                 pid, error = msg.pid, msg.error
 
-                #with lock:
-                task = tasks[msg.task_id] if pid else tasks.pop(msg.task_id)
-
                 if error:
                     error = RuntimeError(error) # FIXME pickle Exception?
 
-                task.pid.set(pid, error)
+                with lock:
+                    try:
+                        task = tasks[msg.task_id] if pid else tasks.pop(msg.task_id)
+                    except KeyError:
+                        if errored:
+                            continue
+                        else:
+                            raise
+                    task.pid.set(pid, error)
 
             elif isinstance(msg, ProcessTerminationMessage):
                 #logging.info('_Client._read_loop ProcessTerminationMessage for task_id=%d, received'  % msg.task_id)
 
-                #with lock:
-                task = tasks.pop(msg.task_id)
+                with lock:
+                    try:
+                        task = tasks.pop(msg.task_id)
+                    except KeyError:
+                        if errored:
+                            continue
+                        else:
+                            raise
+
                 task.term_info.set(msg.exit_status)
 
             elif isinstance(msg, StopServiceResponseMessage):
@@ -814,30 +857,61 @@ def Runner():
 
 class RunnerPool(object):
     def __init__(self, size):
-        self._impls = [Runner() for _ in xrange(size)]
+        self._good = [Runner() for _ in xrange(size)]
+        self._bad  = []
         self._counter = 0
+        self._lock = threading.Lock()
 
-# bullshit
     def _get_impl(self):
-        self._counter += 1
-        return self._impls[self._counter % len(self._impls)]
+        with self._lock:
+            if not self._good:
+                raise ServiceUnavailable()
+            self._counter += 1
+            return self._good[self._counter % len(self._good)]
+
+    def _do(self, f):
+        while True:
+            impl = self._get_impl()
+
+            try:
+                return f(impl)
+            except ServiceUnavailable:
+                with self._lock:
+                    try:
+                        self._good.remove(impl)
+                    except ValueError:
+                        pass
+                    else:
+                        self._bad.append(impl)
+
+    def Popen(self, *args, **kwargs):
+        def do(impl):
+            return impl.Popen(*args, **kwargs)
+        return self._do(do)
 
     def start(self, *args, **kwargs):
-        return self._get_impl().start(*args, **kwargs)
+        def do(impl):
+            return impl.start(*args, **kwargs)
+        return self._do(do)
+
+    #def stop(self):
+        #self._good = []
+        #self._bad  = []
+
+class RunnerPoolNaive(object):
+    def __init__(self, size):
+        self._good = [Runner() for _ in xrange(size)]
+        self._counter = 0
+
+    def _get_impl(self):
+        self._counter += 1
+        return self._good[self._counter % len(self._good)]
 
     def Popen(self, *args, **kwargs):
         return self._get_impl().Popen(*args, **kwargs)
 
-    def stop(self):
-        last_exc = None
-        while len(self._impls):
-            impl = self._impls.pop()
-            try:
-                impl.stop()
-            except Exception as e:
-                last_exc = e
-        if e:
-            raise e
+    def start(self, *args, **kwargs):
+        return self._get_impl().start(*args, **kwargs)
 
 DEFAULT_RUNNER = None
 
@@ -847,6 +921,7 @@ def ResetDefaultRunner(size=1):
     if size <= 0:
         raise ValueError("size must be greater than 0");
 
+    DEFAULT_RUNNER = None
     DEFAULT_RUNNER = Runner() if size == 1 else RunnerPool(size)
 
 def DestroyDefaultRunner():
