@@ -4,7 +4,7 @@ import os
 import logging
 import time
 
-from rem.osspec import gettid
+from rem.osspec
 
 PROFILING_DIR = None
 HAS_PRCTL = False
@@ -27,6 +27,9 @@ def __init():
         os.mkdir(PROFILING_DIR)
 
 __init()
+
+def gettid():
+    return rem.osspec.gettid() or 0
 
 class ProfiledThread(threading.Thread):
     def __init__(self, *args, **kwargs):

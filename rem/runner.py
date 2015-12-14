@@ -840,7 +840,7 @@ def Runner():
         os.close(child_err_wr)
         channel_child.close()
         del channel_child
-        logging.debug("_Server pid = %s" % pid)
+        logging.info("_Server pid = %s" % pid)
         return _Client(pid, channel_parent) # child_err_rd
     else:
         try:
