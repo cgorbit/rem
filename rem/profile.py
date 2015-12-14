@@ -4,7 +4,7 @@ import os
 import logging
 import time
 
-from rem.osspec
+import rem.osspec
 
 PROFILING_DIR = None
 HAS_PRCTL = False
