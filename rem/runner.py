@@ -747,8 +747,8 @@ class _Client(object):
         logging.debug('_Client._read_loop finished')
 
 
-def dup2file(filename, newfd, flags):
-    oldfd = os.open(filename, flags)
+def dup2file(filename, newfd, flags, mode=0666):
+    oldfd = os.open(filename, flags, mode)
     os.dup2(oldfd, newfd)
     os.close(oldfd)
 
