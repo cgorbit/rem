@@ -894,9 +894,9 @@ class RunnerPool(object):
             return impl.start(*args, **kwargs)
         return self._do(do)
 
-    #def stop(self):
-        #self._good = []
-        #self._bad  = []
+    def stop(self):
+        self._good = []
+        self._bad  = []
 
 class RunnerPoolNaive(object):
     def __init__(self, size):
