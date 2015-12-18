@@ -135,7 +135,9 @@ def logging_info(*args):
 class _Server(object):
     def __init__(self, channel):
         self._sig_chld_handler_pid = os.getpid() # #9535
+
         signal.signal(signal.SIGCHLD, self._sig_chld_handler)
+
         for sig in [signal.SIGINT, signal.SIGTERM]:
             signal.signal(sig, signal.SIG_IGN)
 
@@ -912,6 +914,97 @@ class RunnerPoolNaive(object):
 
     def start(self, *args, **kwargs):
         return self._get_impl().start(*args, **kwargs)
+
+    def stop():
+        self._good = []
+
+class ScopedVal(object):
+    def __init__(self, val):
+        self._val = val
+
+    def __enter__(self):
+        return self._val
+
+    def __exit__(self, *args):
+        pass
+
+class BrokenRunner(object):
+    def Popen(self, *args, **kwargs):
+        raise ServiceUnavailable()
+
+    def start(self, *args, **kwargs):
+        raise ServiceUnavailable()
+
+    def stop():
+        pass
+
+class FallbackkedRunner(object):
+    def __init__(self, backend):
+        self._backend = backend
+        self._broken = False
+
+    def Popen(self, *args, **kwargs):
+        if self._broken:
+            return self._Popen_fallback(*args, **kwargs)
+
+        try:
+            return self._backend.Popen(*args, **kwargs)
+        except ServiceUnavailable:
+            self._broken = True
+            return self._Popen_fallback(*args, **kwargs)
+
+    def _Popen_fallback(self, *args, **kwargs):
+        logging.error("using fallback # TODO")
+
+        stdin_content = kwargs.pop('stdin_content', None)
+
+        task = NewTaskParamsMessage(*args, **kwargs)
+
+        def file_or_none(file):
+            if file is None:
+                return ScopedVal(None)
+            elif isinstance(file, str):
+                return open(file, 'r')
+            else:
+                raise ValueError()
+
+        class NamedTemporaryFileWithContent(object):
+            def __init__(self, content):
+                self._file = NamedTemporaryFile()
+                self._file.write(content)
+                self._file.flush()
+
+            def __enter__(self):
+                return self._file.__enter__()
+
+            def __exit__(self, *args):
+                self._file.__exit__(*args)
+
+        stdin_mgr = NamedTemporaryFileWithContent(stdin_content) \
+            if stdin_content is not None \
+            else file_or_none(task.stdin)
+
+        with stdin_mgr as stdin:
+            with file_or_none(task.stdout) as stdout:
+                with file_or_none(task.stderr) as stderr:
+                    refl=dict(
+                        args=task.args,
+                        stdin=stdin,
+                        stdout=stdout,
+                        stderr=stderr,
+                        preexec_fn=os.setpgrp if task.setpgrp else None,
+                        cwd=task.cwd,
+                        shell=task.shell
+                    )
+                    logging.error(repr(refl))
+                    #return subprocess.Popen(refl)
+                    return refl
+
+    def start(self, *args, **kwargs):
+        raise NotImplementedError() # FIXME
+
+    def stop(self):
+        self._backend.stop()
 
 DEFAULT_RUNNER = None
 
