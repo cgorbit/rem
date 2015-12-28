@@ -481,8 +481,28 @@ class Scheduler(Unpickable(lock=PickableRLock,
         for pck in produce_packets_to_wait():
             self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
 
+        ctx = self.context
         for pck in produce_packets_to_reinit():
-            pck.Reinit(self.context)
+            dir = None
+            if pck.directory:
+                dir = pck.directory
+            elif pck.id:
+                dir = os.path.join(ctx.packets_directory, pck.id)
+
+            # FIXME links in pck
+            pck.id = None
+            pck.directory = None
+
+            if dir and os.path.isdir(dir):
+                try:
+                    shutil.rmtree(dir, onerror=None)
+                except:
+                    pass
+
+            try:
+                pck.Reinit(ctx)
+            except Exception as e:
+                logging.exception("Can't Reinit packet %s %s" % (pck.name, pck.id))
 
     def RegisterQueues(self, qRef):
         for q in qRef.itervalues():
