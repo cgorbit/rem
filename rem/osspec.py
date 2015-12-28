@@ -10,6 +10,7 @@ import sys
 import time
 
 import fork_locking
+from fork_locking import gettid
 
 def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
     exception_list = exception_list or []

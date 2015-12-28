@@ -16,6 +16,7 @@ from rem import constants, osspec
 from rem import traced_rpc_method
 from rem import CheckEmailAddress, DefaultContext, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
 from rem import AsyncXMLRPCServer
+from rem.profile import ProfiledThread
 
 
 class DuplicatePackageNameException(Exception):
@@ -351,6 +352,7 @@ class RemServer(object):
         self.readonly = readonly
         self.allow_backup_method = allow_backup_method
         self.rpcserver = AsyncXMLRPCServer(poolsize, ("", port), AuthRequestHandler, allow_none=True)
+        self.port = port
         self.rpcserver.register_multicall_functions()
         self.register_all_functions()
 
@@ -416,7 +418,7 @@ class RemServer(object):
         self.xmlrpcworkers = [XMLRPCWorker(self.rpcserver.requests, self.rpcserver.process_request_thread)
                               for _ in xrange(self.rpcserver.poolsize)]
         self.alive = True
-        self.main_thread = threading.Thread(target=self.request_processor)
+        self.main_thread = ProfiledThread(target=self.request_processor, name_prefix='Listen-%d' % self.port)
         for worker in self.xmlrpcworkers:
             worker.start()
         self.main_thread.start()

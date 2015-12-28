@@ -17,6 +17,12 @@ if 'DUMMY_FORK_LOCKING' not in os.environ:
 else:
     import _dummy_fork_locking as _fork_locking
 
+try:
+    gettid = _fork_locking.gettid
+except AttributeError:
+    def gettid():
+        return None
+
 def acquire_lock(lock, blocking=True):
     if not blocking:
         raise RuntimeError("Non-blocking acquire not implemented")

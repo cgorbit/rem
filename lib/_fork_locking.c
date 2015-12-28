@@ -19,6 +19,11 @@
   #error No tls for your architecture
 #endif
 
+#if defined(__linux__)
+  #include <unistd.h>
+  #include <sys/syscall.h>
+#endif
+
 typedef unsigned char bool;
 #define false 0
 #define true 1
@@ -196,6 +201,23 @@ set_debug_fd(PyObject *self, PyObject *args)
 }
 #endif
 
+#if defined(__linux__)
+static inline pid_t gettid() {
+    return syscall(SYS_gettid);
+}
+#endif
+
+static PyObject *
+Py_gettid(PyObject *self)
+{
+    (void)self;
+#if defined(__linux__)
+    return PyInt_FromLong(gettid());
+#else
+    Py_RETURN_NONE;
+#endif
+}
+
 static PyMethodDef module_methods[] = {
     {"acquire_fork",  (PyCFunction)acquire_fork, METH_NOARGS, NULL},
     {"release_fork",  (PyCFunction)release_fork, METH_NOARGS, NULL},
@@ -204,6 +226,9 @@ static PyMethodDef module_methods[] = {
 #if DEBUG_FORK_LOCKS
     {"set_debug_fd",  (PyCFunction)set_debug_fd, METH_VARARGS, NULL},
 #endif
+
+    {"gettid",        (PyCFunction)Py_gettid, METH_NOARGS, NULL},
+
     {NULL,            NULL,                      0,           NULL}
 };
 

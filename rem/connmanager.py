@@ -1,5 +1,4 @@
 #coding: utf-8
-import threading
 import select
 import bsddb3
 from ConfigParser import ConfigParser
@@ -11,6 +10,7 @@ from xmlrpcmethodnotsupported import ServerProxy as XMLRPCServerProxy, XMLRPCMet
 from common import *
 from callbacks import Tag, ICallbackAcceptor, TagEvent
 from rpcserver import SimpleXMLRPCServer
+from rem.profile import ProfiledThread
 
 PROTOCOL_VERSION = 2
 
@@ -342,7 +342,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
         self.alive = True
         self.InitXMLRPCServer()
-        threading.Thread(target=self.ServerLoop).start()
+        ProfiledThread(target=self.ServerLoop, name_prefix='ConnManager').start()
 
         for client in self.topologyInfo.servers.values():
             self.scheduler.ScheduleTaskT(0, self.SendData, client, skip_logging=True)

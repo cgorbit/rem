@@ -4,13 +4,13 @@ import logging
 import os
 import time
 import datetime
-import threading
 
 from callbacks import CallbackHolder
 from common import FuncRunner, SendEmail, Unpickable, safeint, nullobject, zeroint
 import osspec
 import packet
 import constants
+from rem.profile import ProfiledThread
 
 DUMMY_COMMAND_CREATOR = None
 
@@ -144,7 +144,11 @@ class Job(Unpickable(err=nullobject,
 
     def __wait_process(self, process, err_pipe):
         out = []
-        stderrReadThread = threading.Thread(target=Job.__read_stream, args=(err_pipe, out))
+        stderrReadThread = ProfiledThread(
+            target=Job.__read_stream,
+            args=(err_pipe, out),
+            name_prefix='StdErr',
+        )
         stderrReadThread.setDaemon(True)
         stderrReadThread.start()
         if process.stdin:
