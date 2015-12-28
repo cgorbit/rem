@@ -1,0 +1,29 @@
+In [15]: states
+Out[15]: 
+{'CREATED': [70],
+ 'ERROR': [3154],
+ 'HISTORIED': [18],
+ 'PENDING': [500],
+ 'SUCCESSFULL': [419404],
+ 'SUSPENDED': [122298],
+ 'WAITING': [6],
+ 'WORKABLE': [234]}
+
+In [16]: quit
+_Server._write_loop append(StopServiceResponseMessage)
+argument must have 'write' attributeException RuntimeError: RuntimeError('Runner.Server process exited abnormally 512',) in <bound method _Client.__del__ of <rem.runner._Client object at 0x1c42110>> ignored
+Exception in thread RunnerClnRd-3:
+Traceback (most recent call last):
+  File "/usr/lib/python2.7/threading.py", line 551, in __bootstrap_inner
+    self.run()
+  File "rem/profile.py", line 60, in run
+    func()
+  File "/usr/lib/python2.7/threading.py", line 504, in run
+    self.__target(*self.__args, **self.__kwargs)
+  File "rem/runner.py", line 513, in run
+    return func(obj)
+  File "rem/runner.py", line 541, in impl
+    self._fail()
+ReferenceError: weakly-referenced object no longer exists
+
+^C^\^C^\^C^\^C^\^C^\^CQuit
