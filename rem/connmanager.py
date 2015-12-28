@@ -432,8 +432,8 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     @traced_rpc_method()
     def set_client_version(self, clientname, version):
-        logging.debug("set client version for %s to %s", (clientname, version))
         self.topologyInfo.GetClient(clientname, checkname=True).SetVersion(int(version))
+        logging.debug("set client version for %s to %s", clientname, version)
         return True
 
     @traced_rpc_method()
