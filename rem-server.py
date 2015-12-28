@@ -425,7 +425,8 @@ class RemServer(object):
 
     def stop(self):
         self.alive = False
-        map(lambda worker: worker.Kill(), self.xmlrpcworkers)
+        for w in self.xmlrpcworkers:
+            w.Kill()
 
 
 class RemDaemon(object):
@@ -464,17 +465,30 @@ class RemDaemon(object):
 
     def signal_handler(self, signum, frame):
         logging.warning("rem-server\tsignal %s has gotten", signum)
+        self.stop()
+
+    def stop(self):
         if self.scheduler.alive:
+            logging.debug("rem-server\tenter_stop")
+
             self.permitFinalBackup = False
+
             for server in self.api_servers:
                 server.stop()
+            logging.debug("rem-server\trpc_stopped")
+
             if self.timeWorker:
                 self.timeWorker.Kill()
+            logging.debug("rem-server\ttime_worker_stopped")
+
             self.scheduler.Stop()
             for method in [ThreadJobWorker.Suspend, ThreadJobWorker.Kill, ThreadJobWorker.join]:
                 for worker in self.regWorkers:
                     method(worker)
+            logging.debug("rem-server\tworkers_stopped")
+
             self.permitFinalBackup = True
+
             import multiprocessing
             logging.debug("%s children founded after custom kill", len(multiprocessing.active_children()))
             for proc in multiprocessing.active_children():
@@ -571,9 +585,16 @@ def scheduler_test():
 
 if __name__ == "__main__":
     _context = DefaultContext()
+
     osspec.set_process_title("[remd]%s" % ((" at " + _context.network_name) if _context.network_name else ""))
+
+    logging.debug("rem-server\tbefore_create_scheduler")
     _scheduler = CreateScheduler(_context)
+    logging.debug("rem-server\tafter_create_scheduler")
+
     if _context.execMode == "test":
         scheduler_test()
     elif _context.execMode == "start":
         RemDaemon(_scheduler, _context).start()
+
+    logging.debug("rem-server\texit_main")
