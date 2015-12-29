@@ -1,15 +1,15 @@
 #coding: utf-8
 import select
+import socket
 import bsddb3
 from ConfigParser import ConfigParser
 import cPickle
 import subprocess
 from collections import deque
 
-from xmlrpcmethodnotsupported import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported
+from xmlrpc import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported, SimpleXMLRPCServer
 from common import *
 from callbacks import Tag, ICallbackAcceptor, TagEvent
-from rpcserver import SimpleXMLRPCServer
 from rem.profile import ProfiledThread
 
 PROTOCOL_VERSION = 2
@@ -57,6 +57,7 @@ class ClientInfo(Unpickable(events=Deque,
                             active=(bool, True))):
     MAX_TAGS_BULK = 100
     PENALTY_FACTOR = 6
+    SOCKET_TIMEOUT = 60.0
 
     def __init__(self, *args, **kws):
         getattr(super(ClientInfo, self), "__init__")(*args, **kws)
@@ -64,7 +65,8 @@ class ClientInfo(Unpickable(events=Deque,
         self.lastError = None
 
     def Connect(self):
-        self.connection = XMLRPCServerProxy(self.systemUrl, allow_none=True)
+        self.connection = XMLRPCServerProxy(self.systemUrl, allow_none=True,
+                                            timeout=self.SOCKET_TIMEOUT)
 
     def RegisterTagEvent(self, tag, event, message=None):
         self.events.push((tag, event, message))
@@ -168,7 +170,7 @@ class ClientInfo(Unpickable(events=Deque,
 
             self.errorsCnt = 0
             logging.debug("SendData to %s: ok", self.name)
-        except IOError as e:
+        except (IOError, socket.timeout) as e:
             logging.warning("SendData to %s: failed: %s", self.name, e)
             self.lastError = e
             self.errorsCnt += 1
