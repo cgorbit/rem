@@ -9,7 +9,7 @@ from collections import deque
 
 from xmlrpc import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported, SimpleXMLRPCServer
 from common import *
-from callbacks import Tag, ICallbackAcceptor, TagEvent
+from callbacks import Tag, ICallbackAcceptor, TagEvent, TagEventName
 from rem.profile import ProfiledThread
 
 PROTOCOL_VERSION = 2
@@ -397,12 +397,12 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         with self.lock: # see register_share
             acceptors = self.acceptors.get(tagname)
             if acceptors:
-                logging.debug("ondone connmanager %s with acceptors list %s", tagname, acceptors)
+                logging.debug("on %s connmanager %s with acceptors list %s", TagEventName[event], tagname, acceptors)
                 for clientname in acceptors:
                     self.RegisterTagEventForClient(clientname, tagname, event, message)
 
     def RegisterTagEventForClient(self, clientname, tagname, event, message=None):
-        logging.debug("set remote tag %s on host %s", tagname, clientname)
+        logging.debug("%s remote tag %s on host %s", TagEventName[event], tagname, clientname)
         client = self.topologyInfo.GetClient(clientname, checkname=False)
         if client is None:
             logging.error("unknown client %s appeared", clientname)
@@ -444,9 +444,10 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     @traced_rpc_method()
     def register_tags_events(self, events):
-        logging.debug("update %d remote tags", len(events))
+        logging.debug("update %d remote tags: %s", len(events), events)
         for event in events:
             self.scheduler.tagRef.AcquireTag(event[0]).CheckRemote()._Modify(*event[1:])
+            logging.debug("done with: %s", event)
         return True
 
     @traced_rpc_method()

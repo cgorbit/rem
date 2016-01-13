@@ -8,6 +8,12 @@ class TagEvent(object):
     Set   = 1
     Reset = 2
 
+TagEventName = {
+    TagEvent.Unset: 'unset',
+    TagEvent.Set:   'set',
+    TagEvent.Reset: 'reset',
+}
+
 class ICallbackAcceptor(object):
     def AcceptCallback(self, reference, event):
         methName = "On" + event.title().replace("_", "")
@@ -67,18 +73,18 @@ class Tag(CallbackHolder):
         return self.done
 
     def _Set(self):
-        logging.debug("tag %s\tset", self.name)
+        logging.debug("tag %s\tset", self.GetFullname())
         self.done = True
         self.FireEvent("done")
 
     def _Unset(self):
         """unset function without event firing"""
-        logging.debug("tag %s\tunset", self.name)
+        logging.debug("tag %s\tunset", self.GetFullname())
         self.done = False
         self.FireEvent("undone")
 
     def _Reset(self, message):
-        logging.debug("tag %s\treset", self.name)
+        logging.debug("tag %s\treset", self.GetFullname())
         self.done = False
         self.FireEvent("reset", (self, message))
 

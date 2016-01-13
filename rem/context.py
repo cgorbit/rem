@@ -4,7 +4,18 @@ import os
 import time
 from ConfigParser import ConfigParser, NoOptionError
 import codecs
+import rem.osspec
+import thread
 
+if rem.osspec.gettid():
+    gettid = rem.osspec.gettid
+else:
+    gettid = thread.get_ident
+
+class LogFormatter(logging.Formatter):
+    def format(self, record):
+        record.thread_id = gettid()
+        return logging.Formatter.format(self, record)
 
 class StableRotateFileHandler(logging.handlers.TimedRotatingFileHandler):
     REOPEN_TM = 60
@@ -102,7 +113,7 @@ class Context(object):
             logHandler = StableRotateFileHandler(
                 os.path.join(self.logs_directory, config.get("log", "filename")),
                 when="midnight", backupCount=config.getint("log", "rollcount"))
-            logHandler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-8s %(module)s:\t%(message)s"))
+            logHandler.setFormatter(LogFormatter("%(asctime)s %(thread_id)s %(levelname)-8s %(module)s:\t%(message)s"))
             logger.addHandler(logHandler)
         logger.setLevel(logLevel)
 
