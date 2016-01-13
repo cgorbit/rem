@@ -444,10 +444,11 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     @traced_rpc_method()
     def register_tags_events(self, events):
-        logging.debug("update %d remote tags: %s", len(events), events)
+        logging.debug("register_tags_events %d: %s", len(events), events)
         for event in events:
             self.scheduler.tagRef.AcquireTag(event[0]).CheckRemote()._Modify(*event[1:])
             logging.debug("done with: %s", event)
+        logging.debug("register_tags_events %d: done", len(events))
         return True
 
     @traced_rpc_method()
@@ -487,6 +488,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     @traced_rpc_method()
     def register_share(self, tags, clientname):
+        logging.debug("register_share %d tags for %s: %s", len(tags), clientname, tags)
         for tagname in tags:
             # XXX
             # 1. this lock only guarantee eventual-consistency of tag's history
@@ -496,6 +498,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                 self.acceptors.add(tagname, clientname)
                 if self.scheduler.tagRef.CheckTag(tagname):
                     self.RegisterTagEventForClient(clientname, tagname, TagEvent.Set)
+        logging.debug("register_share %d tags for %s: done", len(tags), clientname)
 
     @traced_rpc_method()
     def unregister_share(self, tagname, clientname):

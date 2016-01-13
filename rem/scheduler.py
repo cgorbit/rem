@@ -413,6 +413,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             tagStorage = self.tagRef
             for pck in packets:
+                pck.working.clear()
                 pck.VivifyDoneTagsIfNeed(tagStorage)
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
