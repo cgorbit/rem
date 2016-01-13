@@ -11,6 +11,8 @@ import threading
 from SimpleXMLRPCServer import SimpleXMLRPCRequestHandler
 import xmlrpclib
 import datetime
+import multiprocessing
+import signal
 
 from rem import constants, osspec
 from rem import traced_rpc_method
@@ -428,9 +430,17 @@ class RemServer(object):
         for w in self.xmlrpcworkers:
             w.Kill()
 
+def wait_cond_in_sleep(cond, deadline=None):
+    while not (cond.is_set() or deadline and time.time() > deadline):
+        time.sleep(1)
+    return cond.is_set()
 
 class RemDaemon(object):
     def __init__(self, scheduler, context):
+        self._started = threading.Event()
+        self._should_stop = threading.Event()
+        self._stopped = threading.Event()
+
         threading.stack_size()
 
         self.scheduler = scheduler
@@ -447,58 +457,73 @@ class RemDaemon(object):
         self.regWorkers = []
         self.timeWorker = None
 
-    def process_backups(self):
-        nextBackupTime = time.time() + self.scheduler.backupPeriod
-        while self.scheduler.alive:
-            if time.time() >= nextBackupTime:
-                try:
-                    self.scheduler.RollBackup()
-                except:
-                    pass
+        self._start()
 
-                nextBackupTime = time.time() + self.scheduler.backupPeriod
+    def _backups_loop(self):
+        while True:
+            nextBackupTime = time.time() + self.scheduler.backupPeriod
 
-                logging.debug("rem-server\tnext backup time: %s" \
-                    % datetime.datetime.fromtimestamp(nextBackupTime).strftime('%H:%M'))
+            logging.debug("rem-server\tnext backup time: %s" \
+                % datetime.datetime.fromtimestamp(nextBackupTime).strftime('%H:%M'))
 
-            time.sleep(max(self.scheduler.backupPeriod, 0.01))
+            # Don't sleep in 50ms in threading.py, accuracy here is not important
+            if wait_cond_in_sleep(self._should_stop, deadline=nextBackupTime):
+                return
 
-    def signal_handler(self, signum, frame):
-        logging.warning("rem-server\tsignal %s has gotten", signum)
-        self.stop()
+            try:
+                self.scheduler.RollBackup()
+            except:
+                pass
 
-    def stop(self):
-        if self.scheduler.alive:
-            logging.debug("rem-server\tenter_stop")
+    def wait(self):
+        wait_cond_in_sleep(self._should_stop) # To handle signals
+        self._stopped.wait()
 
-            self.permitFinalBackup = False
+    def stop(self, wait=True):
+        self._started.wait()
 
-            for server in self.api_servers:
-                server.stop()
-            logging.debug("rem-server\trpc_stopped")
+        self._should_stop.set()
 
-            if self.timeWorker:
-                self.timeWorker.Kill()
-            logging.debug("rem-server\ttime_worker_stopped")
+        if wait:
+            self._stopped.wait()
 
-            self.scheduler.Stop()
-            for method in [ThreadJobWorker.Suspend, ThreadJobWorker.Kill, ThreadJobWorker.join]:
-                for worker in self.regWorkers:
-                    method(worker)
-            logging.debug("rem-server\tworkers_stopped")
+    def _run(self):
+        self._should_stop.wait()
+        self._stop()
 
-            self.permitFinalBackup = True
+        logging.debug("rem-server\tstart_final_backup")
+        self.scheduler.RollBackup()
 
-            import multiprocessing
-            logging.debug("%s children founded after custom kill", len(multiprocessing.active_children()))
-            for proc in multiprocessing.active_children():
-                proc.terminate()
+        logging.debug("rem-server\tstopped")
+        self._stopped.set()
 
-        else:
-            logging.warning("rem-server\talredy dead scheduler, wait for a minute")
+    def _stop(self):
+        logging.debug("rem-server\tenter_stop")
 
-    def start_workers(self):
-        self.permitFinalBackup = False
+        for server in self.api_servers:
+            server.stop()
+        logging.debug("rem-server\trpc_stopped")
+
+        if self.timeWorker:
+            self.timeWorker.Kill()
+        logging.debug("rem-server\ttime_worker_stopped")
+
+        self.scheduler.Stop()
+
+        for method in [ThreadJobWorker.Suspend, ThreadJobWorker.Kill, ThreadJobWorker.join]:
+            for worker in self.regWorkers:
+                method(worker)
+        logging.debug("rem-server\tworkers_stopped")
+
+        logging.debug("rem-server\tstart_wait_backups_thread")
+        self._backups_thread.join()
+        logging.debug("rem-server\tfinish_wait_backups_thread")
+
+        logging.debug("%s children founded after custom kill", len(multiprocessing.active_children()))
+        for proc in multiprocessing.active_children():
+            proc.terminate()
+
+    def _start_workers(self):
         self.scheduler.Start()
         self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self.scheduler.poolSize)]
         self.timeWorker = TimeTicker()
@@ -506,25 +531,23 @@ class RemDaemon(object):
         for worker in self.regWorkers + [self.timeWorker]:
             worker.start()
 
-    def start(self):
-        osspec.reg_signal_handler(signal.SIGINT, self.signal_handler)
-        osspec.reg_signal_handler(signal.SIGTERM, self.signal_handler)
-
-        self.start_workers()
+    def _start(self):
+        self._start_workers()
 
         for server in self.api_servers:
             server.start()
 
         threading.stack_size(256 << 10) # for rem.job stderr readers
 
+        self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")
+        self._backups_thread.start()
+
+        self._run_thread = ProfiledThread(target=self._run, name_prefix="Daemon")
+        self._run_thread.start()
+
         logging.debug("rem-server\tall_started")
 
-        self.process_backups()
-
-        while not self.permitFinalBackup:
-            time.sleep(0.01)
-
-        self.scheduler.RollBackup()
+        self._started.set()
 
 
 def scheduler_test():
@@ -582,6 +605,33 @@ def scheduler_test():
         runner, runtm = sc.schedWatcher.tasks.get()
         print runtm, runner
 
+def run_daemon(ctx, sched):
+    should_stop = [False]
+
+    def signal_handler0(signum, frame):
+        logging.warning("rem-server\tsignal %s has gotten", signum)
+        should_stop[0] = True
+
+    def set_handler(handler):
+        for sig in [signal.SIGINT, signal.SIGTERM]:
+            signal.signal(sig, handler)
+
+    set_handler(signal_handler0)
+
+    daemon = RemDaemon(sched, ctx)
+
+    def signal_handler1(signum, frame):
+        logging.warning("rem-server\tsignal %s has gotten", signum)
+        daemon.stop(wait=False)
+
+    set_handler(signal_handler1)
+
+    if should_stop[0]:
+        daemon.stop(wait=False)
+
+    daemon.wait()
+
+    set_handler(signal.SIG_DFL)
 
 if __name__ == "__main__":
     _context = DefaultContext()
@@ -594,7 +644,8 @@ if __name__ == "__main__":
 
     if _context.execMode == "test":
         scheduler_test()
+
     elif _context.execMode == "start":
-        RemDaemon(_scheduler, _context).start()
+        run_daemon(_context, _scheduler)
 
     logging.debug("rem-server\texit_main")
