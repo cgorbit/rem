@@ -57,7 +57,11 @@ class ClientInfo(Unpickable(events=Deque,
                             active=(bool, True))):
     MAX_TAGS_BULK = 100
     PENALTY_FACTOR = 6
-    SOCKET_TIMEOUT = 60.0
+
+    # TODO Use finite timeout after async events will be implemented here
+    # TagEvent.Reset may be slow (specially on perun)
+    #SOCKET_TIMEOUT = 60.0
+    SOCKET_TIMEOUT = socket._GLOBAL_DEFAULT_TIMEOUT
 
     def __init__(self, *args, **kws):
         getattr(super(ClientInfo, self), "__init__")(*args, **kws)
