@@ -507,10 +507,11 @@ class Bool(object):
 
 def fail_on_error(func):
     def impl(self):
+        fail = self._fail
         try:
             func(self)
         except:
-            self._fail()
+            fail()
             raise
 
     impl.__name__ = func.__name__
