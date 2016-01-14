@@ -348,7 +348,7 @@ def get_backupable_state():
 def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
 
-class RemServer(object):
+class ApiServer(object):
     def __init__(self, port, poolsize, scheduler, allow_backup_method=False, readonly=False):
         self.scheduler = scheduler
         self.readonly = readonly
@@ -445,11 +445,11 @@ class RemDaemon(object):
 
         self.scheduler = scheduler
         self.api_servers = [
-            RemServer(context.manager_port, context.xmlrpc_pool_size, scheduler,
+            ApiServer(context.manager_port, context.xmlrpc_pool_size, scheduler,
                       allow_backup_method=context.allow_backup_rpc_method)
         ]
         if context.manager_readonly_port:
-            self.api_servers.append(RemServer(context.manager_readonly_port,
+            self.api_servers.append(ApiServer(context.manager_readonly_port,
                                               context.readonly_xmlrpc_pool_size,
                                               scheduler,
                                               allow_backup_method=context.allow_backup_rpc_method,
@@ -515,9 +515,9 @@ class RemDaemon(object):
                 method(worker)
         logging.debug("rem-server\tworkers_stopped")
 
-        logging.debug("rem-server\tstart_wait_backups_thread")
+        logging.debug("rem-server\tbefore_backups_thread_join")
         self._backups_thread.join()
-        logging.debug("rem-server\tfinish_wait_backups_thread")
+        logging.debug("rem-server\tafter_backups_thread_join")
 
         logging.debug("%s children founded after custom kill", len(multiprocessing.active_children()))
         for proc in multiprocessing.active_children():
@@ -608,20 +608,23 @@ def scheduler_test():
 def run_daemon(ctx, sched):
     should_stop = [False]
 
-    def signal_handler0(signum, frame):
-        logging.warning("rem-server\tsignal %s has gotten", signum)
-        should_stop[0] = True
+    def _log_signal(sig):
+        logging.warning("rem-server\tsignal %s has gotten", sig)
 
     def set_handler(handler):
         for sig in [signal.SIGINT, signal.SIGTERM]:
             signal.signal(sig, handler)
 
+    def signal_handler0(sig, frame):
+        _log_signal(sig)
+        should_stop[0] = True
+
     set_handler(signal_handler0)
 
     daemon = RemDaemon(sched, ctx)
 
-    def signal_handler1(signum, frame):
-        logging.warning("rem-server\tsignal %s has gotten", signum)
+    def signal_handler1(sig, frame):
+        _log_signal(sig)
         daemon.stop(wait=False)
 
     set_handler(signal_handler1)
