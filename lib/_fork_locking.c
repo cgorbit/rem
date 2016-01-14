@@ -3,6 +3,7 @@
 #endif
 
 #include <pthread.h>
+#include <sys/time.h>
 
 #include <Python.h>
 
@@ -28,12 +29,17 @@ typedef unsigned char bool;
 #define false 0
 #define true 1
 
-#define DEBUG_FORK_LOCKS 0
+#define NO_TIMEOUT -1
+
+#define DEBUG_FORK_LOCKS 1
 
 #if DEBUG_FORK_LOCKS
 extern void fld_write_debug(const char* str, size_t len);
 extern void fld_set_debug_fd(int fd);
 extern void fld_add_acquire_time_point(size_t locked_thread_count);
+extern void fld_write_int(size_t);
+extern void fld_thread_release_all_locks();
+extern void fld_thread_has_acquired_locks();
 #endif
 
 #if DEBUG_FORK_LOCKS
@@ -44,29 +50,63 @@ extern void fld_add_acquire_time_point(size_t locked_thread_count);
 
 POD_STATIC_THREAD(size_t) thread_lock_count = 0;
 
-static volatile size_t forking = false;
+enum {
+    FS_NONE = 0,
+    FS_ACQUIRING,
+    FS_LOCKS_PARTIALLY_DISABLED, // TODO Rename
+    FS_FORKING,
+};
+
+static const char* FORK_STATE_NAME[] = {
+    "NONE",
+    "ACQUIRING",
+    "LOCKS_PARTIALLY_DISABLED",
+    "FORKING",
+};
+
+static volatile size_t fork_state = FS_NONE;
 static volatile size_t locked_thread_count = 0;
 
 static pthread_mutex_t lock;
 
 static pthread_cond_t all_locks_released;
-static pthread_cond_t fork_finished;
+static pthread_cond_t fork_state_changed;
+
+static size_t FORK_FRIENDLY_ACQUIRE_TIMEOUT = NO_TIMEOUT;
 
 
 static inline void
-_wait_for(pthread_mutex_t* lock, pthread_cond_t* cond, volatile size_t* value, size_t expected) {
+_wait_for(pthread_mutex_t* lock, pthread_cond_t* cond, volatile size_t* value, size_t expected, int timeout) {
     if (*value == expected) {
         return;
     }
 
+    struct timespec deadline;
+    bool with_timeout = timeout != NO_TIMEOUT;
+
+    if (with_timeout) {
+        struct timeval now;
+        gettimeofday(&now, 0);
+        deadline.tv_sec = now.tv_sec + timeout;
+        deadline.tv_nsec = now.tv_usec * 1000;
+    }
+
     pthread_mutex_lock(lock);
     while (*value != expected) {
-        Py_BEGIN_ALLOW_THREADS
+        PyThreadState *_save;
+        Py_UNBLOCK_THREADS
 
-        pthread_cond_wait(cond, lock);
+        int ret = with_timeout
+            ? pthread_cond_timedwait(cond, lock, &deadline)
+            : pthread_cond_wait(cond, lock);
         pthread_mutex_unlock(lock);
 
-        Py_END_ALLOW_THREADS
+        Py_BLOCK_THREADS
+
+        if (with_timeout && ret == ETIMEDOUT) {
+            return;
+        }
+
         pthread_mutex_lock(lock);
     }
     pthread_mutex_unlock(lock);
@@ -75,12 +115,20 @@ _wait_for(pthread_mutex_t* lock, pthread_cond_t* cond, volatile size_t* value, s
 static inline bool
 _acquire_fork(void)
 {
-    if (forking) {
+    if (fork_state != FS_NONE) {
         return false;
     }
 
-    _wait_for(&lock, &all_locks_released, &locked_thread_count, 0);
-    forking = true;
+    fork_state = FS_ACQUIRING;
+
+    _wait_for(&lock, &all_locks_released, &locked_thread_count, 0, FORK_FRIENDLY_ACQUIRE_TIMEOUT);
+
+    if (locked_thread_count) {
+        fork_state = FS_LOCKS_PARTIALLY_DISABLED;
+        _wait_for(&lock, &all_locks_released, &locked_thread_count, 0, NO_TIMEOUT);
+    }
+
+    fork_state = FS_FORKING;
 
     return true;
 }
@@ -88,15 +136,15 @@ _acquire_fork(void)
 static inline bool
 _release_fork(void)
 {
-    if (!forking) {
+    if (fork_state != FS_FORKING) {
         return false;
     }
 
     pthread_mutex_lock(&lock);
-    forking = false;
+    fork_state = FS_NONE;
     pthread_mutex_unlock(&lock);
 
-    pthread_cond_broadcast(&fork_finished);
+    pthread_cond_broadcast(&fork_state_changed);
 
     return true;
 }
@@ -105,14 +153,22 @@ static inline void
 _acquire_lock(void)
 {
     #if DEBUG_FORK_LOCKS
-    fld_add_acquire_time_point(locked_thread_count);
+    /*fld_add_acquire_time_point(locked_thread_count);*/
     #endif
 
-    _wait_for(&lock, &fork_finished, &forking, 0);
+    if (!thread_lock_count) {
+        if (fork_state != FS_NONE && fork_state != FS_ACQUIRING) {
+            _wait_for(&lock, &fork_state_changed, &fork_state, FS_NONE, NO_TIMEOUT);
+        }
+    }
 
     if (++thread_lock_count == 1) {
         ++locked_thread_count;
+        #if DEBUG_FORK_LOCKS
+        fld_thread_has_acquired_locks();
+        #endif
     }
+/*fld_write_int(thread_lock_count);*/
 }
 
 static inline bool
@@ -132,7 +188,12 @@ _release_lock(void)
         } else {
             --locked_thread_count;
         }
+        #if DEBUG_FORK_LOCKS
+        fld_thread_release_all_locks();
+        #endif
     }
+
+/*fld_write_int(thread_lock_count);*/
 
     return true;
 }
@@ -144,7 +205,7 @@ acquire_fork(PyObject *self)
 
     WRITE_DEBUG("acquire_fork before");
     if (!_acquire_fork()) {
-        PyErr_SetString(PyExc_RuntimeError, "Fork is already locked");
+        PyErr_SetString(PyExc_RuntimeError, "Acquire fork already in progress");
         return NULL;
     }
     WRITE_DEBUG("acquire_fork acquired");
@@ -185,6 +246,50 @@ release_lock(PyObject *self)
     Py_RETURN_NONE;
 }
 
+static PyObject *
+set_fork_friendly_acquire_timeout(PyObject *self, PyObject *args)
+{
+    (void)self;
+    /*PyObject *timeout = NULL;*/
+    int timeout = NO_TIMEOUT;
+
+    if (!PyArg_ParseTuple(args, "i:set_fork_friendly_acquire_timeout", &timeout)) {
+        return NULL;
+    }
+
+    if (timeout < -1) {
+        PyErr_SetString(PyExc_RuntimeError, "Timeout must be None or greater or equal 0");
+        /*Py_CLEAR(timeout);*/
+        return NULL;
+    }
+
+    FORK_FRIENDLY_ACQUIRE_TIMEOUT = timeout;
+    /*Py_CLEAR(timeout);*/
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+get_locked_thread_count(PyObject *self)
+{
+    (void)self;
+    return PyInt_FromLong(locked_thread_count);
+}
+
+static PyObject *
+get_thread_lock_count(PyObject *self)
+{
+    (void)self;
+    return PyInt_FromLong(thread_lock_count);
+}
+
+static PyObject *
+get_fork_state(PyObject *self)
+{
+    (void)self;
+    return PyString_FromString(FORK_STATE_NAME[fork_state]);
+}
+
 #if DEBUG_FORK_LOCKS
 static PyObject *
 set_debug_fd(PyObject *self, PyObject *args)
@@ -196,6 +301,20 @@ set_debug_fd(PyObject *self, PyObject *args)
         return NULL;
 
     fld_set_debug_fd(fd);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *
+write_debug(PyObject *self, PyObject *args)
+{
+    (void)self;
+    const char* string = NULL;
+
+    if (!PyArg_ParseTuple(args, "s:write", &string))
+        return NULL;
+
+    fld_write_debug(string, strlen(string));
 
     Py_RETURN_NONE;
 }
@@ -223,12 +342,16 @@ static PyMethodDef module_methods[] = {
     {"release_fork",  (PyCFunction)release_fork, METH_NOARGS, NULL},
     {"acquire_lock",  (PyCFunction)acquire_lock, METH_NOARGS, NULL},
     {"release_lock",  (PyCFunction)release_lock, METH_NOARGS, NULL},
+    {"get_locked_thread_count",  (PyCFunction)get_locked_thread_count, METH_NOARGS, NULL},
+    {"get_thread_lock_count",  (PyCFunction)get_thread_lock_count, METH_NOARGS, NULL},
+    {"get_fork_state",  (PyCFunction)get_fork_state, METH_NOARGS, NULL},
+    {"set_fork_friendly_acquire_timeout",
+        (PyCFunction)set_fork_friendly_acquire_timeout, METH_VARARGS, NULL},
 #if DEBUG_FORK_LOCKS
     {"set_debug_fd",  (PyCFunction)set_debug_fd, METH_VARARGS, NULL},
+    {"write",  (PyCFunction)write_debug, METH_VARARGS, NULL},
 #endif
-
     {"gettid",        (PyCFunction)Py_gettid, METH_NOARGS, NULL},
-
     {NULL,            NULL,                      0,           NULL}
 };
 
