@@ -605,7 +605,7 @@ class _Client(object):
         return fail
 
     def _wait_stop(self):
-        for w in [self._write_thread, self._write_thread]:
+        for w in [self._read_thread, self._write_thread]:
             t = w()
             if t:
                 t.join()
