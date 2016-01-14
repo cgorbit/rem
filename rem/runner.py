@@ -574,7 +574,7 @@ class _Client(object):
         channel = self._channel
         tasks = self._tasks
 
-# I forgot what for not to clouse on self
+        # Don't closure on self to prevent cycle
         def fail():
             with queue_not_empty:
                 if errored:
