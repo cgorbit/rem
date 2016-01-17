@@ -179,13 +179,7 @@ class _Server(object):
     def __init__(self, channel):
         self._sig_chld_handler_pid = os.getpid() # #9535
 
-        signal.signal(signal.SIGCHLD, self._sig_chld_handler)
-
-        for sig in [signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
-            signal.signal(sig, signal.SIG_IGN)
-
-        for sig in [signal.SIGCHLD, signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
-            signal.siginterrupt(sig, False)
+        self._modify_signals(True)
 
         self._channel = channel
         set_cloexec(self._channel)
@@ -211,6 +205,17 @@ class _Server(object):
         self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='RunnerSrvWr')
         self._read_thread.start()
         self._write_thread.start()
+
+    def _modify_signals(self, set):
+        signal.signal(signal.SIGCHLD, self._sig_chld_handler if set else signal.SIG_DFL)
+
+        act = signal.SIG_IGN if set else signal.SIG_DFL
+        for sig in [signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
+            signal.signal(sig, act)
+
+        restart = bool(set)
+        for sig in [signal.SIGCHLD, signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
+            signal.siginterrupt(sig, not restart)
 
     def wait(self):
         # Fuck Python. Can't wait on mutexes here, because need
@@ -308,6 +313,8 @@ class _Server(object):
 
                 #if executable is None:
                     #executable = args[0]
+
+                self._modify_signals(False)
 
                 os.execvp(args[0], args)
 
