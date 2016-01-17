@@ -88,7 +88,7 @@ class Promise(object):
     def is_set(self):
         return self._state.is_set()
 
-    def get_future(self):
+    def to_future(self):
         return Future(self._state)
 
     def run_and_set(self, code):

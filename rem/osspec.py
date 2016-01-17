@@ -36,7 +36,7 @@ def __get_gettid():
 
 gettid = __get_gettid()
 
-import rem.runner as runner
+import rem.runproc as runproc
 
 def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
     exception_list = exception_list or []
@@ -157,7 +157,7 @@ To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-    sender = runner.Popen(["sendmail"] + map(str, emails), stdin_content=body)
+    sender = runproc.Popen(["sendmail"] + map(str, emails), stdin_content=body)
     return sender.wait()
 
 

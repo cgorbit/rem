@@ -11,7 +11,7 @@ import osspec
 import packet
 import constants
 from rem.profile import ProfiledThread
-import runner
+import runproc
 
 DUMMY_COMMAND_CREATOR = None
 
@@ -184,14 +184,14 @@ class Job(Unpickable(err=nullobject,
             self.tries += 1
             self.working_time = 0
             self.FireEvent("start")
-            startTime = time.localtime()
+            start_time = time.localtime()
 
             run_args = DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
                        else self._make_run_args()
 
             logging.debug("out: %s, in: %s", self.output, self.input)
 
-            process = runner.Popen(
+            process = runproc.Popen(
                 run_args,
                 stdout=self.output.name,
                 stdin=self.input.name,
@@ -209,12 +209,12 @@ class Job(Unpickable(err=nullobject,
             if not self.alive:
                 self.Terminate()
 
-            retCode = self.__wait_process(process)
+            exit_status = self.__wait_process(process)
 
-            err = self._produce_legacy_stderr_output(
+            stderr_summary = self._produce_legacy_stderr_output(
                 self.error_output.name, self.max_err_len or 2000)
 
-            jobResult = CommandLineResult(retCode, startTime, time.localtime(), err)
+            jobResult = CommandLineResult(exit_status, start_time, time.localtime(), stderr_summary)
 
         except Exception, e:
             if not jobPid:

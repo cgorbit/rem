@@ -9,9 +9,9 @@ from collections import deque
 from xmlrpcmethodnotsupported import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported
 from common import *
 from callbacks import Tag, ICallbackAcceptor, TagEvent
-from rpcserver import SimpleXMLRPCServer
+from xmlrpc import SimpleXMLRPCServer
 from rem.profile import ProfiledThread
-import rem.runner as runner
+import rem.runproc as runproc
 
 PROTOCOL_VERSION = 2
 
@@ -223,7 +223,7 @@ class TopologyInfo(Unpickable(servers=dict, location=str)):
         tmp_dir = tempfile.mkdtemp(dir=".", prefix="network-topology")
         try:
             config_temporary_path = os.path.join(tmp_dir, os.path.split(location)[1])
-            runner.check_call(
+            runproc.check_call(
                 ["svn", "export", "--force", "--non-interactive", "-q", location, config_temporary_path])
             return cls.ReadConfigFromFile(config_temporary_path)
         finally:

@@ -49,6 +49,24 @@ class NewTaskParamsMessage(object):
         self.cwd = cwd # filename or None
         self.shell = shell # filename or None
 
+class SendSignalRequestMessage(object):
+    def __init__(self, process_task_id, sig, group):
+        self.task_id = None
+        self.process_task_id = process_task_id
+        self.sig = sig
+        self.group = group
+
+class SendSignalResponseMessage(object):
+    def __init__(self, task_id, was_sent, error):
+        self.task_id = task_id
+        self.was_sent = was_sent
+        self.error = error
+
+def _send_signal(pid, sig, group):
+    kill = os.killpg if group else os.kill
+    print >>sys.stderr, "+ %s(%s, %s)" % (kill, pid, sig)
+    kill(pid, sig)
+
 def set_cloexec(fd):
     if not isinstance(fd, int):
         fd = fd.fileno()
@@ -132,16 +150,41 @@ def logging_info(*args):
 
 # XXX Don't use logging in _Server
 
+class _Active(object):
+    def __init__(self):
+        self._by_pid = {}
+        self._by_task_id = {}
+
+    def add(self, task):
+        self._by_pid[task.pid] = task
+        self._by_task_id[task.task_id] = task
+
+    def get_by_pid(self, pid):
+        return self._by_pid[pid]
+
+    def get_by_task_id(self, id):
+        return self._by_task_id[id]
+
+    def try_get_by_task_id(self, id):
+        return self._by_task_id.get(id)
+
+    def pop_by_pid(self, pid):
+        task = self._by_pid.pop(pid)
+        self._by_task_id.pop(task.task_id)
+
+    def __nonzero__(self):
+        return bool(self._by_pid)
+
 class _Server(object):
     def __init__(self, channel):
         self._sig_chld_handler_pid = os.getpid() # #9535
 
         signal.signal(signal.SIGCHLD, self._sig_chld_handler)
 
-        for sig in [signal.SIGINT, signal.SIGTERM]:
+        for sig in [signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
             signal.signal(sig, signal.SIG_IGN)
 
-        for sig in [signal.SIGCHLD, signal.SIGINT, signal.SIGTERM]:
+        for sig in [signal.SIGCHLD, signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
             signal.siginterrupt(sig, False)
 
         self._channel = channel
@@ -155,7 +198,7 @@ class _Server(object):
 
         self._should_stop = False
         self._lock = threading.Lock()
-        self._active = {}
+        self._active = _Active()
         self._running_count = 0
 
         self._send_queue = deque()
@@ -179,7 +222,8 @@ class _Server(object):
         self._write_thread.join()
 
     class RunningTask(object):
-        def __init__(self, task_id):
+        def __init__(self, pid, task_id):
+            self.pid = pid
             self.task_id = task_id
             self.start_sent = False
             self.exit_status = None
@@ -194,7 +238,8 @@ class _Server(object):
             with self._lock:
                 pid = os.fork()
                 if pid:
-                    running_task = self._active[pid] = self.RunningTask(task.task_id)
+                    running_task = self.RunningTask(pid, task.task_id)
+                    self._active.add(running_task)
                     self._running_count += 1
             _fork_time = time.time() - t0
         except OSError as e:
@@ -278,6 +323,41 @@ class _Server(object):
                 exit_code = 66
             os._exit(exit_code)
 
+    def _process_send_signal_message(self, msg):
+        with self._lock:
+            err = None
+            was_sent = False
+            task = self._active.try_get_by_task_id(msg.process_task_id)
+            if task:
+                if task.exec_errored:
+                    err = RuntimeError("Can't kill exec_errored tasks")
+                else:
+                    try:
+                        was_sent = True
+                        _send_signal(task.pid, msg.sig, msg.group)
+                    except OSError as err:
+                        print >>sys.stderr, "+ _process_send_signal_message:", err
+                        pass
+            else:
+                pass # terminated
+
+            self._send_queue.append(
+                SendSignalResponseMessage(msg.task_id, was_sent, err))
+
+            self._send_queue_not_empty.notify()
+
+    def _process_new_process_message(self, msg):
+        t0 = time.time()
+        pid, error = self._start_process(msg)
+
+        logging_debug('_start_process time %s' % (time.time() - t0))
+
+        with self._lock:
+            self._enqueue_start_msg(msg.task_id, pid, error)
+            self._send_queue_not_empty.notify()
+
+        logging_debug('after _enqueue_start_msg')
+
     @exit_on_error
     def _read_loop(self):
         channel_in = self._channel_in
@@ -293,21 +373,14 @@ class _Server(object):
                 break
 
             if isinstance(msg, NewTaskParamsMessage):
-                #logging_debug('_Server._read_loop NewTaskParamsMessage received')
-
                 if stop_request_received:
                     raise RuntimeError("Message in channel after StopServiceRequestMessage")
+                self._process_new_process_message(msg)
 
-                t0 = time.time()
-                pid, error = self._start_process(msg)
-                logging_debug('_start_process time %s' % (time.time() - t0))
-                with self._lock:
-                    self._enqueue_start_msg(msg.task_id, pid, error)
-                    self._send_queue_not_empty.notify()
-                logging_debug('after _enqueue_start_msg')
+            elif isinstance(msg, SendSignalRequestMessage):
+                self._process_send_signal_message(msg)
 
             elif isinstance(msg, StopServiceRequestMessage):
-                #logging_debug('_Server._read_loop StopServiceRequestMessage received')
                 stop_request_received = True
                 with self._lock:
                     self._should_stop = True
@@ -336,10 +409,6 @@ class _Server(object):
 
             with self._lock:
                 while not send_queue and not (self._should_stop and not self._active):
-                    #logging_info('before self._send_queue_not_empty.wait: %r' % dict(
-                        #send_queue=len(send_queue), should_stop=self._should_stop,
-                        #active=len(self._active), running=self._running_count,
-                    #))
                     self._send_queue_not_empty.wait()
 
                 messages = []
@@ -367,12 +436,12 @@ class _Server(object):
     def _enqueue_start_msg(self, task_id, pid, error):
         task = None
         if pid:
-            task = self._active[pid]
+            task = self._active.get_by_pid(pid)
 
         terminated = task and task.exit_status is not None
 
         if terminated:
-            self._active.pop(pid)
+            self._active.pop_by_pid(pid)
 
         if error:
             pid = None
@@ -387,10 +456,10 @@ class _Server(object):
                 ProcessTerminationMessage(task_id, task.exit_status))
 
     def _enqueue_term_msg(self, pid, exit_status):
-        task = self._active[pid]
+        task = self._active.get_by_pid(pid)
 
         if task.start_sent:
-            self._active.pop(pid)
+            self._active.pop_by_pid(pid)
             if not task.exec_errored:
                 self._send_queue.append(
                     ProcessTerminationMessage(task.task_id, exit_status))
@@ -419,11 +488,20 @@ class _Server(object):
 
 
 class _Popen(object):
-    def __init__(self, pid, exit_status): #, send_signal):
+    def __init__(self, pid, task_id, exit_status, client):
         self.pid = pid
+        self._task_id = task_id
         self._exit_status = exit_status
-        #self._send_signal = send_signal
+        self._client = client
         self.returncode = None
+
+    def __repr__(self):
+        self.poll()
+        cls = type(self)
+        ret = '<%s.%s: pid=%s, ' % (cls.__module__, cls.__name__, self.pid)
+        ret += 'returncode=%s' % self.returncode if not self._exit_status else 'running'
+        ret += '>'
+        return ret
 
     def _handle_exitstatus(self, sts, _WIFSIGNALED=os.WIFSIGNALED,
             _WTERMSIG=os.WTERMSIG, _WIFEXITED=os.WIFEXITED,
@@ -462,14 +540,29 @@ class _Popen(object):
     def check(self):
         check_retcode(self.wait(), '#TODO args')
 
-    def send_signal(self, sig):
-        os.kill(self.pid, sig)
+    def send_signal_safe(self, sig, group=False):
+        return self._client._send_signal(self, sig, group)
 
-    def terminate(self):
-        self.send_signal(signal.SIGTERM)
+    def send_signal(self, sig, group=False):
+        _send_signal(self.pid, sig, group)
+
+    def terminate(self, group=False):
+        self.send_signal(signal.SIGTERM, group)
 
     def kill(self):
         self.send_signal(signal.SIGKILL)
+
+    def killpg(self):
+        self.send_signal(signal.SIGKILL, group=True)
+
+    def terminate_safe(self, group=False):
+        return self.send_signal_safe(signal.SIGTERM, group)
+
+    def kill_safe(self):
+        return self.send_signal_safe(signal.SIGKILL)
+
+    def killpg_safe(self):
+        return self.send_signal_safe(signal.SIGKILL, group=True)
 
     def communicate(self):
         raise NotImplementedError("communicate not implemented")
@@ -519,11 +612,25 @@ def fail_on_error(func):
     return impl
 
 
+# TODO Use another approach for weakness:
+# wrapper class for ref-counting and __del__,
+# and impl, which will be passed with strong refs to threads
+# Proxy.__del__(): self._impl.stop()
 class _Client(object):
-    class Task(object):
+    class RunTask(object):
         def __init__(self):
             self.pid = Promise()
             self.term_info = Promise()
+
+        def list_promises(self):
+            return [self.pid, self.term_info]
+
+    class SignalTask(object):
+        def __init__(self):
+            self.ack = Promise()
+
+        def list_promises(self):
+            return [self.ack]
 
     def __init__(self, server_pid, channel): # executor_pid, executor_stderr
         self._server_pid = server_pid
@@ -592,8 +699,9 @@ class _Client(object):
 
                 tasks_values = tasks.values()
                 tasks.clear()
+
                 for task in tasks_values:
-                    for p in [task.pid, task.term_info]:
+                    for p in task.list_promises():
                         if not p.is_set():
                             try:
                                 p.set(None, exc)
@@ -626,34 +734,43 @@ class _Client(object):
         if do_wait:
             self._server_stop.run_and_set(self._wait_stop)
 
-        self._server_stop.get_future().get()
+        self._server_stop.to_future().get()
 
     def __del__(self):
         self.stop()
 
-    def start(self, *pargs, **pkwargs):
+    def _get_next_task_id(self):
+        ret = self._next_task_id
+        self._next_task_id += 1
+        return ret
+
+    def _enqueue(self, task, msg):
         with self._lock:
             if self._errored:
                 raise ServiceUnavailable("Runner in malformed state")
 
-            task_id = self._next_task_id
-            self._next_task_id += 1
+            task_id = self._get_next_task_id()
 
-            msg = NewTaskParamsMessage(*pargs, **pkwargs)
             msg.task_id = task_id
-
-            task = _Client.Task()
             self._tasks[task_id] = task
 
             self._input_queue.append(msg)
             self._queue_not_empty.notify()
 
+            return task_id
+
+    def start(self, *pargs, **pkwargs):
+        task = self.RunTask()
+        task_id = self._enqueue(task, NewTaskParamsMessage(*pargs, **pkwargs))
+
         def join_pid():
-            pid = task.pid.get_future().get()
+            pid = task.pid.to_future().get()
 
             return _Popen(
                 pid=pid,
-                exit_status=task.term_info.get_future(),
+                task_id=task_id,
+                exit_status=task.term_info.to_future(),
+                client=self # FIXME weak
             )
 
         return join_pid
@@ -675,6 +792,11 @@ class _Client(object):
             pkwargs['stdin'] = tmp.name
 
             return start()
+
+    def _send_signal(self, target_task, sig, group):
+        task = self.SignalTask()
+        self._enqueue(task, SendSignalRequestMessage(target_task._task_id, sig, group))
+        return task.ack.to_future()
 
     @fail_on_error
     def _write_loop(self):
@@ -766,12 +888,24 @@ class _Client(object):
                     try:
                         task = tasks.pop(msg.task_id)
                     except KeyError:
-                        if errored:
+                        if errored: # FIXME Don't remember
                             continue
                         else:
                             raise
 
                 task.term_info.set(msg.exit_status)
+
+            elif isinstance(msg, SendSignalResponseMessage):
+                with lock:
+                    try:
+                        task = tasks.pop(msg.task_id)
+                    except KeyError:
+                        if errored:
+                            continue
+                        else:
+                            raise
+
+                task.ack.set(msg.was_sent, msg.error)
 
             elif isinstance(msg, StopServiceResponseMessage):
                 logging.debug('_Client._read_loop StopServiceResponseMessage received')
