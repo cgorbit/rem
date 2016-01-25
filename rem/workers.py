@@ -37,29 +37,28 @@ class ThreadJobWorker(KillableWorker):
 
     def __init__(self, scheduler):
         super(ThreadJobWorker, self).__init__(name_prefix='JobWrk')
-        self.pids = None
         self.scheduler = scheduler
         self.suspended = False
+        self.job = None
 
     def do(self):
         if not self.IsSuspended() and self.scheduler.alive:
             try:
-                self.pids = set()
-                job = self.scheduler.Get()
-                if job:
-                    job.Run(self.pids)
+                self.job = self.scheduler.Get()
+                if self.job:
+                    self.job.Run()
             finally:
-                self.pids = None
+                self.job = None
 
     def IsSuspended(self):
         return self.suspended
 
     def Kill(self):
         super(ThreadJobWorker, self).Kill()
-        if self.pids:
-            for pid in copy.copy(self.pids):
-                logging.debug("worker\ttrying to kill process with pid %s", pid)
-                osspec.terminate(pid)
+
+        job = self.job
+        if job:
+            job.Terminate()
 
     def Resume(self):
         self.suspended = False

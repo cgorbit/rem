@@ -50,6 +50,8 @@ readonly_xmlrpc_poolsize = 10
 # необязательный параметр - shell скрипт, выполняемый перед запуском
 # REM (нужен для установки необходимых переменных окружения)
 setup_script = %(project_dir)s/setup_env.sh
+# TODO
+#process_wrapper = pgrpguard
 
 [server]
 #порт, слушаемый сервером (для общения с клиентами, посылающими задачи)

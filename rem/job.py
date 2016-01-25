@@ -1,5 +1,4 @@
 from __future__ import with_statement
-import subprocess
 import logging
 import os
 import time
@@ -11,6 +10,8 @@ import osspec
 import packet
 import constants
 from rem.profile import ProfiledThread
+import process_proxy
+import pgrpguard # TODO remove
 
 DUMMY_COMMAND_CREATOR = None
 
@@ -20,7 +21,6 @@ def cut_message(msg, BEG_LEN=None, FIN_LEN=None):
     if msg and len(msg) > BEG_LEN + FIN_LEN + 5:
         msg = msg[:BEG_LEN] + "\n...\n" + msg[-FIN_LEN:]
     return msg or ""
-
 
 class IResult(Unpickable(type=str,
                          code=safeint,
@@ -93,9 +93,7 @@ class Job(Unpickable(err=nullobject,
                      notify_timeout=(int, constants.NOTIFICATION_TIMEOUT),
                      working_time=int,
                      _notified=bool,
-                     output_to_status=bool,
-                     alive=bool,
-                     running_pids=set),
+                     output_to_status=bool),
           CallbackHolder):
     ERR_PENALTY_FACTOR = 6
 
@@ -119,28 +117,12 @@ class Job(Unpickable(err=nullobject,
         self.packetRef = packetRef
         self.AddCallbackListener(self.packetRef)
         self.output_to_status = output_to_status
+        self._process = None
+        self._should_stop = False
 
     @staticmethod
     def __read_stream(fh, buffer):
         buffer.append(fh.read())
-
-    #copy-paste from multiprocessing/forking.py
-    def popen_wait(self, process, timeout=None):
-        if timeout is None:
-            return process.poll()
-        deadline = time.time() + timeout
-        delay = 0.0005
-        res = None
-        while 1:
-            res = process.poll()
-            if res is not None:
-                break
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                break
-            delay = min(delay * 2, remaining, constants.JOB_WATCHER_MAX_DELAY)
-            time.sleep(delay)
-        return res
 
     def __wait_process(self, process, err_pipe):
         out = []
@@ -161,12 +143,12 @@ class Job(Unpickable(err=nullobject,
             working_time += _time() - last_update_time
             last_update_time = _time()
             if working_time < self.notify_timeout < self.max_working_time and not self._notified:
-                if self.popen_wait(process, self.notify_timeout - working_time) is None:
+                if process.wait(self.notify_timeout - working_time) is None:
                     self._timeoutNotify(working_time + _time() - last_update_time)
 
             elif working_time < self.max_working_time:
-                if self.popen_wait(process, self.max_working_time - working_time) is None:
-                    process.kill()
+                if process.wait(self.max_working_time - working_time) is None:
+                    process.terminate()
                     self.results.append(TimeOutExceededResult(self.id))
                     break
             time.sleep(0.001)
@@ -184,12 +166,8 @@ class Job(Unpickable(err=nullobject,
             return self.limitter.CanStart()
         return True
 
-    def _finalize_job_iteration(self, pid, result, pidTrackers):
+    def _finalize_job_iteration(self, result):
         try:
-            self.alive = False
-            if pidTrackers and pid is not None:
-                for tracker in pidTrackers:
-                    tracker.discard(pid)
             if result is not None:
                 self.results.append(result)
             if (result is None) \
@@ -212,13 +190,22 @@ class Job(Unpickable(err=nullobject,
             + (["-o", "pipefail"] if self.pipe_fail else []) \
             + ["-c", self.shell]
 
-    def Run(self, worker_trace_pids=None):
-        self.alive = True
+    @staticmethod
+    def start_process(*args, **kwargs):
+        wrapper = packet.PacketCustomLogic.SchedCtx.process_wrapper
+
+        if wrapper is None:
+            return process_proxy.ProcessProxy(*args, **kwargs)
+        else:
+            kwargs['wrapper_binary'] = wrapper
+            return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
+
+    def Run(self):
+        self._should_stop = False
         self.input = self.output = None
         self.errPipe = None
         jobResult = None
-        jobPid = None
-        pidTrackers = [self.running_pids] + ([] if worker_trace_pids is None else [worker_trace_pids])
+        proc = None
         try:
             self.tries += 1
             self.working_time = 0
@@ -230,30 +217,34 @@ class Job(Unpickable(err=nullobject,
                        else self._make_run_args()
 
             logging.debug("out: %s, in: %s", self.output, self.input)
-            process = subprocess.Popen(run_args, stdout=self.output.fileno(), stdin=self.input.fileno(),
-                                       stderr=self.errPipe[1].fileno(), close_fds=True, cwd=self.packetRef.directory,
-                                       preexec_fn=os.setpgrp)
-            jobPid = process.pid
-            #in case when we stopped during start implicitly kill himself
-            if jobPid is not None:
-                for tracker in pidTrackers: tracker.add(jobPid)
+
+            self._process = proc = self.start_process(
+                run_args,
+                stdout=self.output.fileno(),
+                stdin=self.input.fileno(),
+                stderr=self.errPipe[1].fileno(),
+                close_fds=True,
+                cwd=self.packetRef.directory,
+            )
+
             self.errPipe[1].close()
-            if not self.alive:
-                self.Terminate()
-            _, err = self.__wait_process(process, self.errPipe[0])
-            retCode = process.poll()
-            if retCode is None:
-                #can't determine exit code for killed process because of asynchronous nature of process.kill()
-                retCode = 666
+
+            if self._should_stop:
+                proc.terminate()
+
+            _, err = self.__wait_process(proc, self.errPipe[0])
+            retCode = proc.wait()
+
             jobResult = CommandLineResult(retCode, startTime, time.localtime(), err,
                                        getattr(self, "max_err_len", None))
-        except Exception, e:
-            if not jobPid:
+        except Exception as e:
+            if not proc or isinstance(e, pgrpguard.ProcessStartError): # TODO don't use pgrpguard here
                 jobResult = JobStartErrorResult(None, str(e))
             logging.exception("Run job %s exception: %s", self.id, e)
 
         finally:
-            self._finalize_job_iteration(jobPid, jobResult, pidTrackers)
+            self._process = None
+            self._finalize_job_iteration(jobResult)
             self.CloseStreams()
             self.FireEvent("done")
 
@@ -299,12 +290,10 @@ class Job(Unpickable(err=nullobject,
                     logging.exception('close stream error')
 
     def Terminate(self):
-        self.alive = False
-        pids = self.running_pids
-        if pids:
-            logging.debug("trying to terminate processes with pids: %s", ",".join(map(str, pids)))
-            for pid in list(pids):
-                osspec.terminate(pid)
+        self._should_stop = True
+        proc = self._process
+        if proc:
+            proc.terminate()
 
     def Result(self):
         return self.results[-1] if self.results else None
