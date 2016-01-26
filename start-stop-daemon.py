@@ -181,13 +181,13 @@ class Service(object):
         pid = self.CheckProcess()
         if pid > 0:
             try:
-                pgid = os.getpgid(pid)
-                os.killpg(pgid, signum)
+                os.kill(pid, signum)
                 time.sleep(0.1)
                 while os.path.isdir("/proc/%s" % pid) and time.time() - stTime < timeout:
                     time.sleep(0.01)
                     logger.process()
                 if os.path.isdir("/proc/%s" % pid):
+                    pgid = os.getpgid(pid)
                     os.killpg(pgid, signal.SIGKILL)
                 result = not os.path.isdir("/proc/%s" % pid)
                 if result:
