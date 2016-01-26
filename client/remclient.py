@@ -633,7 +633,7 @@ class TagsBulk(object):
 class Connector(object):
     """объект коннектор, для работы с REM"""
 
-    def __init__(self, url, conn_retries=5, verbose=False, checksumDbPath=None, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY, logger_name=None):
+    def __init__(self, url, conn_retries=10, verbose=False, checksumDbPath=None, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY, logger_name=None):
         """конструктор коннектора
         принимает один параметр - url REM сервера"""
         self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose, allow_none=True)
@@ -714,7 +714,7 @@ class ServerInfo(object):
 
 
 class AdminConnector(object):
-    def __init__(self, url, conn_retries=5, verbose=False):
+    def __init__(self, url, conn_retries=10, verbose=False):
         self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose, allow_none=True)
 
     def GetURL(self):
@@ -756,10 +756,11 @@ class AdminConnector(object):
 class _RetriableMethod:
     TIMEOUT = 30
     PROGR_MULT = 5
+    MAX_TIMEOUT = 600
 
     @classmethod
     def __timeout__(cls, spentTrying):
-        return cls.TIMEOUT + cls.PROGR_MULT ** spentTrying
+        return min(cls.MAX_TIMEOUT, cls.TIMEOUT + cls.PROGR_MULT ** spentTrying)
 
     def __init__(self, method, tryCount, verbose, IgnoreExcType):
         self.method = method
