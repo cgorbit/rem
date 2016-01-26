@@ -621,7 +621,7 @@ def run_daemon(ctx, sched):
         logging.warning("rem-server\tsignal %s has gotten", sig)
 
     def set_handler(handler):
-        for sig in [signal.SIGINT, signal.SIGTERM]:
+        for sig in [signal.SIGINT, signal.SIGTERM, signal.SIGQUIT]:
             signal.signal(sig, handler)
 
     def signal_handler0(sig, frame):
