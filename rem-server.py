@@ -510,9 +510,18 @@ class RemDaemon(object):
 
         self.scheduler.Stop()
 
-        for method in [ThreadJobWorker.Suspend, ThreadJobWorker.Kill, ThreadJobWorker.join]:
-            for worker in self.regWorkers:
-                method(worker)
+        for worker in self.regWorkers:
+            worker.Suspend()
+
+        for worker in self.regWorkers:
+            try:
+                worker.Kill()
+            except Exception:
+                logging.exception("worker.Kill() failed")
+
+        for worker in self.regWorkers:
+            worker.join()
+
         logging.debug("rem-server\tworkers_stopped")
 
         logging.debug("rem-server\tbefore_backups_thread_join")
