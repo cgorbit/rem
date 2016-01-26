@@ -304,5 +304,5 @@ class FuncJob(object):
         assert isinstance(runner, FuncRunner), "incorrent arguments for FuncJob initializing"
         self.runner = runner
 
-    def Run(self, pids=None):
+    def Run(self):
         self.runner()
