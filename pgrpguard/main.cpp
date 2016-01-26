@@ -10,12 +10,13 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <sys/ipc.h>
-#include <sys/shm.h>
+#include <sys/mman.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <limits.h>
 
 #define PREVENT_WAITPID_KILL_RACE
+#define BLOCK_COMMON_TERM_SIGNALS_IN_WRAPPER
 
 enum {
     EXIT_MIN            = 200,
@@ -29,8 +30,7 @@ enum {
 
 enum {
     ERROR_OK,
-    ERROR_SHMGET,
-    ERROR_SHMAT,
+    ERROR_SHM,
     ERROR_SETRESUID,
     ERROR_FORK,
     ERROR_EXECVE,
@@ -88,6 +88,12 @@ static int run_child_inner(uid_t ruid, int, char *argv[]) {
     change_signal_mask(PRC_TERM_SIGNAL, SIG_UNBLOCK);
     change_signal_mask(GRP_KILL_SIGNAL, SIG_UNBLOCK);
     change_signal_mask(SIGCHLD, SIG_UNBLOCK);
+
+#ifdef BLOCK_COMMON_TERM_SIGNALS_IN_WRAPPER
+    change_signal_mask(SIGINT,  SIG_UNBLOCK);
+    change_signal_mask(SIGTERM, SIG_UNBLOCK);
+    change_signal_mask(SIGQUIT, SIG_UNBLOCK);
+#endif
 
     // 22 cases of fail
     execvp(argv[0], argv);
@@ -256,14 +262,9 @@ static int run_parent() {
 }
 
 static int init_shared_memory() {
-    int shmid = shmget(IPC_PRIVATE, 2 * sizeof(int), 0600);
-    if (shmid == -1) {
-        return ERROR_SHMGET;
-    }
-
-    void *mem = shmat(shmid, 0, 0);
-    if (mem == (void*)-1) {
-        return ERROR_SHMAT;
+    void *mem = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, -1, 0);
+    if (mem == MAP_FAILED) {
+        return ERROR_SHM;
     }
 
     child_error_type  = (int*)mem;
@@ -334,8 +335,7 @@ static bool report_error(const int error, const int saved_errno) {
     const char* msg = NULL;
 
     switch (error) {
-    case ERROR_SHMGET:
-    case ERROR_SHMAT:
+    case ERROR_SHM:
         msg = "Failed to initialize shared memory";
         break;
 
@@ -412,11 +412,16 @@ int main(int argc, char *argv[]) {
     change_signal_mask(PRC_TERM_SIGNAL, SIG_BLOCK);
     change_signal_mask(GRP_KILL_SIGNAL, SIG_BLOCK);
 
+    // FIXME What to do with all other signals?
+#ifdef BLOCK_COMMON_TERM_SIGNALS_IN_WRAPPER
+    change_signal_mask(SIGINT,  SIG_BLOCK);
+    change_signal_mask(SIGTERM, SIG_BLOCK);
+    change_signal_mask(SIGQUIT, SIG_BLOCK);
+#endif
+
     if (argc < 2) {
         return EXIT_NO_ARGV;
     }
-
-    // FIXME What to do with all other Term/Core-defaulted signals?
 
     uid_t ruid;
     {
