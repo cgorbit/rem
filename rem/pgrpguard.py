@@ -41,6 +41,8 @@ def _set_cloexec(fd, state=True):
 def _preexec_fn(report_fd):
     _set_cloexec(report_fd, False)
 
+    # Python has no sigprocmask (for portability), so use sigaction
+
     # Prevent race-condition in pgrpguard
     for sig in [_PRC_TERM_SIGNAL, _GRP_KILL_SIGNAL]:
         signal.signal(sig, signal.SIG_IGN)
