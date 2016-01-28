@@ -8,6 +8,7 @@ import threading
 from collections import deque
 
 from common import Unpickable, PickableRLock
+from profile import ProfiledThread
 from callbacks import ICallbackAcceptor, RemoteTag, Tag
 
 
@@ -71,7 +72,7 @@ class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):
         self._queue_lock = threading.Lock()
         self._db_lock = threading.Lock()
         self._queue_not_empty = threading.Condition(self._queue_lock)
-        self._write_thread = threading.Thread(target=self._write_loop)
+        self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='Journal')
         self._write_thread.start()
 
     def Stop(self):
