@@ -524,6 +524,10 @@ class RemDaemon(object):
 
         logging.debug("rem-server\tworkers_stopped")
 
+    # TODO Make it nice
+        self.scheduler.tagRef.tag_logger.Stop()
+        logging.debug("rem-server\tjournal_stopped")
+
         logging.debug("rem-server\tbefore_backups_thread_join")
         self._backups_thread.join()
         logging.debug("rem-server\tafter_backups_thread_join")
