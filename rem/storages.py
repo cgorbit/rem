@@ -17,6 +17,10 @@ import fork_locking
 from future import Promise, WaitFutures
 from profile import ProfiledThread
 
+sys.path[0:0] = ['/home/trofimenkov/cloud_tags']
+import client as cloud_tags
+sys.path[0:1] = []
+
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
 
@@ -282,6 +286,8 @@ class TagStorage(object):
         self._local_tag_modify_lock = threading.Lock()
         self._repr_modifier = TagReprModifier() # TODO pool_size from rem.cfg
         self.tag_logger = TagLogger()
+        self._cloud = None
+        self._safe_cloud = None
         if len(args) == 1:
             if isinstance(args[0], dict):
                 self.inmem_items = args[0]
@@ -293,8 +299,38 @@ class TagStorage(object):
     def Start(self):
         self.tag_logger.Start()
         self._repr_modifier.Start()
+        self._cloud = cloud_tags.getc(self._on_cloud_journal_event)
+        self._safe_cloud = SafeCloud(self._cloud, self.tag_logger)
+
+    def _on_cloud_journal_event(self, ev):
+        logging.debug('before GOT EVENT FOR %s' % ev.tag_name)
+        time.sleep(5)
+        tag = self._RawTag(ev.tag_name, dont_create=True)
+
+        if not tag:
+            logging.warning('no object in inmem_items for cloud tag %s' % ev.tag_name)
+            return
+
+        if tag.version >= ev.version:
+            logging.warning('local version (%d) >= journal version (%d) for tag %s' \
+                % (tag.version, ev.version, ev.tag_name))
+            return
+
+        def add_event(event, msg=None):
+            self._repr_modifier.add((tag, event, msg))
+
+    # FIXME here with warning, on state sync without it
+        if ev.version > ev.last_reset_version and tag.version < ev.last_reset_version:
+            add_event(ETagEvent.Reset, ev.last_reset_comment)
+
+        add_event(ev.event, ev.comment)
+        logging.debug('after GOT EVENT FOR %s' % ev.tag_name)
 
     def Stop(self):
+        self._cloud.stop()
+# FIXME order
+        self._safe_cloud = None # TODO
+
         self._repr_modifier.Stop()
         self.tag_logger.Stop()
 
@@ -347,7 +383,7 @@ class TagStorage(object):
         def on_cloud_done(f):
             if f.is_success():
                 cloud_result = f.get()
-                for tag in cloud_tags.get():
+                for tag in cloud_tags:
                     ret[tag] = _ret_value(cloud_result.get(tag, None))
                 promise.set(ret)
             else:
@@ -444,8 +480,6 @@ class TagStorage(object):
                 return TagWrapper(self.inmem_items.setdefault(tagname, tag))
 
     def IsCloudTagName(self, name):
-# XXX
-        return False
         return name.startswith('_cloud_') # TODO
 
     def _create_tag(self, name):
@@ -479,7 +513,8 @@ class TagStorage(object):
         return tag
 
     def ListTags(self, name_regex=None, prefix=None, memory_only=True):
-        raise NotImplementedError() # XXX
+        #raise NotImplementedError() # XXX
+# TODO Only local tags
         for name, tag in self.inmem_items.items():
             if name and (not prefix or name.startswith(prefix)) \
                 and (not name_regex or name_regex.match(name)):
