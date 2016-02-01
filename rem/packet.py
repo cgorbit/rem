@@ -1,3 +1,4 @@
+#coding: utf-8
 from __future__ import with_statement
 import logging
 import tempfile
@@ -332,6 +333,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                            kill_all_jobs_on_error=(bool, True),
                            _working_empty=lambda : None,
                            isResetable=(bool, True)),
+       # TODO _clean_state
                 CallbackHolder,
                 ICallbackAcceptor,
                 JobPacketImpl):
@@ -372,6 +374,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         if not getattr(self, "directory", None):
             self.CreatePlace(context)
         self.changeState(PacketState.CREATED)
+        self._clean_state = True
 
     def __repr__(self):
         return "<JobPacket(id:%s; name: %s)>" % (getattr(self, "id", None), getattr(self, "name", None))
@@ -440,15 +443,11 @@ class JobPacket(Unpickable(lock=PickableRLock,
         PacketCustomLogic(self).DoChangeStateAction()
         return True
 
-    def Reinit(self, context, suspend=False):
-        self.Init(context)
-
-        if self.CheckFlag(PacketFlag.USER_SUSPEND) or suspend:
-            self.changeState(PacketState.SUSPENDED)
-        else:
-            self.Resume()
-
     def OnStart(self, ref):
+        # FIXME lock
+
+        self._clean_state = False # FIXME
+
         if not hasattr(self, "waitJobs"):
             self.UpdateJobsDependencies()
         if isinstance(ref, Job):
@@ -693,39 +692,83 @@ class JobPacket(Unpickable(lock=PickableRLock,
         for job in self.GetWorkingJobs():
             job.Terminate()
 
+    def _Reset(self, suspend=False, tag_op):
+        def update_tags():
+    # FIXME Better always Reset tags
+            for tag in self._get_all_done_tags():
+                tag_op(tag)
+
+        with self.lock:
+            if self._clean_state: # FIXME If clea
+                # 1. Must put tag-change request into "queue" under PacketState.lock
+                # 2. Actual tag modification and reactions on it should be done async
+                update_tags()
+                return
+
+            self.changeState(PacketState.NONINITIALIZED)
+
+            self.KillJobs()
+            self._wait_working_empty()
+
+            update_tags()
+
+            self.done.clear()
+            for job in self.jobs.values():
+                job.results = []
+
+            self.Init(self._get_scheduler_ctx())
+
+            if self.CheckFlag(PacketFlag.USER_SUSPEND) or suspend:
+                self.changeState(PacketState.SUSPENDED)
+            else:
+                self.Resume()
+
     def Reset(self, suspend=False):
-        self.changeState(PacketState.NONINITIALIZED)
-        self.KillJobs()
-        self._wait_working_empty()
+        self._Reset(suspend, lambda tag: tag.Unset())
+
+    def _get_scheduler_ctx(self):
+        return PacketCustomLogic.SchedCtx
+        #return self._get_scheduler().context
+
+    #def _get_scheduler(self):
+        #return PacketCustomLogic.SchedCtx.Scheduler
+        #ret = [None]
+        #def set(ctx):
+            #ret[0] = ctx.Scheduler
+        #self.FireEvent("packet_reinit_request", set)
+        #return ret[0]
+
+    def _get_all_done_tags(self):
         if self.done_indicator:
-            self.done_indicator.Unset()
-        for job_id in list(self.done):
-            tag = self.job_done_indicator.get(job_id)
-            if tag:
-                tag.Unset()
-        self.done.clear()
-        for job in self.jobs.values():
-            job.results = []
+            yield done_indicator
 
-        def reinit(ctx):
-            self.Reinit(ctx, suspend=suspend)
+        for tag in self.job_done_indicator.itervalues():
+            yield tag
 
-        self.FireEvent("packet_reinit_request", reinit)
+        #for job_id in self.done: # FIXME job_done_indicator.values()
+            #tag = self.job_done_indicator.get(job_id)
+            #if tag:
+                #yield tag
+
+# no waitTags.add(tag) on OnUnset
+
+# XXX
+# 1. Как вставить Journal и сразу 
 
     def OnReset(self, (ref, message)):
-        if isinstance(ref, Tag):
-            self.waitTags.add(ref.GetFullname())
-            if self.isResetable:
-                if self.state == PacketState.SUCCESSFULL and self.done_indicator:
-                    self.done_indicator.Reset(message)
-                for job_id in list(self.done):
-                    tag = self.job_done_indicator.get(job_id)
-                    if tag:
-                        tag.Reset(message)
-                self.Reset()
-            else:
-                PacketCustomLogic(self).DoResetNotification(message)
+        if not isinstance(ref, Tag):
+            return
 
+    # Андрей: SUCCESSFULL, но ждёт тега -- нехорошо
+
+        # FIXME ref.OnReset can't be interleave with other tag c
+        self.waitTags.add(ref.GetFullname())
+
+        if not self.isResetable:
+            PacketCustomLogic(self).DoResetNotification(message) # TODO not under lock (only data collect under lock)
+            return
+
+        self._Reset(suspend, lambda tag: tag.Reset())
 
 # Hack to restore from old backups (before refcatoring), when JobPacket was in
 import job

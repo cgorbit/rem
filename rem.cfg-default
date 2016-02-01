@@ -29,6 +29,7 @@ binary_lifetime = 86400
 error_packet_lifetime = 604800 ; 7 дней
 success_packet_lifetime = 259200 ; 3 дня
 
+#cloud_tag_server = localhost:17777
 
 [log]
 # директория с логами

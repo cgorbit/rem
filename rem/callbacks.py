@@ -9,9 +9,9 @@ class TagEvent(object):
     Reset = 2
 
 TagEventName = {
-    TagEvent.Unset: 'unset',
-    TagEvent.Set:   'set',
-    TagEvent.Reset: 'reset',
+    ETagEvent.Unset: 'unset',
+    ETagEvent.Set:   'set',
+    ETagEvent.Reset: 'reset',
 }
 
 class ICallbackAcceptor(object):
@@ -63,13 +63,16 @@ class CallbackHolder(Unpickable(callbacks=weakref.WeakKeyDictionary,
         return sdict
 
 
-class Tag(CallbackHolder):
-    def __init__(self, tagname):
+class TagBase(CallbackHolder):
+    def __init__(self, modify):
         CallbackHolder.__init__(self)
         self.done = False
-        self.name = tagname
+        self._request_modify = modify
 
     def IsSet(self):
+        return self.done
+
+    def __nonzero__(self):
         return self.done
 
     def _Set(self):
@@ -78,7 +81,6 @@ class Tag(CallbackHolder):
         self.FireEvent("done")
 
     def _Unset(self):
-        """unset function without event firing"""
         logging.debug("tag %s\tunset", self.GetFullname())
         self.done = False
         self.FireEvent("undone")
@@ -88,30 +90,61 @@ class Tag(CallbackHolder):
         self.done = False
         self.FireEvent("reset", (self, message))
 
-    def Set(self):
-        self._Set()
-
-    def Unset(self):
-        self._Unset()
-
-    def Reset(self, message):
-        self._Reset(message)
-
-    def _Modify(self, event, message=None):
-        if event == TagEvent.Set:
+    def _ModifyLocalState(self, event, message=None):
+        if event == ETagEvent.Set:
             self._Set()
-        elif event == TagEvent.Unset:
+        elif event == ETagEvent.Unset:
             self._Unset()
-        elif event == TagEvent.Reset:
+        elif event == ETagEvent.Reset:
             self._Reset(message)
 
-    def GetName(self):
-        return self.name
+#
+    def Set(self):
+        self._request_modify(True, self, ETagEvent.Set)
 
-    def GetFullname(self):
-        return self.name
+    def Unset(self):
+        self._request_modify(True, self, ETagEvent.Unset)
+
+    def Reset(self, msg):
+        self._request_modify(True, self, ETagEvent.Reset, msg)
+
+    def Modify(self, event, msg=None):
+        self._request_modify(True, self, event, msg)
+#
+# FIXIM Willn't use
+
+    #def SetSafe(self):
+        #self._request_modify(True, self, ETagEvent.Set)
+
+    #def UnsetSafe(self):
+        #self._request_modify(True, self, ETagEvent.Unset)
+
+    #def ResetSafe(self, msg):
+        #self._request_modify(True, self, ETagEvent.Reset, msg)
+
+    #def ModifySafe(self, event, msg=None):
+        #self._request_modify(True, self, event, msg)
+#
+    #def SetUnsafe(self):
+        #return self._request_modify(False, self, ETagEvent.Set)
+
+    #def UnsetUnsafe(self):
+        #return self._request_modify(False, self, ETagEvent.Unset)
+
+    #def ResetUnsafe(self, msg):
+        #return self._request_modify(False, self, ETagEvent.Reset, msg)
+
+    #def ModifyUnsafe(self, event, msg=None):
+        #return self._request_modify(False, self, event, msg)
+#
+
+    def GetListenersIds(self):
+        return [k.id for k in self.callbacks.iterkeys()]
 
     def IsRemote(self):
+        return False
+
+    def IsCloud(self):
         return False
 
     def CheckRemote(self):
@@ -119,14 +152,23 @@ class Tag(CallbackHolder):
             raise RuntimeError("Tag is not RemoteTag")
         return self
 
-    def GetListenersIds(self):
-        return [k.id for k in self.callbacks.iterkeys()]
+
+class LocalTag(TagBase):
+    def __init__(self, name, modify):
+        TagBase.__init__(modify)
+        self.name = name
+
+    def GetName(self):
+        return self.name
+
+    def GetFullname(self):
+        return self.name
 
 
-class RemoteTag(Tag):
-    def __init__(self, tagname):
-        Tag.__init__(self, tagname)
-        self.remotehost, self.name = tagname.split(":")
+class RemoteTag(TagBase):
+    def __init__(self, name, modify):
+        TagBase.__init__(self, modify)
+        self.remotehost, self.name = name.split(":")
 
     def Set(self):
         raise RuntimeError("Attempt to set RemoteTag %r", self)
@@ -147,6 +189,25 @@ class RemoteTag(Tag):
         return ':'.join((self.remotehost, self.name))
 
     def IsRemote(self):
+        return True
+
+
+class CloudTag(TagBase):
+    def __init__(self, name, modify):
+        TagBase.__init__(self, modify)
+        self.name = name
+        self.version = 0 # FIXME Unpickable
+
+    # FIXME Changes will be applied serialized by tagname hash,
+    # so no lock is need here
+
+    def GetName(self):
+        return self.name
+
+    def GetFullname(self):
+        return self.name
+
+    def IsCloud(self):
         return True
 
 

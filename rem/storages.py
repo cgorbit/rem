@@ -14,6 +14,7 @@ from callbacks import ICallbackAcceptor
 from packet import PacketState, JobPacket
 from Queue import Queue
 import fork_locking
+from future import Promise, WaitFutures
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -183,17 +184,94 @@ class TagWrapper(object):
             return object.__getattribute__(self, attr)
         return self.inner.__getattribute__(attr)
 
+class SafeCloud(object):
+    def __init__(self, cloud, journal):
+        self._next_id = 1
+        self._cloud = cloud
+        self._journal = journal
+        self._lock = fork_locking.Lock()
+
+    def _alloc_id(self):
+        ret = self._next_id
+        self._next_id += 1
+        return ret
+
+    def _on_done(self, id, f):
+        with self._lock:
+            if f.is_success():
+                self._running.pop(id)
+                return
+        # TODO
+        logging.warning("Task #%d failed %s" % (id, self._running[id]))
+
+    def update(self, event):
+        with self._lock:
+            # XXX log_cloud_request and seq_update under lock, so sequential
+            #self._journal.log_cloud_request(event) # TODO
+            id = self._alloc_id()
+            done = self._cloud.serial_update(event)
+            self._running[id] = event
+
+        # This call may lead to immediate _on_done in current thread
+        done.subscribe(lambda f: self._on_done(id, f))
+
+
+def TagReprModifier(object):
+    _STOP_INDICATOR = object()
+
+    def __init__(self, connection_manager, pool_size=100):
+        self._connection_manager = connection_manager
+        self._create_workers(pool_size)
+
+    def add(self, update, with_future=False):
+        queue = self._queues[hash(update[0].GetFullname()) % len(self._queues)]
+        promise = Promise() if with_future else None
+        queue.put((update, promise))
+        if promise:
+            return promise.to_future()
+
+    def stop(self):
+        for q in self._queues:
+            q.put((self._STOP_INDICATOR, None))
+
+        for t in self._threads:
+            t.join()
+
+    def _create_workers(self, pool_size):
+        self._queues  = []
+        self._threads = []
+
+        for _ in xrange(pool_size):
+            q = Queue()
+            t = NamedThread(target=self._worker, args=(queue,), name_prefix='TagReprModifier')
+            self._queues.append(q)
+            self._threads.append(t)
+
+            t.start()
+
+    def _worker(self, queue):
+        while True:
+            update, promise = queue.get()
+
+            if update is self._STOP_INDICATOR:
+                return
+
+            tag, event, msg = update
+
+            tag._ModifyLocalState(event, msg) # FIXME try/except?
+            self._connection_manager.RegisterTagEvent(tag, event, msg)
+
+            if promise:
+                promise.set()
+
 
 class TagStorage(object):
-    __slots__ = ["db_file", "infile_items", "inmem_items", "lock", "additional_listeners", "conn_manager", "tag_logger", 'db_file_opened']
-
     def __init__(self, *args):
         self.lock = PickableLock()
         self.inmem_items = {}
         self.infile_items = None
         self.db_file = ""
         self.db_file_opened = False
-        self.additional_listeners = set()
         self.tag_logger = TagLogger(self)
         if len(args) == 1:
             if isinstance(args[0], dict):
@@ -206,43 +284,179 @@ class TagStorage(object):
     def __reduce__(self):
         return TagStorage, (self.inmem_items.copy(), )
 
-    def SetTag(self, tagname):
-        self.AcquireTag(tagname).Set()
+######
+    def _lookup_tags(self, tags):
+        return self.__lookup_tags(tags, False)
 
-    def UnsetTag(self, tagname):
-        self.AcquireTag(tagname).Unset()
+    def _are_tags_set(self, tags):
+        return self.__lookup_tags(tags, True)
 
-    def ResetTag(self, tagname, message):
-        self.AcquireTag(tagname).Reset(message)
+    def __lookup_tags(self, tags, as_bools):
+        ret = {}
 
-    def CheckTag(self, tagname):
-        return self.RawTag(tagname).IsSet()
+        cloud_tags = set()
 
-    def IsRemoteName(self, tagname):
+    # FIXME not as closure
+        def _ret_value(state):
+            if as_bools:
+                if not state:
+                    return False
+                elif isinstance(state, callbacks.TagBase):
+                    return state.IsSet()
+                else:
+                    return state.is_set
+            else:
+                if not state:
+                    return None
+                elif isinstance(state, callbacks.TagBase):
+                    return {'is_set': state.IsSet()}
+                else:
+                    return state.__dict__
+
+        for tag in tags:
+            if self.IsCloudTagName(tag):
+                cloud_tags.add(tag)
+            else:
+                ret[tag] = _ret_value(self._RawTag(tag, dont_create=True))
+
+        cloud_done = self._cloud.lookup(cloud_tags)
+
+        promise = Promise()
+
+        def on_cloud_done(f):
+            if f.is_success():
+                cloud_result = f.get()
+                for tag in cloud_tags.get():
+                    ret[tag] = _ret_value(cloud_result.get(tag, None))
+                promise.set(ret)
+            else:
+                promise.set(None, f.get_raw()[1]) # FIXME backtrace
+
+        cloud_done.subscribe(on_cloud_done)
+
+        return promise.to_future()
+
+######
+    def _modify_cloud_tag(self, safe, tag, event, msg=None):
+        update = (tag.GetFullname(), event, msg)
+        if safe:
+            # For calls from REM guts
+            self._safe_cloud.update(update)
+        else:
+            # For calls from RPC
+            return self._cloud.update([update]) # future
+
+    # from RPC
+    def _modify_tags_unsafe(self, updates):
+        if not updates:
+            return future.READY_FUTURE
+
+        cloud_updates = []
+        local_updates = []
+
+        for update in updates:
+            if self.IsCloudTagName(update[0]):
+                cloud_updates.append(update)
+            else:
+                if isinstance(update[0], str):
+                    update = list(update)
+                    update[0] = self.AcquireTag(update[0])
+                local_updates.append(update)
+
+        local_done = self._modify_local_tags(local_updates, with_future=True) \
+            else None
+
+        cloud_done = self._cloud.update(cloud_updates) if cloud_updates \
+            else None
+
+        if local_done is None:
+            return cloud_done
+        elif cloud_done is None:
+            return local_done
+        else:
+            return WaitFutures([cloud_done, local_done])
+
+    def _modify_tag_unsafe(self, tagname, event, msg=None):
+        return self._modify_tags_unsafe([(tagname, event, msg)]) # FIXME own faster impl?
+
+    def _modify_local_tags(self, updates, with_future=False):
+        done = []
+
+        with self._local_tag_modify_lock: # FIXME
+            for update in updates:
+                self._journal.LogEvent(*update)
+                done.append(self._repr_modifier.add(update, with_future))
+
+        if not with_future:
+            return
+
+        return done[0] if len(done) == 1 else WaitFutures(done)
+
+    def _modify_local_tag(self, safe, tag, event, msg=None):
+        with_future = not safe
+        return self._modify_local_tags([(tag, event, msg)], with_future)
+######
+
+# TODO check usage
+
+    #def SetTag(self, tagname):
+        #self.AcquireTag(tagname).Set()
+
+    #def UnsetTag(self, tagname):
+        #self.AcquireTag(tagname).Unset()
+
+    #def ResetTag(self, tagname, message):
+        #self.AcquireTag(tagname).Reset(message)
+
+    #def CheckTag(self, tagname):
+        #return self._RawTag(tagname).IsSet()
+
+######
+
+    def IsRemoteTagName(self, tagname):
         return ':' in tagname
 
     def AcquireTag(self, tagname):
         if tagname:
-            tag = self.RawTag(tagname)
+            tag = self._RawTag(tagname)
             with self.lock:
                 return TagWrapper(self.inmem_items.setdefault(tagname, tag))
 
-    def RawTag(self, tagname):
-        if tagname:
-            tag = self.inmem_items.get(tagname, None)
-            if tag is None:
-                if not self.db_file_opened:
-                    self.DBConnect()
-                tagDescr = self.infile_items.get(tagname, None)
-                if tagDescr:
-                    tag = cPickle.loads(tagDescr)
-                else:
-                    tag = RemoteTag(tagname) if self.IsRemoteName(tagname) else Tag(tagname)
-            for obj in self.additional_listeners:
-                tag.AddNonpersistentCallbackListener(obj)
-            return tag
+    def IsCloudTagName(self, name):
+        return name.startswith('_cloud_') # TODO
+
+    def _create_tag(self, name):
+        if self.IsRemoteTagName(name):
+            return RemoteTag(name, self._modify_local_tag)
+        elif self.IsCloudTagName(name):
+            return CloudTag(name, self._modify_cloud_tag)
+        else:
+            return LocalTag(name, self._modify_local_tag)
+
+    def _RawTag(self, tagname, dont_create=False):
+        if not tagname:
+            raise ValueError("Bad tag name")
+
+        tag = self.inmem_items.get(tagname, None)
+        if tag is None:
+            if not self.db_file_opened:
+                self.DBConnect()
+            tagDescr = self.infile_items.get(tagname, None)
+            if tagDescr:
+                tag = cPickle.loads(tagDescr)
+            elif dont_create:
+                return None
+            else:
+                tag = self._create_tag(tagname)
+
+    # TODO Ignore in backup
+        #for obj in self.additional_listeners:
+            #tag.AddNonpersistentCallbackListener(obj)
+
+        return tag
 
     def ListTags(self, name_regex=None, prefix=None, memory_only=True):
+        raise NotImplementedError() # XXX
         for name, tag in self.inmem_items.items():
             if name and (not prefix or name.startswith(prefix)) \
                 and (not name_regex or name_regex.match(name)):
@@ -271,15 +485,16 @@ class TagStorage(object):
         self.DBConnect()
         self.conn_manager = context.Scheduler.connManager
         self.tag_logger.UpdateContext(context)
-        self.additional_listeners = set()
-        self.additional_listeners.add(context.Scheduler.connManager)
-        self.additional_listeners.add(self.tag_logger)
+
+        #self.additional_listeners = set()
+        #self.additional_listeners.add(context.Scheduler.connManager)
+        #self.additional_listeners.add(self.tag_logger)
 
     def Restore(self, timestamp):
         self.tag_logger.Restore(timestamp)
 
     def ListDependentPackets(self, tag_name):
-        return self.RawTag(tag_name).GetListenersIds()
+        return self._RawTag(tag_name).GetListenersIds()
 
     def tofileOldItems(self):
         old_tags = set()

@@ -9,7 +9,7 @@ from collections import deque
 
 from common import Unpickable, PickableRLock
 from profile import ProfiledThread
-from callbacks import ICallbackAcceptor, RemoteTag, Tag
+from callbacks import ICallbackAcceptor, RemoteTag, Tag, ETagEvent
 
 
 class TagEvent(object):
@@ -130,15 +130,30 @@ class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):
             self._queue.append(obj)
             self._queue_not_empty.notify()
 
+    def LogEvent(self, tag, ev, msg=None):
+        args = ()
+
+        if ev == ETagEvent.Set:
+            cls = SetTagEvent
+        if ev == ETagEvent.Unset:
+            cls = SetTagEvent
+        else:
+            cls = ResetTagEvent
+            args = (msg,)
+
+        if not isinstance(tag, str):
+            tag = tag.GetFullname()
+
+        self._LogEvent(cls(tag.GetFullname(), *args))
+
     def OnDone(self, tag):
-        if isinstance(tag, (Tag, RemoteTag)):
-            self._LogEvent(SetTagEvent, tag.GetFullname())
+        self.LogEvent(tag, ETagEvent.Set)
 
     def OnUndone(self, tag):
-        self._LogEvent(UnsetTagEvent, tag.GetFullname())
+        self.LogEvent(tag, ETagEvent.Unset)
 
     def OnReset(self, (tag, message)):
-        self._LogEvent(ResetTagEvent, tag.GetFullname(), message)
+        self.LogEvent(tag, ETagEvent.Reset, message)
 
     def Restore(self, timestamp):
         logging.debug("TagLogger.Restore(%d)", timestamp)

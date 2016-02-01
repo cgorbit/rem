@@ -130,27 +130,46 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
     raise AttributeError("nonexisted packet id: %s" % pck_id)
 
 
+#########
+
+# TODO timeouts
+
 @readonly_method
 @traced_rpc_method()
 def check_tag(tagname):
-    return _scheduler.tagRef.CheckTag(tagname)
-
+    return _scheduler.tagRef._are_tags_set([tagname]).get()[0]
 
 @traced_rpc_method("info")
 def set_tag(tagname):
-    return _scheduler.tagRef.SetTag(tagname)
-
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Set).get()
 
 @traced_rpc_method("info")
 def unset_tag(tagname):
-    return _scheduler.tagRef.UnsetTag(tagname)
-
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Unset).get()
 
 @traced_rpc_method()
-def reset_tag(tagname, message=""):
-    tag = _scheduler.tagRef.AcquireTag(tagname)
-    tag.Reset(message)
+def reset_tag(tagname, msg=""):
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get()
 
+#########
+
+# TODO timeouts
+
+@readonly_method
+@traced_rpc_method()
+def check_tags(tags):
+    return _scheduler.tagRef._are_tags_set(tags).get()
+
+@readonly_method
+@traced_rpc_method()
+def lookup_tags(tags):
+    return _scheduler.tagRef._lookup_tags(tags).get()
+
+@traced_rpc_method("info")
+def update_tags(updates):
+    return _scheduler.tagRef._modify_tags_unsafe(updates).get()
+
+#########
 
 @readonly_method
 @traced_rpc_method()

@@ -79,6 +79,7 @@ class Queue(Unpickable(pending=PackSet.create,
             else:
                 break
 
+# TODO See rem-xx-more-packet-locks.patch
     def relocatePacket(self, pck):
         dest_queue_name = self.VIEW_BY_STATE.get(pck.state, None)
         dest_queue = getattr(self, dest_queue_name) if dest_queue_name else None
@@ -119,6 +120,7 @@ class Queue(Unpickable(pending=PackSet.create,
             pck.AddCallbackListener(self)
             self.working.update(pck.GetWorkingJobs())
         self.relocatePacket(pck)
+# XXX
         pck.Resume()
 
     def Remove(self, pck):

@@ -93,6 +93,7 @@ class Context(object):
         self.xmlrpc_pool_size = config.safe_getint("run", "xmlrpc_poolsize", 1)
         self.readonly_xmlrpc_pool_size = config.safe_getint("run", "readonly_xmlrpc_pool_size", 1)
         self.process_wrapper = config.safe_get("run", "process_wrapper", None)
+        self.cloud_tag_server = config.safe_get("storage", "cloud_tag_server", None)
         self.manager_port = config.getint("server", "port")
         self.manager_readonly_port = config.safe_getint("server", "readonly_port")
         self.system_port = config.safe_getint("server", "system_port")

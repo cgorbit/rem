@@ -376,8 +376,6 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
             )
 
 
-    # XXX The order of events for clients may differ from order of Tag.done modifications
-
     def OnDone(self, tag):
         self.RegisterTagEvent(tag, TagEvent.Set)
 
@@ -391,7 +389,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     def RegisterTagEvent(self, tag, event, message=None):
         if not self.alive:
             return
-        if not isinstance(tag, Tag):
+        if not isinstance(tag, (LocalTag, RemoteTag)):
             logging.error("%s is not Tag class instance", tag.GetName())
             return
         if tag.IsRemote():
@@ -450,7 +448,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     def register_tags_events(self, events):
         logging.debug("register_tags_events %d: %s", len(events), events)
         for event in events:
-            self.scheduler.tagRef.AcquireTag(event[0]).CheckRemote()._Modify(*event[1:])
+            self.scheduler.tagRef.AcquireTag(event[0]).CheckRemote()._request_modify(*event[1:])
             logging.debug("done with: %s", event)
         logging.debug("register_tags_events %d: done", len(events))
         return True
