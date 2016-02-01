@@ -6,15 +6,16 @@ import time
 import weakref
 import bsddb3
 import cPickle
+import threading
 
 from common import *
-from callbacks import Tag, RemoteTag, CallbackHolder
+from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor
 from journal import TagLogger
-from callbacks import ICallbackAcceptor
 from packet import PacketState, JobPacket
 from Queue import Queue
 import fork_locking
 from future import Promise, WaitFutures
+from profile import ProfiledThread
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -216,12 +217,18 @@ class SafeCloud(object):
         done.subscribe(lambda f: self._on_done(id, f))
 
 
-def TagReprModifier(object):
+class TagReprModifier(object):
     _STOP_INDICATOR = object()
 
-    def __init__(self, connection_manager, pool_size=100):
-        self._connection_manager = connection_manager
-        self._create_workers(pool_size)
+    def __init__(self, pool_size=100):
+        self._connection_manager = None
+        self._pool_size = pool_size
+
+    def Start(self):
+        self._create_workers(self._pool_size)
+
+    def UpdateContext(self, ctx):
+        self._connection_manager = ctx.Scheduler.connManager
 
     def add(self, update, with_future=False):
         queue = self._queues[hash(update[0].GetFullname()) % len(self._queues)]
@@ -230,7 +237,7 @@ def TagReprModifier(object):
         if promise:
             return promise.to_future()
 
-    def stop(self):
+    def Stop(self):
         for q in self._queues:
             q.put((self._STOP_INDICATOR, None))
 
@@ -243,7 +250,7 @@ def TagReprModifier(object):
 
         for _ in xrange(pool_size):
             q = Queue()
-            t = NamedThread(target=self._worker, args=(queue,), name_prefix='TagReprModifier')
+            t = ProfiledThread(target=self._worker, args=(q,), name_prefix='TagReprModifier')
             self._queues.append(q)
             self._threads.append(t)
 
@@ -272,7 +279,9 @@ class TagStorage(object):
         self.infile_items = None
         self.db_file = ""
         self.db_file_opened = False
-        self.tag_logger = TagLogger(self)
+        self._local_tag_modify_lock = threading.Lock()
+        self._repr_modifier = TagReprModifier() # TODO pool_size from rem.cfg
+        self.tag_logger = TagLogger()
         if len(args) == 1:
             if isinstance(args[0], dict):
                 self.inmem_items = args[0]
@@ -280,6 +289,14 @@ class TagStorage(object):
                 self.inmem_items = args[0].inmem_items
                 self.infile_items = args[0].infile_items
                 self.db_file = args[0].db_file
+
+    def Start(self):
+        self.tag_logger.Start()
+        self._repr_modifier.Start()
+
+    def Stop(self):
+        self._repr_modifier.Stop()
+        self.tag_logger.Stop()
 
     def __reduce__(self):
         return TagStorage, (self.inmem_items.copy(), )
@@ -301,14 +318,14 @@ class TagStorage(object):
             if as_bools:
                 if not state:
                     return False
-                elif isinstance(state, callbacks.TagBase):
+                elif isinstance(state, TagBase):
                     return state.IsSet()
                 else:
                     return state.is_set
             else:
                 if not state:
                     return None
-                elif isinstance(state, callbacks.TagBase):
+                elif isinstance(state, TagBase):
                     return {'is_set': state.IsSet()}
                 else:
                     return state.__dict__
@@ -319,9 +336,13 @@ class TagStorage(object):
             else:
                 ret[tag] = _ret_value(self._RawTag(tag, dont_create=True))
 
-        cloud_done = self._cloud.lookup(cloud_tags)
-
         promise = Promise()
+
+        if not cloud_tags:
+            promise.set(ret)
+            return promise.to_future()
+
+        cloud_done = self._cloud.lookup(cloud_tags)
 
         def on_cloud_done(f):
             if f.is_success():
@@ -363,7 +384,7 @@ class TagStorage(object):
                     update[0] = self.AcquireTag(update[0])
                 local_updates.append(update)
 
-        local_done = self._modify_local_tags(local_updates, with_future=True) \
+        local_done = self._modify_local_tags(local_updates, with_future=True) if local_updates \
             else None
 
         cloud_done = self._cloud.update(cloud_updates) if cloud_updates \
@@ -384,7 +405,7 @@ class TagStorage(object):
 
         with self._local_tag_modify_lock: # FIXME
             for update in updates:
-                self._journal.LogEvent(*update)
+                self.tag_logger.LogEvent(*update)
                 done.append(self._repr_modifier.add(update, with_future))
 
         if not with_future:
@@ -423,6 +444,8 @@ class TagStorage(object):
                 return TagWrapper(self.inmem_items.setdefault(tagname, tag))
 
     def IsCloudTagName(self, name):
+# XXX
+        return False
         return name.startswith('_cloud_') # TODO
 
     def _create_tag(self, name):
@@ -485,13 +508,14 @@ class TagStorage(object):
         self.DBConnect()
         self.conn_manager = context.Scheduler.connManager
         self.tag_logger.UpdateContext(context)
+        self._repr_modifier.UpdateContext(context)
 
         #self.additional_listeners = set()
         #self.additional_listeners.add(context.Scheduler.connManager)
         #self.additional_listeners.add(self.tag_logger)
 
     def Restore(self, timestamp):
-        self.tag_logger.Restore(timestamp)
+        self.tag_logger.Restore(timestamp, self)
 
     def ListDependentPackets(self, tag_name):
         return self._RawTag(tag_name).GetListenersIds()
@@ -509,8 +533,10 @@ class TagStorage(object):
             for name in old_tags:
                 tag = self.inmem_items.pop(name)
                 tag.callbacks.clear()
+                serialized = cPickle.dumps(tag)
                 try:
-                    self.infile_items[name] = cPickle.dumps(tag)
+                    #self.infile_items[name] = cPickle.dumps(tag)
+                    self.infile_items[name] = serialized
                 except bsddb3.error as e:
                     if 'BSDDB object has already been closed' in e.message:
                         self.db_file_opened = False

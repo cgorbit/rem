@@ -19,6 +19,7 @@ from rem import traced_rpc_method
 from rem import CheckEmailAddress, DefaultContext, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
 from rem import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
+from rem.callbacks import ETagEvent
 
 
 class DuplicatePackageNameException(Exception):
@@ -137,7 +138,7 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
 @readonly_method
 @traced_rpc_method()
 def check_tag(tagname):
-    return _scheduler.tagRef._are_tags_set([tagname]).get()[0]
+    return _scheduler.tagRef._are_tags_set([tagname]).get()[tagname]
 
 @traced_rpc_method("info")
 def set_tag(tagname):
@@ -527,7 +528,7 @@ class RemDaemon(object):
             self.timeWorker.Kill()
         logging.debug("rem-server\ttime_worker_stopped")
 
-        self.scheduler.Stop()
+        self.scheduler.Stop1()
 
         for worker in self.regWorkers:
             worker.Suspend()
@@ -544,7 +545,7 @@ class RemDaemon(object):
         logging.debug("rem-server\tworkers_stopped")
 
     # TODO Make it nice
-        self.scheduler.tagRef.tag_logger.Stop()
+        self.scheduler.Stop2()
         logging.debug("rem-server\tjournal_stopped")
 
         logging.debug("rem-server\tbefore_backups_thread_join")

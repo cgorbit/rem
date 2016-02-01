@@ -583,16 +583,20 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.schedWatcher.AddTaskT(timeout, fn, *args, **kws)
 
     def Start(self):
+        self.tagRef.Start()
         with self.lock:
             self.alive = True
             self.HasScheduledTask.notify_all()
         self.connManager.Start()
 
-    def Stop(self):
+    def Stop1(self):
         self.connManager.Stop()
         with self.lock:
             self.alive = False
             self.HasScheduledTask.notify_all()
+
+    def Stop2(self):
+        self.tagRef.Stop()
 
     def GetConnectionManager(self):
         return self.connManager

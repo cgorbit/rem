@@ -9,13 +9,13 @@ from collections import deque
 
 from xmlrpc import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported, SimpleXMLRPCServer
 from common import *
-from callbacks import Tag, ICallbackAcceptor, TagEvent, TagEventName
+from callbacks import TagBase, LocalTag, RemoteTag, ICallbackAcceptor, ETagEvent, TagEventName
 from rem.profile import ProfiledThread
 
 PROTOCOL_VERSION = 2
 
 def _get_tags_to_set(events):
-    return list(set(ev[0] for ev in events if ev[1] == TagEvent.Set))
+    return list(set(ev[0] for ev in events if ev[1] == ETagEvent.Set))
 
 class Deque(object):
     # Thread-affinity: just as needed for ClientInfo
@@ -59,7 +59,7 @@ class ClientInfo(Unpickable(events=Deque,
     PENALTY_FACTOR = 6
 
     # TODO Use finite timeout after async events will be implemented here
-    # TagEvent.Reset may be slow (specially on perun)
+    # ETagEvent.Reset may be slow (specially on perun)
     #SOCKET_TIMEOUT = 60.0
     SOCKET_TIMEOUT = socket._GLOBAL_DEFAULT_TIMEOUT
 
@@ -98,7 +98,7 @@ class ClientInfo(Unpickable(events=Deque,
         super(ClientInfo, self).__setstate__(sdict)
         if taglist:
             for tag in taglist:
-                self.RegisterTagEvent(tag, TagEvent.Set)
+                self.RegisterTagEvent(tag, ETagEvent.Set)
 
     def Resume(self):
         self.Connect()
@@ -377,21 +377,22 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
 
     def OnDone(self, tag):
-        self.RegisterTagEvent(tag, TagEvent.Set)
+        self.RegisterTagEvent(tag, ETagEvent.Set)
 
     def OnUndone(self, tag):
-        self.RegisterTagEvent(tag, TagEvent.Unset)
+        self.RegisterTagEvent(tag, ETagEvent.Unset)
 
     def OnReset(self, (tag, message)):
-        self.RegisterTagEvent(tag, TagEvent.Reset, message)
+        self.RegisterTagEvent(tag, ETagEvent.Reset, message)
 
 
     def RegisterTagEvent(self, tag, event, message=None):
         if not self.alive:
             return
         if not isinstance(tag, (LocalTag, RemoteTag)):
-            logging.error("%s is not Tag class instance", tag.GetName())
-            return
+            #logging.error("%s is not Tag class instance", tag.GetName())
+            #return
+            raise RuntimeError("%s is not Tag class instance", tag.GetName())
         if tag.IsRemote():
             return
 
@@ -499,7 +500,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
             with self.lock:
                 self.acceptors.add(tagname, clientname)
                 if self.scheduler.tagRef.CheckTag(tagname):
-                    self.RegisterTagEventForClient(clientname, tagname, TagEvent.Set)
+                    self.RegisterTagEventForClient(clientname, tagname, ETagEvent.Set)
         logging.debug("register_share %d tags for %s: done", len(tags), clientname)
 
     @traced_rpc_method()

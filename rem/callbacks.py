@@ -3,7 +3,7 @@ import logging
 import itertools
 from common import *
 
-class TagEvent(object):
+class ETagEvent(object):
     Unset = 0
     Set   = 1
     Reset = 2
@@ -68,6 +68,11 @@ class TagBase(CallbackHolder):
         CallbackHolder.__init__(self)
         self.done = False
         self._request_modify = modify
+
+    def __getstate__(self):
+        sdict = CallbackHolder.__getstate__(self)
+        sdict.pop('_request_modify')
+        return sdict
 
     def IsSet(self):
         return self.done
@@ -155,7 +160,7 @@ class TagBase(CallbackHolder):
 
 class LocalTag(TagBase):
     def __init__(self, name, modify):
-        TagBase.__init__(modify)
+        TagBase.__init__(self, modify)
         self.name = name
 
     def GetName(self):
@@ -215,4 +220,4 @@ class CloudTag(TagBase):
 
 
 def tagset(st=None):
-    return set((v.name if isinstance(v, Tag) else v) for v in st) if st else set()
+    return set((v.name if isinstance(v, TagBase) else v) for v in st) if st else set()

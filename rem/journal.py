@@ -9,15 +9,15 @@ from collections import deque
 
 from common import Unpickable, PickableRLock
 from profile import ProfiledThread
-from callbacks import ICallbackAcceptor, RemoteTag, Tag, ETagEvent
+from callbacks import ICallbackAcceptor, RemoteTag, LocalTag, ETagEvent
 
 
 class TagEvent(object):
     def __init__(self, tagname):
         self.tagname = tagname
 
-    def Redo(self, journal):
-        self.DoRedo(journal.tagRef.AcquireTag(self.tagname))
+    def Redo(self, tagRef):
+        self.DoRedo(tagRef.AcquireTag(self.tagname))
 
 
 class SetTagEvent(TagEvent):
@@ -58,20 +58,27 @@ class JournalDB(object):
     def sync(self):
         self._impl.sync()
 
+def log_stack(msg):
+    import traceback
+    from cStringIO import StringIO
+    out = StringIO()
+    traceback.print_stack(file=out)
+    logging.debug(msg + "\n" + out.getvalue())
 
-class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):
-    def __init__(self, tagRef):
+class TagLogger(object):
+    def __init__(self):
         super(TagLogger, self).__init__()
-        self._db = None
         self.db_filename = None
-# TODO For restore pass tagRef explicitely
-        self.tagRef = tagRef
+        self._db = None
         self._restoring_mode = False
         self._should_stop = False
         self._queue = deque()
         self._queue_lock = threading.Lock()
         self._db_lock = threading.Lock()
         self._queue_not_empty = threading.Condition(self._queue_lock)
+        self._write_thread = None
+
+    def Start(self):
         self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='Journal')
         self._write_thread.start()
 
@@ -124,10 +131,11 @@ class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):
             while self._queue:
                 self._write(cPickle.dumps(self._queue.pop()))
 
-    def _LogEvent(self, cls, *args, **kws):
-        obj = cls(*args, **kws)
+    def _LogEvent(self, ev):
         with self._queue_lock:
-            self._queue.append(obj)
+            if self._should_stop:
+                raise RuntimeError("Can't register events after should_stop")
+            self._queue.append(ev)
             self._queue_not_empty.notify()
 
     def LogEvent(self, tag, ev, msg=None):
@@ -144,18 +152,18 @@ class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):
         if not isinstance(tag, str):
             tag = tag.GetFullname()
 
-        self._LogEvent(cls(tag.GetFullname(), *args))
+        self._LogEvent(cls(tag, *args))
 
-    def OnDone(self, tag):
-        self.LogEvent(tag, ETagEvent.Set)
+    #def OnDone(self, tag):
+        #self.LogEvent(tag, ETagEvent.Set)
 
-    def OnUndone(self, tag):
-        self.LogEvent(tag, ETagEvent.Unset)
+    #def OnUndone(self, tag):
+        #self.LogEvent(tag, ETagEvent.Unset)
 
-    def OnReset(self, (tag, message)):
-        self.LogEvent(tag, ETagEvent.Reset, message)
+    #def OnReset(self, (tag, message)):
+        #self.LogEvent(tag, ETagEvent.Reset, message)
 
-    def Restore(self, timestamp):
+    def Restore(self, timestamp, tagRef):
         logging.debug("TagLogger.Restore(%d)", timestamp)
         dirname, db_filename = os.path.split(self.db_filename)
 
@@ -178,7 +186,7 @@ class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):
                 for k, v in f.items():
                     try:
                         obj = cPickle.loads(v)
-                        obj.Redo(self)
+                        obj.Redo(tagRef)
                     except Exception, e:
                         logging.exception("occurred in TagLogger while restoring from a journal : %s", e)
                 f.close()
@@ -206,3 +214,13 @@ class TagLogger(Unpickable(lock=PickableRLock), ICallbackAcceptor):
                 file_time = int(filename.split("-")[-1])
                 if file_time <= final_time:
                     os.remove(os.path.join(dirname, filename))
+
+#class TagLogger(object):
+    #def __init__(self):
+        #self.__impl = TagLoggerImpl()
+
+        #for name in ['Clear', 'Restore', 'Rotate', 'LogEvent', 'UpdateContext', 'Stop']:
+            #setattr(self, name, getattr(self.__impl, name))
+
+    #def __del__(self):
+        #self.__impl.Stop()
