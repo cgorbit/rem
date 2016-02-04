@@ -9,7 +9,7 @@ from collections import deque
 
 from xmlrpc import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported, SimpleXMLRPCServer
 from common import *
-from callbacks import TagBase, LocalTag, RemoteTag, ICallbackAcceptor, ETagEvent, TagEventName
+from callbacks import TagBase, ICallbackAcceptor, ETagEvent, TagEventName
 from rem.profile import ProfiledThread
 
 PROTOCOL_VERSION = 2
@@ -389,7 +389,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     def RegisterTagEvent(self, tag, event, message=None):
         if not self.alive:
             return
-        if not isinstance(tag, (LocalTag, RemoteTag)):
+        if not isinstance(tag, TagBase):
             #logging.error("%s is not Tag class instance", tag.GetName())
             #return
             raise RuntimeError("%s is not Tag class instance", tag.GetName())

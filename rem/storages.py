@@ -1,3 +1,4 @@
+#coding: utf-8
 from __future__ import with_statement
 import logging
 import os
@@ -16,10 +17,7 @@ from Queue import Queue
 import fork_locking
 from future import Promise, WaitFutures
 from profile import ProfiledThread
-
-sys.path[0:0] = ['/home/trofimenkov/cloud_tags']
-import client as cloud_tags
-sys.path[0:1] = []
+import cloud_client
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -220,6 +218,14 @@ class SafeCloud(object):
         # This call may lead to immediate _on_done in current thread
         done.subscribe(lambda f: self._on_done(id, f))
 
+#class TagReprUpdate(object):
+    #__slots__ = ['tag', 'event', 'msg', 'version']
+
+    #def __init__(self, tag, event, msg=None, version=None):
+        #self.tag = tag
+        #self.event = event
+        #self.msg = msg
+        #self.version = version
 
 class TagReprModifier(object):
     _STOP_INDICATOR = object()
@@ -267,9 +273,17 @@ class TagReprModifier(object):
             if update is self._STOP_INDICATOR:
                 return
 
-            tag, event, msg = update
+            tag, event = update[0:2]
+            msg = None
+            version = None
+            if len(update) >= 3:
+                msg = update[2]
+            if len(update) >= 4:
+                version = update[3]
 
-            tag._ModifyLocalState(event, msg) # FIXME try/except?
+            tag._ModifyLocalState(event, msg, version) # FIXME try/except?
+
+        # FIXME try/except?
             self._connection_manager.RegisterTagEvent(tag, event, msg)
 
             if promise:
@@ -299,16 +313,36 @@ class TagStorage(object):
     def Start(self):
         self.tag_logger.Start()
         self._repr_modifier.Start()
-        self._cloud = cloud_tags.getc(self._on_cloud_journal_event)
+        self._cloud = cloud_client.getc(self._on_cloud_journal_event)
         self._safe_cloud = SafeCloud(self._cloud, self.tag_logger)
+        self._subscribe_all()
+
+    def _subscribe_all(self):
+        with self.lock:
+            # FIXME могут ли они быть ещё где-то, суки?
+            cloud_tags = set(
+                tag.GetFullname()
+                    for tag in self.inmem_items.itervalues()
+                        if tag.IsCloud()
+            )
+
+            # TODO split in groups in cloud_client?
+
+            if cloud_tags:
+                self._cloud.subscribe(cloud_tags)
 
     def _on_cloud_journal_event(self, ev):
-        logging.debug('before GOT EVENT FOR %s' % ev.tag_name)
-        time.sleep(5)
-        tag = self._RawTag(ev.tag_name, dont_create=True)
+        logging.debug('before journal event for %s' % ev.tag_name)
+
+        with self.lock: # FIXME
+            tag = self.inmem_items.get(ev.tag_name)
 
         if not tag:
             logging.warning('no object in inmem_items for cloud tag %s' % ev.tag_name)
+            return
+
+        if not tag.IsCloud(): # it's like assert
+            logging.error('tag %s is not cloud tag in inmem_items but receives event from cloud' % ev.tag_name)
             return
 
         if tag.version >= ev.version:
@@ -316,18 +350,22 @@ class TagStorage(object):
                 % (tag.version, ev.version, ev.tag_name))
             return
 
-        def add_event(event, msg=None):
-            self._repr_modifier.add((tag, event, msg))
+        def add_event(event, version, msg=None):
+            self._repr_modifier.add((tag, event, msg, version))
 
     # FIXME here with warning, on state sync without it
         if ev.version > ev.last_reset_version and tag.version < ev.last_reset_version:
-            add_event(ETagEvent.Reset, ev.last_reset_comment)
+            add_event(ETagEvent.Reset, ev.last_reset_version, ev.last_reset_comment)
 
-        add_event(ev.event, ev.comment)
-        logging.debug('after GOT EVENT FOR %s' % ev.tag_name)
+        add_event(ev.event, ev.version, ev.comment)
+
+        logging.debug('after journal event for %s' % ev.tag_name)
 
     def Stop(self):
-        self._cloud.stop()
+        # TODO Kosher
+        self._cloud.stop(timeout=10)
+        self._cloud.stop(wait=False)
+
 # FIXME order
         self._safe_cloud = None # TODO
 
@@ -415,7 +453,8 @@ class TagStorage(object):
             if self.IsCloudTagName(update[0]):
                 cloud_updates.append(update)
             else:
-                if isinstance(update[0], str):
+                #if isinstance(update[0], str):
+                if True:
                     update = list(update)
                     update[0] = self.AcquireTag(update[0])
                 local_updates.append(update)
@@ -474,13 +513,24 @@ class TagStorage(object):
         return ':' in tagname
 
     def AcquireTag(self, tagname):
-        if tagname:
-            tag = self._RawTag(tagname)
-            with self.lock:
-                return TagWrapper(self.inmem_items.setdefault(tagname, tag))
+        tag = self._RawTag(tagname)
+
+        with self.lock:
+            ret = self.inmem_items.setdefault(tagname, tag)
+
+            if ret is tag and tag.IsCloud() and self._cloud: # FIXME "and self._cloud" is bullshit?
+                logging.debug('AcquireTag.subscribe(%s)' % tagname)
+                self._cloud.subscribe([tagname])
+
+            return TagWrapper(ret)
+
+    def TryGetInMemoryTag(self, name):
+        with self.lock: # FIXME useless lock
+            obj = self.inmem_items.get(name)
+            return TagWrapper(obj) if obj else None
 
     def IsCloudTagName(self, name):
-        return name.startswith('_cloud_') # TODO
+        return name.startswith('_cloud_') or False # TODO
 
     def _create_tag(self, name):
         if self.IsRemoteTagName(name):
@@ -495,6 +545,7 @@ class TagStorage(object):
             raise ValueError("Bad tag name")
 
         tag = self.inmem_items.get(tagname, None)
+
         if tag is None:
             if not self.db_file_opened:
                 self.DBConnect()
@@ -506,7 +557,8 @@ class TagStorage(object):
             else:
                 tag = self._create_tag(tagname)
 
-    # TODO Ignore in backup
+# XXX TODO Ignore in backup
+
         #for obj in self.additional_listeners:
             #tag.AddNonpersistentCallbackListener(obj)
 
@@ -557,14 +609,25 @@ class TagStorage(object):
 
     def tofileOldItems(self):
         old_tags = set()
+        unsub_tags = set()
+
         for name, tag in self.inmem_items.items():
             #tag for removing have no listeners and have no external links for himself (actualy 4 links)
             if tag.GetListenersNumber() == 0 and sys.getrefcount(tag) == 4:
-                old_tags.add(name)
+                if tag.IsCloud():
+                    unsub_tags.add(name)
+                else:
+                    old_tags.add(name)
+
         if not self.db_file_opened:
             with self.lock:
                 self.DBConnect()
+
+# XXX FIXME At this point GetListenersNumber and getrefcount may change
         with self.lock:
+            if unsub_tags:
+                self._cloud.unsubscribe(unsub_tags)
+
             for name in old_tags:
                 tag = self.inmem_items.pop(name)
                 tag.callbacks.clear()

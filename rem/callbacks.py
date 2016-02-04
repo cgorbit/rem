@@ -77,8 +77,8 @@ class TagBase(CallbackHolder):
     def IsSet(self):
         return self.done
 
-    def __nonzero__(self):
-        return self.done
+    #def __nonzero__(self):
+        #return self.done
 
     def _Set(self):
         logging.debug("tag %s\tset", self.GetFullname())
@@ -90,18 +90,21 @@ class TagBase(CallbackHolder):
         self.done = False
         self.FireEvent("undone")
 
-    def _Reset(self, message):
+    def _Reset(self, msg):
         logging.debug("tag %s\treset", self.GetFullname())
         self.done = False
-        self.FireEvent("reset", (self, message))
+        self.FireEvent("reset", (self, msg))
 
-    def _ModifyLocalState(self, event, message=None):
+    def _ModifyLocalState(self, event, msg=None, version=None):
+        if version is not None: # TODO Kosher
+            self.version = version
+
         if event == ETagEvent.Set:
             self._Set()
         elif event == ETagEvent.Unset:
             self._Unset()
         elif event == ETagEvent.Reset:
-            self._Reset(message)
+            self._Reset(msg)
 
 #
     def Set(self):
@@ -201,7 +204,7 @@ class CloudTag(TagBase):
     def __init__(self, name, modify):
         TagBase.__init__(self, modify)
         self.name = name
-        self.version = 0 # FIXME Unpickable
+        self.version = 0 # FIXME None
 
     # FIXME Changes will be applied serialized by tagname hash,
     # so no lock is need here

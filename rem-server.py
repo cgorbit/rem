@@ -100,7 +100,7 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
             shell = shell.encode('utf-8')
         parents = [pck.jobs[int(jid)] for jid in parents]
         pipe_parents = [pck.jobs[int(jid)] for jid in pipe_parents]
-        job = pck.Add(shell, parents, pipe_parents, _scheduler.tagRef.AcquireTag(set_tag), tries, \
+        job = pck.Add(shell, parents, pipe_parents, set_tag and _scheduler.tagRef.AcquireTag(set_tag), tries, \
                       max_err_len, retry_delay, pipe_fail, description, notify_timeout, max_working_time, output_to_status)
         return str(job.id)
     raise AttributeError("nonexisted packet id: %s" % pck_id)
@@ -165,6 +165,27 @@ def check_tags(tags):
 @traced_rpc_method()
 def lookup_tags(tags):
     return _scheduler.tagRef._lookup_tags(tags).get()
+
+@readonly_method
+@traced_rpc_method()
+def get_inmemory_tag_state(tag):
+    tag = _scheduler.tagRef.TryGetInMemoryTag(tag)
+    if not tag:
+        return None
+
+    state = tag.__dict__.copy()
+
+# TODO Kosher
+
+    ret = {
+        'is_set': state['done']
+    }
+
+    if tag.IsCloud():
+        for field in ['version', 'last_reset_version', 'last_reset_comment']:
+            ret[field] = state.get(field)
+
+    return ret
 
 @traced_rpc_method("info")
 def update_tags(updates):
@@ -397,10 +418,18 @@ class ApiServer(object):
         self.register_function(pck_add_job, "pck_add_job")
         self.register_function(pck_addto_queue, "pck_addto_queue")
         self.register_function(pck_moveto_queue, "pck_moveto_queue")
+
         self.register_function(check_tag, "check_tag")
         self.register_function(set_tag, "set_tag")
         self.register_function(unset_tag, "unset_tag")
         self.register_function(reset_tag, "reset_tag")
+
+        self.register_function(check_tags, "check_tags")
+        self.register_function(lookup_tags, "lookup_tags")
+        self.register_function(update_tags, "update_tags")
+
+        self.register_function(get_inmemory_tag_state, "get_inmemory_tag_state")
+
         self.register_function(get_dependent_packets_for_tag, "get_dependent_packets_for_tag")
         self.register_function(queue_suspend, "queue_suspend")
         self.register_function(queue_resume, "queue_resume")
@@ -638,7 +667,7 @@ def scheduler_test():
         runner, runtm = sc.schedWatcher.tasks.get()
         print runtm, runner
 
-def run_daemon(ctx, sched):
+def start_daemon(ctx, sched, wait=True):
     should_stop = [False]
 
     def _log_signal(sig):
@@ -665,9 +694,11 @@ def run_daemon(ctx, sched):
     if should_stop[0]:
         daemon.stop(wait=False)
 
-    daemon.wait()
+    def join():
+        daemon.wait()
+        set_handler(signal.SIG_DFL)
 
-    set_handler(signal.SIG_DFL)
+    return daemon, join
 
 if __name__ == "__main__":
     _context = DefaultContext()
@@ -682,6 +713,6 @@ if __name__ == "__main__":
         scheduler_test()
 
     elif _context.execMode == "start":
-        run_daemon(_context, _scheduler)
+        start_daemon(_context, _scheduler)[1]()
 
     logging.debug("rem-server\texit_main")

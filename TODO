@@ -1,0 +1,42 @@
+1. Backup child process stderr: Failed to execute child function: '_request_modify'
+
+2. _cloud.stop() failed
+    2016-02-04 23:28:46,701 7785 DEBUG    cloud_client: Failed to connect: [Errno 111] Connection refused
+    2016-02-04 23:28:48,687 7785 DEBUG    cloud_client: Failed to connect: [Errno 111] Connection refused
+    2016-02-04 23:28:52,657 7785 DEBUG    cloud_client: Failed to connect: [Errno 111] Connection refused
+    2016-02-04 23:29:00,597 7785 DEBUG    cloud_client: Failed to connect: [Errno 111] Connection refused
+    2016-02-04 23:29:10,598 7785 DEBUG    cloud_client: Failed to connect: [Errno 111] Connection refused
+    2016-02-04 23:29:18,085 7653 WARNING  rem_server:   rem-server  signal 3 has gotten
+    2016-02-04 23:29:18,085 7907 DEBUG    rem_server:   rem-server  enter_stop
+    2016-02-04 23:29:18,085 7907 DEBUG    rem_server:   rem-server  rpc_stopped
+    2016-02-04 23:29:18,086 7907 DEBUG    rem_server:   rem-server  time_worker_stopped
+    2016-02-04 23:29:18,095 7907 DEBUG    rem_server:   rem-server  workers_stopped
+    2016-02-04 23:29:18,095 7907 INFO     cloud_client: Stopping YtTags.Client (_ST_WAIT)
+    2016-02-04 23:29:20,598 7785 DEBUG    cloud_client: Failed to connect: [Errno 111] Connection refused
+
+
+3.
+    + accepted 
+    + detach
+    Subscriptions: {
+    "2": 0x00007FDB6C016AD0, 
+    "_": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "t": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "_cloud_sdf": 0x00007FDB6C016AD0, 0x00007FDB6C001C60, 
+    "s": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "u": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "e": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "d": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "o": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "c": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "0": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "l": 0x00007FDB6C001C60, 0x00007FDB6C016AD0, 
+    "1": 0x00007FDB6C001C60, 
+    }
+    + accepted 
+
+4.
+    terminate called after throwing an instance of 'yexception'
+    what():  yt/experiments/cloud_tags_server/server.cpp:351: Unknown message type
+    Aborted
+
