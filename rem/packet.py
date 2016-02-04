@@ -7,7 +7,7 @@ import shutil
 import errno
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
-from common import BinaryFile, PickableRLock, SendEmail, Unpickable, safeStringEncode
+from common import BinaryFile, PickableRLock, SendEmail, Unpickable, safeStringEncode, get_None
 from job import Job, PackedExecuteResult
 import osspec
 import fork_locking
@@ -330,7 +330,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                            notify_emails=(list, []),
                            flags=int,
                            kill_all_jobs_on_error=(bool, True),
-                           _working_empty=lambda : None,
+                           _working_empty=get_None,
                            isResetable=(bool, True)),
                 CallbackHolder,
                 ICallbackAcceptor,

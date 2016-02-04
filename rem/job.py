@@ -5,7 +5,7 @@ import time
 import datetime
 
 from callbacks import CallbackHolder
-from common import FuncRunner, SendEmail, Unpickable, safeint, nullobject, zeroint
+from common import FuncRunner, SendEmail, Unpickable, safeint, nullobject, zeroint, get_None, get_False
 import osspec
 import packet
 import constants
@@ -93,7 +93,9 @@ class Job(Unpickable(err=nullobject,
                      notify_timeout=(int, constants.NOTIFICATION_TIMEOUT),
                      working_time=int,
                      _notified=bool,
-                     output_to_status=bool),
+                     output_to_status=bool,
+                     _should_stop=get_False,
+                     _process=get_None),
           CallbackHolder):
     ERR_PENALTY_FACTOR = 6
 
@@ -117,8 +119,12 @@ class Job(Unpickable(err=nullobject,
         self.packetRef = packetRef
         self.AddCallbackListener(self.packetRef)
         self.output_to_status = output_to_status
-        self._process = None
-        self._should_stop = False
+
+    def __getstate__(self):
+        sdict = CallbackHolder.__getstate__(self)
+        sdict.pop('_process', None)
+        sdict.pop('_should_stop', None)
+        return sdict
 
     @staticmethod
     def __read_stream(fh, buffer):

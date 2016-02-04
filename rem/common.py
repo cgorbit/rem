@@ -526,3 +526,9 @@ def SendEmail(emails, msg_helper):
 def DiscardKey(d, key):
     if key in d:
         del d[key]
+
+def get_None(*args):
+    return None
+
+def get_False(*args):
+    return False
