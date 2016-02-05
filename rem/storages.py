@@ -204,13 +204,19 @@ class SafeCloud(object):
             if f.is_success():
                 self._running.pop(id)
                 return
-        # TODO
+
+# TODO Backup event failed tasks
         logging.warning("Task #%d failed %s" % (id, self._running[id]))
 
     def update(self, event):
         with self._lock:
             # XXX log_cloud_request and seq_update under lock, so sequential
+
+# TODO Backup state
+
+# TODO Log update intentions to tag_logger
             #self._journal.log_cloud_request(event) # TODO
+
             id = self._alloc_id()
             done = self._cloud.serial_update(event)
             self._running[id] = event
@@ -562,11 +568,6 @@ class TagStorage(object):
             else:
                 tag = self._create_tag(tagname)
 
-# XXX TODO Ignore in backup
-
-        #for obj in self.additional_listeners:
-            #tag.AddNonpersistentCallbackListener(obj)
-
         return tag
 
     def ListTags(self, name_regex=None, prefix=None, memory_only=True):
@@ -601,10 +602,6 @@ class TagStorage(object):
         self.conn_manager = context.Scheduler.connManager
         self.tag_logger.UpdateContext(context)
         self._repr_modifier.UpdateContext(context)
-
-        #self.additional_listeners = set()
-        #self.additional_listeners.add(context.Scheduler.connManager)
-        #self.additional_listeners.add(self.tag_logger)
 
     def Restore(self, timestamp):
         self.tag_logger.Restore(timestamp, self)
