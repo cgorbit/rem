@@ -193,6 +193,7 @@ class SafeCloud(object):
         self._cloud = cloud
         self._journal = journal
         self._lock = fork_locking.Lock()
+        self._running = {}
 
     def _alloc_id(self):
         ret = self._next_id
@@ -204,22 +205,24 @@ class SafeCloud(object):
             if f.is_success():
                 self._running.pop(id)
                 return
+            else:
+                pass # TODO XXX TODO XXX
 
 # TODO Backup event failed tasks
         logging.warning("Task #%d failed %s" % (id, self._running[id]))
 
-    def update(self, event):
+    def update(self, update):
         with self._lock:
             # XXX log_cloud_request and seq_update under lock, so sequential
 
 # TODO Backup state
 
 # TODO Log update intentions to tag_logger
-            #self._journal.log_cloud_request(event) # TODO
+            #self._journal.log_cloud_request(update) # TODO
 
             id = self._alloc_id()
-            done = self._cloud.serial_update(event)
-            self._running[id] = event
+            done = self._cloud.serial_update(update)
+            self._running[id] = update
 
         # This call may lead to immediate _on_done in current thread
         done.subscribe(lambda f: self._on_done(id, f))
@@ -521,6 +524,7 @@ class TagStorage(object):
             return tag.IsLocallySet() if tag else False
 
     def IsCloudTagName(self, name):
+        return True
         return name.startswith('_cloud_') or False # TODO
 
     def _create_tag(self, name):
@@ -612,6 +616,10 @@ class TagStorage(object):
 
 # XXX FIXME At this point GetListenersNumber and getrefcount may change
         with self.lock:
+            for name in unsub_tags:
+                tag = self.inmem_items.pop(name)
+                tag.callbacks.clear() # j.i.c
+
             if unsub_tags:
                 self._cloud.unsubscribe(unsub_tags)
 
@@ -627,6 +635,7 @@ class TagStorage(object):
                         self.db_file_opened = False
                         self.db_file = None
                     raise
+
             self.infile_items.sync()
 
 
