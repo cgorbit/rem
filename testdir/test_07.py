@@ -8,7 +8,7 @@ class T07(unittest.TestCase):
     def testTagWrapperSerialization(self):
         import cPickle
 
-        tag = rem.Tag("test")
+        tag = rem.LocalTag("test", lambda *args: None)
         wrapOrig = rem.storages.TagWrapper(tag)
         wrapDesc = cPickle.dumps(wrapOrig)
         wrapNew = cPickle.loads(wrapDesc)

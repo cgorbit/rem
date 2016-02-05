@@ -291,6 +291,10 @@ class TagReprModifier(object):
         # FIXME try/except? NO!
             self._connection_manager.RegisterTagEvent(tag, event, msg)
 
+            # XXX see tofileOldItems
+            del update
+            del tag
+
             if promise:
                 promise.set()
 
