@@ -297,7 +297,7 @@ class TagReprModifier(object):
 
 
 class TagStorage(object):
-    def __init__(self, *args):
+    def __init__(self, rhs=None):
         self.lock = PickableLock()
         self.inmem_items = {}
         self.infile_items = None
@@ -308,13 +308,13 @@ class TagStorage(object):
         self.tag_logger = TagLogger()
         self._cloud = None
         self._safe_cloud = None
-        if len(args) == 1:
-            if isinstance(args[0], dict):
-                self.inmem_items = args[0]
-            elif isinstance(args[0], TagStorage):
-                self.inmem_items = args[0].inmem_items
-                self.infile_items = args[0].infile_items
-                self.db_file = args[0].db_file
+        if rhs:
+            if isinstance(rhs, dict):
+                self.inmem_items = rhs
+            elif isinstance(rhs, TagStorage):
+                self.inmem_items = rhs.inmem_items
+                self.infile_items = rhs.infile_items
+                self.db_file = rhs.db_file
 
     def Start(self):
         self.tag_logger.Start()
@@ -382,7 +382,6 @@ class TagStorage(object):
     def __reduce__(self):
         return TagStorage, (self.inmem_items.copy(), )
 
-######
     def _lookup_tags(self, tags):
         return self.__lookup_tags(tags, False)
 
@@ -438,7 +437,6 @@ class TagStorage(object):
 
         return promise.to_future()
 
-######
     def _modify_cloud_tag(self, safe, tag, event, msg=None):
         update = (tag.GetFullname(), event, msg)
         if safe:
@@ -551,6 +549,7 @@ class TagStorage(object):
             tagDescr = self.infile_items.get(tagname, None)
             if tagDescr:
                 tag = cPickle.loads(tagDescr)
+                self.vivify_tags([tag])
             elif dont_create:
                 return None
             else:
