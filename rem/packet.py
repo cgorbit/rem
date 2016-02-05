@@ -113,14 +113,14 @@ class JobPacketImpl(object):
         for tag in wait_tags:
             tag.AddCallbackListener(self)
         self.allTags = set(tag.GetFullname() for tag in wait_tags)
-        self.waitTags = set(tag.GetFullname() for tag in wait_tags if not tag.IsSet())
+        self.waitTags = set(tag.GetFullname() for tag in wait_tags if not tag.IsLocallySet())
 
     def SetDoneTags(self):
         if self.done_indicator:
             self.done_indicator.Set()
 
     def ProcessTagEvent(self, tag):
-        if tag.IsSet():
+        if tag.IsLocallySet():
             tagname = tag.GetFullname()
             if tagname in self.waitTags:
                 self.waitTags.remove(tagname)
@@ -137,7 +137,7 @@ class JobPacketImpl(object):
     def UpdateTagDependencies(self, tagStorage):
         self.waitTags = tagset(self.waitTags)
         for tagname in list(self.waitTags):
-            if tagStorage.CheckTag(tagname):
+            if tagStorage._is_tag_locally_set(tagname):
                 self.ProcessTagEvent(tagStorage.AcquireTag(tagname))
         if isinstance(self.done_indicator, TagBase):
             self.done_indicator = tagStorage.AcquireTag(self.done_indicator.name)

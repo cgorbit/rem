@@ -84,7 +84,7 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag, 
             assert CheckEmailAddress(email), "incorrect e-mail: " + email
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck = JobPacket(packet_name, priority, _context, notify_emails,
-                    wait_tags=wait_tags, set_tag=_scheduler.tagRef.AcquireTag(set_tag),
+                    wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
                     kill_all_jobs_on_error=kill_all_jobs_on_error, isResetable=resetable)
     _scheduler.RegisterNewPacket(pck, wait_tags)
     logging.info('packet %s registered as %s', packet_name, pck.id)

@@ -499,7 +499,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
             # 3. also guard self.acceptors
             with self.lock:
                 self.acceptors.add(tagname, clientname)
-                if self.scheduler.tagRef.CheckTag(tagname):
+                if self.scheduler.tagRef._is_tag_locally_set(tagname):
                     self.RegisterTagEventForClient(clientname, tagname, ETagEvent.Set)
         logging.debug("register_share %d tags for %s: done", len(tags), clientname)
 

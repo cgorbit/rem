@@ -319,7 +319,7 @@ class TagStorage(object):
     def Start(self):
         self.tag_logger.Start()
         self._repr_modifier.Start()
-        self._cloud = cloud_client.getc(self._on_cloud_journal_event)
+        self._cloud = cloud_client.getc(on_event=self._on_cloud_journal_event)
         self._safe_cloud = SafeCloud(self._cloud, self.tag_logger)
         self._subscribe_all()
 
@@ -400,14 +400,14 @@ class TagStorage(object):
                 if not state:
                     return False
                 elif isinstance(state, TagBase):
-                    return state.IsSet()
+                    return state.IsLocallySet()
                 else:
                     return state.is_set
             else:
                 if not state:
                     return None
                 elif isinstance(state, TagBase):
-                    return {'is_set': state.IsSet()}
+                    return {'is_set': state.IsLocallySet()}
                 else:
                     return state.__dict__
 
@@ -498,23 +498,6 @@ class TagStorage(object):
     def _modify_local_tag(self, safe, tag, event, msg=None):
         with_future = not safe
         return self._modify_local_tags([(tag, event, msg)], with_future)
-######
-
-# TODO check usage
-
-    #def SetTag(self, tagname):
-        #self.AcquireTag(tagname).Set()
-
-    #def UnsetTag(self, tagname):
-        #self.AcquireTag(tagname).Unset()
-
-    #def ResetTag(self, tagname, message):
-        #self.AcquireTag(tagname).Reset(message)
-
-    #def CheckTag(self, tagname):
-        #return self._RawTag(tagname).IsSet()
-
-######
 
     def IsRemoteTagName(self, tagname):
         return ':' in tagname
@@ -535,6 +518,11 @@ class TagStorage(object):
         with self.lock: # FIXME useless lock
             obj = self.inmem_items.get(name)
             return TagWrapper(obj) if obj else None # FIXME WHAT TagWrapper FOR?!??!?
+
+    def _is_tag_locally_set(self, name):
+        with self.lock: # FIXME useless lock
+            tag = self.inmem_items.get(name)
+            return tag.IsLocallySet() if tag else False
 
     def IsCloudTagName(self, name):
         return name.startswith('_cloud_') or False # TODO
@@ -576,7 +564,7 @@ class TagStorage(object):
         for name, tag in self.inmem_items.items():
             if name and (not prefix or name.startswith(prefix)) \
                 and (not name_regex or name_regex.match(name)):
-                yield name, tag.IsSet()
+                yield name, tag.IsLocallySet()
         if memory_only:
             return
         inner_db = bsddb3.btopen(self.db_file, "r")
@@ -586,7 +574,7 @@ class TagStorage(object):
                 if prefix and not name.startswith(prefix):
                     break
                 if not name_regex or name_regex.match(name):
-                    yield name, cPickle.loads(tagDescr).IsSet()
+                    yield name, cPickle.loads(tagDescr).IsLocallySet()
                 name, tagDescr = inner_db.next()
         except bsddb3._pybsddb.DBNotFoundError:
             pass

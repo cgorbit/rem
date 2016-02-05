@@ -74,7 +74,7 @@ class TagBase(CallbackHolder):
         sdict.pop('_request_modify') # TODO Set on _any_ backups loading
         return sdict
 
-    def IsSet(self):
+    def IsLocallySet(self):
         return self.done
 
     def _Set(self):
