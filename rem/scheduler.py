@@ -21,7 +21,7 @@ from connmanager import ConnectionManager
 from packet import JobPacket, PacketState, PacketFlag
 from queue import Queue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
-from callbacks import ICallbackAcceptor, CallbackHolder
+from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
 
 class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
@@ -362,14 +362,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
         import cPickle as pickle
 
         class PacketsRegistrator(object):
-            __slots__ = ['packets']
-
             def __init__(self):
-                self.packets = []
+                self.packets = deque()
+                self.tags = deque()
 
             def register(self, obj, state):
                 if isinstance(obj, packet.JobPacket):
                     self.packets.append(obj)
+                elif isinstance(obj, TagBase):
+                    self.tags.append(obj)
 
             def LogStats(self):
                 pass
@@ -394,15 +395,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         objects_registrator.LogStats()
 
-        return sdict, packets_registrator.packets
+        return sdict, packets_registrator
 
     def LoadBackup(self, filename, restorer=None):
         with self.lock:
             with open(filename, "r") as stream:
-                sdict, packets = self.Deserialize(stream, self.ObjectRegistratorClass())
+                sdict, registrator = self.Deserialize(stream, self.ObjectRegistratorClass())
 
             if restorer:
-                restorer(sdict, packets)
+                restorer(sdict, registrator)
 
             qRef = sdict.pop("qRef")
             prevWatcher = sdict.pop("schedWatcher", None) # from old backups
@@ -412,7 +413,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.UpdateContext(None)
 
             tagStorage = self.tagRef
-            for pck in packets:
+
+            #for tag in registrator.tags:
+                # FIXME nothing listeners to drop
+            tagStorage.vivify_tags(registrator.tags)
+
+            for pck in registrator.packets:
                 pck.working.clear()
                 pck.VivifyDoneTagsIfNeed(tagStorage)
 

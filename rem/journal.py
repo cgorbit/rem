@@ -11,6 +11,7 @@ from common import Unpickable, PickableRLock
 from profile import ProfiledThread
 from callbacks import ICallbackAcceptor, RemoteTag, LocalTag, ETagEvent
 
+# FIXME TODO ConnectionManager willn't receive events anymore
 
 class TagEvent(object):
     def __init__(self, tagname):

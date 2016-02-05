@@ -71,14 +71,11 @@ class TagBase(CallbackHolder):
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
-        sdict.pop('_request_modify')
+        sdict.pop('_request_modify') # TODO Set on _any_ backups loading
         return sdict
 
     def IsSet(self):
         return self.done
-
-    #def __nonzero__(self):
-        #return self.done
 
     def _Set(self):
         logging.debug("tag %s\tset", self.GetFullname())
@@ -172,6 +169,8 @@ class LocalTag(TagBase):
     def GetFullname(self):
         return self.name
 
+Tag = LocalTag # old backups
+
 
 class RemoteTag(TagBase):
     def __init__(self, name, modify):
@@ -205,9 +204,6 @@ class CloudTag(TagBase):
         TagBase.__init__(self, modify)
         self.name = name
         self.version = 0 # FIXME None
-
-    # FIXME Changes will be applied serialized by tagname hash,
-    # so no lock is need here
 
     def GetName(self):
         return self.name

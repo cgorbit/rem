@@ -168,7 +168,7 @@ def lookup_tags(tags):
 
 @readonly_method
 @traced_rpc_method()
-def get_inmemory_tag_state(tag):
+def get_in_memory_tag_state(tag):
     tag = _scheduler.tagRef.TryGetInMemoryTag(tag)
     if not tag:
         return None
@@ -189,6 +189,7 @@ def get_inmemory_tag_state(tag):
 
 @traced_rpc_method("info")
 def update_tags(updates):
+    # TODO VERIFY `updates' HERE
     return _scheduler.tagRef._modify_tags_unsafe(updates).get()
 
 #########
@@ -414,49 +415,51 @@ class ApiServer(object):
         self.rpcserver.register_function(func, name)
 
     def register_all_functions(self):
-        self.register_function(create_packet, "create_packet")
-        self.register_function(pck_add_job, "pck_add_job")
-        self.register_function(pck_addto_queue, "pck_addto_queue")
-        self.register_function(pck_moveto_queue, "pck_moveto_queue")
+        funcs = [
+            check_binary_and_lock,
+            check_binary_exist,
+            check_tag,
+            check_tags,
+            create_packet,
+            get_backupable_state,
+            get_dependent_packets_for_tag,
+            get_in_memory_tag_state,
+            list_queues,
+            list_tags,
+            lookup_tags,
+            pck_add_binary,
+            pck_add_job,
+            pck_addto_queue,
+            pck_delete,
+            pck_get_file,
+            pck_list_files,
+            pck_moveto_queue,
+            pck_reset,
+            pck_resume,
+            pck_status,
+            pck_suspend,
+            queue_change_limit,
+            queue_delete,
+            queue_list,
+            queue_list_updated,
+            queue_resume,
+            queue_set_error_lifetime,
+            queue_set_success_lifetime,
+            queue_status,
+            queue_suspend,
+            reset_tag,
+            save_binary,
+            set_backupable_state,
+            set_tag,
+            unset_tag,
+            update_tags,
+        ]
 
-        self.register_function(check_tag, "check_tag")
-        self.register_function(set_tag, "set_tag")
-        self.register_function(unset_tag, "unset_tag")
-        self.register_function(reset_tag, "reset_tag")
-
-        self.register_function(check_tags, "check_tags")
-        self.register_function(lookup_tags, "lookup_tags")
-        self.register_function(update_tags, "update_tags")
-
-        self.register_function(get_inmemory_tag_state, "get_inmemory_tag_state")
-
-        self.register_function(get_dependent_packets_for_tag, "get_dependent_packets_for_tag")
-        self.register_function(queue_suspend, "queue_suspend")
-        self.register_function(queue_resume, "queue_resume")
-        self.register_function(queue_status, "queue_status")
-        self.register_function(queue_list, "queue_list")
-        self.register_function(queue_list_updated, "queue_list_updated")
-        self.register_function(queue_change_limit, "queue_change_limit")
-        self.register_function(queue_delete, "queue_delete")
-        self.register_function(list_tags, "list_tags")
-        self.register_function(list_queues, "list_queues")
-        self.register_function(pck_status, "pck_status")
-        self.register_function(pck_suspend, "pck_suspend")
-        self.register_function(pck_resume, "pck_resume")
-        self.register_function(pck_delete, "pck_delete")
-        self.register_function(pck_reset, "pck_reset")
-        self.register_function(check_binary_exist, "check_binary_exist")
-        self.register_function(save_binary, "save_binary")
-        self.register_function(check_binary_and_lock, "check_binary_and_lock")
-        self.register_function(pck_add_binary, "pck_add_binary")
-        self.register_function(pck_list_files, "pck_list_files")
-        self.register_function(pck_get_file, "pck_get_file")
-        self.register_function(queue_set_success_lifetime, "queue_set_success_lifetime")
-        self.register_function(queue_set_error_lifetime, "queue_set_error_lifetime")
-        self.register_function(set_backupable_state, "set_backupable_state")
-        self.register_function(get_backupable_state, "get_backupable_state")
         if self.allow_backup_method:
-            self.register_function(do_backup, "do_backup")
+            funcs.append(do_backup)
+
+        for func in funcs:
+            self.register_function(func, func.__name__)
 
     def request_processor(self):
         rpc_fd = self.rpcserver.fileno()
@@ -599,6 +602,7 @@ class RemDaemon(object):
         for server in self.api_servers:
             server.start()
 
+    # FIXME New thread pools
         threading.stack_size(256 << 10) # for rem.job stderr readers
 
         self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")

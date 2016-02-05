@@ -283,7 +283,7 @@ class TagReprModifier(object):
 
             tag._ModifyLocalState(event, msg, version) # FIXME try/except?
 
-        # FIXME try/except?
+        # FIXME try/except? NO!
             self._connection_manager.RegisterTagEvent(tag, event, msg)
 
             if promise:
@@ -345,6 +345,7 @@ class TagStorage(object):
             logging.error('tag %s is not cloud tag in inmem_items but receives event from cloud' % ev.tag_name)
             return
 
+# TODO user flag in cloud_client.subscribe() that will passed back _on_cloud_journal_event
         if tag.version >= ev.version:
             logging.warning('local version (%d) >= journal version (%d) for tag %s' \
                 % (tag.version, ev.version, ev.tag_name))
@@ -527,7 +528,7 @@ class TagStorage(object):
     def TryGetInMemoryTag(self, name):
         with self.lock: # FIXME useless lock
             obj = self.inmem_items.get(name)
-            return TagWrapper(obj) if obj else None
+            return TagWrapper(obj) if obj else None # FIXME WHAT TagWrapper FOR?!??!?
 
     def IsCloudTagName(self, name):
         return name.startswith('_cloud_') or False # TODO
@@ -539,6 +540,10 @@ class TagStorage(object):
             return CloudTag(name, self._modify_cloud_tag)
         else:
             return LocalTag(name, self._modify_local_tag)
+
+    def vivify_tags(self, tags):
+        for tag in tags:
+            tag._request_modify = self._modify_cloud_tag if tag.IsCloud() else self._modify_local_tag
 
     def _RawTag(self, tagname, dont_create=False):
         if not tagname:
