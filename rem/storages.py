@@ -512,14 +512,9 @@ class TagStorage(object):
 
             return TagWrapper(ret)
 
-    def TryGetInMemoryTag(self, name):
-        with self.lock: # FIXME useless lock
-            obj = self.inmem_items.get(name)
-            return TagWrapper(obj) if obj else None # FIXME WHAT TagWrapper FOR?!??!?
-
     def _is_tag_locally_set(self, name):
         with self.lock: # FIXME useless lock
-            tag = self.inmem_items.get(name)
+            tag = self._RawTag(name, dont_create=True)
             return tag.IsLocallySet() if tag else False
 
     def IsCloudTagName(self, name):

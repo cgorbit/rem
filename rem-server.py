@@ -169,8 +169,8 @@ def lookup_tags(tags):
 @readonly_method
 @traced_rpc_method()
 # TODO Move impl to TagStorage
-def get_in_memory_tag_state(tag):
-    tag = _scheduler.tagRef.TryGetInMemoryTag(tag)
+def get_tag_local_state(tag):
+    tag = _scheduler.tagRef._RawTag(tag, dont_create=True)
     if not tag:
         return None
 
@@ -424,7 +424,7 @@ class ApiServer(object):
             create_packet,
             get_backupable_state,
             get_dependent_packets_for_tag,
-            get_in_memory_tag_state,
+            get_tag_local_state,
             list_queues,
             list_tags,
             lookup_tags,

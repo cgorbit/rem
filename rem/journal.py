@@ -23,12 +23,12 @@ class TagEvent(object):
 
 class SetTagEvent(TagEvent):
     def DoRedo(self, tag):
-        tag._Set()
+        tag.Set()
 
 
 class UnsetTagEvent(TagEvent):
     def DoRedo(self, tag):
-        tag._Unset()
+        tag.Unset()
 
 
 class ResetTagEvent(TagEvent, Unpickable(message=str)):
@@ -37,7 +37,7 @@ class ResetTagEvent(TagEvent, Unpickable(message=str)):
         self.message = message
 
     def DoRedo(self, tag):
-        tag._Reset(self.message)
+        tag.Reset(self.message)
 
 
 class JournalDB(object):
@@ -144,8 +144,8 @@ class TagLogger(object):
 
         if ev == ETagEvent.Set:
             cls = SetTagEvent
-        if ev == ETagEvent.Unset:
-            cls = SetTagEvent
+        elif ev == ETagEvent.Unset:
+            cls = UnsetTagEvent
         else:
             cls = ResetTagEvent
             args = (msg,)
