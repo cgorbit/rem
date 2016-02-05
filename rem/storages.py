@@ -239,6 +239,7 @@ class TagReprModifier(object):
     def __init__(self, pool_size=100):
         self._connection_manager = None
         self._pool_size = pool_size
+        self._queues  = [Queue() for _ in xrange(pool_size)]
 
     def Start(self):
         self._create_workers(self._pool_size)
@@ -261,13 +262,11 @@ class TagReprModifier(object):
             t.join()
 
     def _create_workers(self, pool_size):
-        self._queues  = []
         self._threads = []
 
-        for _ in xrange(pool_size):
-            q = Queue()
+        for idx in xrange(pool_size):
+            q = self._queues[idx]
             t = ProfiledThread(target=self._worker, args=(q,), name_prefix='TagReprModifier')
-            self._queues.append(q)
             self._threads.append(t)
 
             t.start()
