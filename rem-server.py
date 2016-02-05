@@ -168,6 +168,7 @@ def lookup_tags(tags):
 
 @readonly_method
 @traced_rpc_method()
+# TODO Move impl to TagStorage
 def get_in_memory_tag_state(tag):
     tag = _scheduler.tagRef.TryGetInMemoryTag(tag)
     if not tag:

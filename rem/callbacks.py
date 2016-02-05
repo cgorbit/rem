@@ -115,33 +115,6 @@ class TagBase(CallbackHolder):
 
     def Modify(self, event, msg=None):
         self._request_modify(True, self, event, msg)
-#
-# FIXIM Willn't use
-
-    #def SetSafe(self):
-        #self._request_modify(True, self, ETagEvent.Set)
-
-    #def UnsetSafe(self):
-        #self._request_modify(True, self, ETagEvent.Unset)
-
-    #def ResetSafe(self, msg):
-        #self._request_modify(True, self, ETagEvent.Reset, msg)
-
-    #def ModifySafe(self, event, msg=None):
-        #self._request_modify(True, self, event, msg)
-#
-    #def SetUnsafe(self):
-        #return self._request_modify(False, self, ETagEvent.Set)
-
-    #def UnsetUnsafe(self):
-        #return self._request_modify(False, self, ETagEvent.Unset)
-
-    #def ResetUnsafe(self, msg):
-        #return self._request_modify(False, self, ETagEvent.Reset, msg)
-
-    #def ModifyUnsafe(self, event, msg=None):
-        #return self._request_modify(False, self, event, msg)
-#
 
     def GetListenersIds(self):
         return [k.id for k in self.callbacks.iterkeys()]

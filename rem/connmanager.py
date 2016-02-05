@@ -432,7 +432,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
     def set_tags(self, tags): # obsolete
         logging.debug("set %d remote tags", len(tags))
         for tagname in tags:
-            self.scheduler.tagRef.AcquireTag(tagname).CheckRemote()._Set()
+            self.scheduler.tagRef.AcquireTag(tagname).CheckRemote().Set()
         return True
 
     @traced_rpc_method()
@@ -446,12 +446,12 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         return PROTOCOL_VERSION
 
     @traced_rpc_method()
-    def register_tags_events(self, events):
-        logging.debug("register_tags_events %d: %s", len(events), events)
-        for event in events:
-            self.scheduler.tagRef.AcquireTag(event[0]).CheckRemote()._request_modify(*event[1:])
-            logging.debug("done with: %s", event)
-        logging.debug("register_tags_events %d: done", len(events))
+    def register_tags_events(self, updates):
+        logging.debug("register_tags_events %d: %s", len(updates), updates)
+        for update in updates:
+            self.scheduler.tagRef.AcquireTag(update[0]).CheckRemote().Modify(*update[1:])
+            logging.debug("done with: %s", update)
+        logging.debug("register_tags_events %d: done", len(updates))
         return True
 
     @traced_rpc_method()
