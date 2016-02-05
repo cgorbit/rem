@@ -183,7 +183,7 @@ def get_tag_local_state(tag):
     }
 
     if tag.IsCloud():
-        for field in ['version', 'last_reset_version', 'last_reset_comment']:
+        for field in ['version']:
             ret[field] = state.get(field)
 
     return ret
