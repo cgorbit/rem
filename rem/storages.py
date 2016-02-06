@@ -273,6 +273,20 @@ class TagReprModifier(object):
 
             t.start()
 
+    def _process_update(self, update):
+        tag, event = update[0:2]
+        msg = None
+        version = None
+        if len(update) >= 3:
+            msg = update[2]
+        if len(update) >= 4:
+            version = update[3]
+
+        tag._ModifyLocalState(event, msg, version) # FIXME try/except?
+
+    # FIXME try/except? NO!
+        self._connection_manager.RegisterTagEvent(tag, event, msg)
+
     def _worker(self, queue):
         while True:
             update, promise = queue.get()
@@ -280,26 +294,13 @@ class TagReprModifier(object):
             if update is self._STOP_INDICATOR:
                 return
 
-            tag, event = update[0:2]
-            msg = None
-            version = None
-            if len(update) >= 3:
-                msg = update[2]
-            if len(update) >= 4:
-                version = update[3]
-
-            tag._ModifyLocalState(event, msg, version) # FIXME try/except?
-
-        # FIXME try/except? NO!
-            self._connection_manager.RegisterTagEvent(tag, event, msg)
+            self._process_update(update)
 
             # XXX see tofileOldItems
             del update
-            del tag
 
             if promise:
                 promise.set()
-
 
 class TagStorage(object):
     _CLOUD_TAG_REPR_UPDATE_WAITING_TTL = 7200 # Hack for hostA:RemoteTag -> hostB:CloudTag
@@ -345,7 +346,7 @@ class TagStorage(object):
                 self._cloud.subscribe(cloud_tags)
 
     def _on_cloud_journal_event(self, ev):
-        logging.debug('before journal event for %s' % ev.tag_name)
+        logging.debug('before journal event %s' % ev)
 
         with self.lock: # FIXME
             tag = self.inmem_items.get(ev.tag_name)
@@ -422,7 +423,7 @@ class TagStorage(object):
             if self.IsCloudTagName(tag):
                 cloud_tags.add(tag)
             else:
-                ret[tag] = _ret_value(self.inmem_items.get(tag))
+                ret[tag] = _ret_value(self._RawTag(tag, dont_create=True))
 
         promise = Promise()
 
@@ -511,18 +512,20 @@ class TagStorage(object):
         return ':' in tagname
 
     def AcquireTag(self, tagname):
-        tag = self._RawTag(tagname)
+        raw = self._RawTag(tagname)
 
         with self.lock:
-            ret = self.inmem_items.setdefault(tagname, tag)
+            ret = self.inmem_items.setdefault(tagname, raw)
 
-            if ret is tag and tag.IsCloud() and self._cloud: # FIXME "and self._cloud" is bullshit?
+            if ret is raw and ret.IsCloud() and self._cloud: # FIXME "and self._cloud" is bullshit?
                 logging.debug('AcquireTag.subscribe(%s)' % tagname)
                 self._cloud.subscribe(tagname)
 
-            return TagWrapper(ret)
+        return TagWrapper(ret)
 
     def IsCloudTagName(self, name):
+        if self.IsRemoteTagName(name): # fuck
+            return False
         return True
         return name.startswith('_cloud_') or False # TODO
 
@@ -561,7 +564,10 @@ class TagStorage(object):
         #cls = RemoteTag if self.IsRemoteTagName(name) else LocalTag
         #return cls(name, self._modify_local_tag_safe)
 
-    def _RawTag(self, tagname):
+    def _GetTagLocalState(self, name):
+        return self._RawTag(name, dont_create=True)
+
+    def _RawTag(self, tagname, dont_create=False):
         if not tagname:
             raise ValueError("Bad tag name")
 
@@ -574,6 +580,8 @@ class TagStorage(object):
             if tagDescr:
                 tag = cPickle.loads(tagDescr)
                 self.vivify_tags([tag])
+            elif dont_create:
+                return None
             else:
                 tag = self._create_tag(tagname)
 

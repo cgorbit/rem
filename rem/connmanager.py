@@ -436,9 +436,10 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     @traced_rpc_method()
     def register_tags_events(self, updates):
+        tagRef = self.scheduler.tagRef
         logging.debug("register_tags_events %d: %s", len(updates), updates)
         for update in updates:
-            self.scheduler.tagRef.AcquireTag(update[0]).CheckRemote().Modify(*update[1:])
+            tagRef.AcquireTag(update[0]).CheckRemote().Modify(*update[1:])
             logging.debug("done with: %s", update)
         logging.debug("register_tags_events %d: done", len(updates))
         return True

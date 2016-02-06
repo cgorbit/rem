@@ -172,7 +172,7 @@ def lookup_tags(tags):
 @traced_rpc_method()
 # TODO Move impl to TagStorage
 def get_tag_local_state(tag):
-    tag = _scheduler.tagRef._RawTag(tag, dont_create=True)
+    tag = _scheduler.tagRef._GetTagLocalState(tag)
     if not tag:
         return None
 
