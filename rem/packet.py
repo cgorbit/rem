@@ -119,13 +119,12 @@ class JobPacketImpl(object):
         if self.done_indicator:
             self.done_indicator.Set()
 
-    def ProcessTagEvent(self, tag):
-        if tag.IsLocallySet():
-            tagname = tag.GetFullname()
-            if tagname in self.waitTags:
-                self.waitTags.remove(tagname)
-            if len(self.waitTags) == 0 and self.state == PacketState.SUSPENDED:
-                self.Resume()
+    def ProcessTagSetEvent(self, tag):
+        tagname = tag.GetFullname()
+        if tagname in self.waitTags:
+            self.waitTags.remove(tagname)
+        if len(self.waitTags) == 0 and self.state == PacketState.SUSPENDED:
+            self.Resume()
 
     def VivifyDoneTagsIfNeed(self, tagStorage):
         if isinstance(self.done_indicator, str):
@@ -136,9 +135,9 @@ class JobPacketImpl(object):
 
     def UpdateTagDependencies(self, tagStorage):
         self.waitTags = tagset(self.waitTags)
-        for tagname in list(self.waitTags):
-            if tagStorage._is_tag_locally_set(tagname):
-                self.ProcessTagEvent(tagStorage.AcquireTag(tagname))
+        for tag in map(tagStorage.AcquireTag, self.waitTags):
+            if tag.IsLocallySet():
+                self.ProcessTagSetEvent(tag)
         if isinstance(self.done_indicator, TagBase):
             self.done_indicator = tagStorage.AcquireTag(self.done_indicator.name)
         for jid in self.job_done_indicator:
@@ -477,7 +476,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                         self.waitingDeadline = time.time() + nTimeout
                     self.changeState(nState)
         elif isinstance(ref, TagBase):
-            self.ProcessTagEvent(ref)
+            self.ProcessTagSetEvent(ref)
 
     def Add(self, shell, parents, pipe_parents, set_tag, tries,
             max_err_len, retry_delay, pipe_fail, description, notify_timeout, max_working_time, output_to_status):

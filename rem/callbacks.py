@@ -71,7 +71,8 @@ class TagBase(CallbackHolder):
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
-        sdict.pop('_request_modify') # TODO Set on _any_ backups loading
+        sdict.pop('_request_modify')
+        #sdict.pop('_min_release_time', None) # FIXME not here
         return sdict
 
     def IsLocallySet(self):
@@ -103,18 +104,17 @@ class TagBase(CallbackHolder):
         elif event == ETagEvent.Reset:
             self._Reset(msg)
 
-#
     def Set(self):
-        self._request_modify(True, self, ETagEvent.Set)
+        self._request_modify(self, ETagEvent.Set)
 
     def Unset(self):
-        self._request_modify(True, self, ETagEvent.Unset)
+        self._request_modify(self, ETagEvent.Unset)
 
     def Reset(self, msg):
-        self._request_modify(True, self, ETagEvent.Reset, msg)
+        self._request_modify(self, ETagEvent.Reset, msg)
 
     def Modify(self, event, msg=None):
-        self._request_modify(True, self, event, msg)
+        self._request_modify(self, event, msg)
 
     def GetListenersIds(self):
         return [k.id for k in self.callbacks.iterkeys()]
@@ -176,7 +176,7 @@ class CloudTag(TagBase):
     def __init__(self, name, modify):
         TagBase.__init__(self, modify)
         self.name = name
-        self.version = 0 # FIXME None
+        self.version = 0
 
     def GetName(self):
         return self.name

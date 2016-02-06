@@ -10,7 +10,7 @@ import cPickle
 import threading
 
 from common import *
-from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor
+from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor, ETagEvent
 from journal import TagLogger
 from packet import PacketState, JobPacket
 from Queue import Queue
@@ -20,7 +20,6 @@ from profile import ProfiledThread
 import cloud_client
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
-
 
 class GlobalPacketStorage(object):
     def __init__(self):
@@ -303,6 +302,8 @@ class TagReprModifier(object):
 
 
 class TagStorage(object):
+    _CLOUD_TAG_REPR_UPDATE_WAITING_TTL = 7200 # Hack for hostA:RemoteTag -> hostB:CloudTag
+
     def __init__(self, rhs=None):
         self.lock = PickableLock()
         self.inmem_items = {}
@@ -368,9 +369,10 @@ class TagStorage(object):
 
     # FIXME here with warning, on state sync without it
         if ev.version > ev.last_reset_version and tag.version < ev.last_reset_version:
-            add_event(ETagEvent.Reset, ev.last_reset_version, ev.last_reset_comment)
+            logging.debug('overtaking reset %s.%d.%d for %d' % (ev.tag_name, ev.version, ev.last_reset_version, tag.version))
+            add_event(ETagEvent.Reset, ev.last_reset_version, ev.last_reset_comment) # TODO last_reset_comment is wrong
 
-        add_event(ev.event, ev.version, ev.comment)
+        add_event(ev.event, ev.version, ev.last_reset_comment if ev.event == ETagEvent.Reset else None)
 
         logging.debug('after journal event for %s' % ev.tag_name)
 
@@ -420,7 +422,7 @@ class TagStorage(object):
             if self.IsCloudTagName(tag):
                 cloud_tags.add(tag)
             else:
-                ret[tag] = _ret_value(self._RawTag(tag, dont_create=True))
+                ret[tag] = _ret_value(self.inmem_items.get(tag))
 
         promise = Promise()
 
@@ -443,16 +445,16 @@ class TagStorage(object):
 
         return promise.to_future()
 
-    def _modify_cloud_tag(self, safe, tag, event, msg=None):
+    # For calls from REM guts
+    def _modify_cloud_tag_safe(self, tag, event, msg=None):
         update = (tag.GetFullname(), event, msg)
-        if safe:
-            # For calls from REM guts
-            self._safe_cloud.update(update)
-        else:
-            # For calls from RPC
-            return self._cloud.update([update]) # future
+        self._set_min_release_time(tag)
+        self._safe_cloud.update(update)
 
-    # from RPC
+    def _set_min_release_time(self, tag):
+        tag._min_release_time = time.time() + self._CLOUD_TAG_REPR_UPDATE_WAITING_TTL
+
+    # for calls from from RPC
     def _modify_tags_unsafe(self, updates):
         if not updates:
             return future.READY_FUTURE
@@ -461,13 +463,14 @@ class TagStorage(object):
         local_updates = []
 
         for update in updates:
-            if self.IsCloudTagName(update[0]):
+            tag_name = update[0]
+
+            if self.IsCloudTagName(tag_name):
+                self._set_min_release_time(self.AcquireTag(tag_name).inner)
                 cloud_updates.append(update)
             else:
-                #if isinstance(update[0], str):
-                if True:
-                    update = list(update)
-                    update[0] = self.AcquireTag(update[0])
+                update = list(update)
+                update[0] = self.AcquireTag(tag_name)
                 local_updates.append(update)
 
         local_done = self._modify_local_tags(local_updates, with_future=True) if local_updates \
@@ -476,6 +479,8 @@ class TagStorage(object):
         cloud_done = self._cloud.update(cloud_updates) if cloud_updates \
             else None
 
+        #futures = filter(None, [local_done, cloud_done])
+        #return WaitFutures(futures) if len(futures) > 1 else futures[0]
         if local_done is None:
             return cloud_done
         elif cloud_done is None:
@@ -499,9 +504,8 @@ class TagStorage(object):
 
         return done[0] if len(done) == 1 else WaitFutures(done)
 
-    def _modify_local_tag(self, safe, tag, event, msg=None):
-        with_future = not safe
-        return self._modify_local_tags([(tag, event, msg)], with_future)
+    def _modify_local_tag_safe(self, tag, event, msg=None):
+        self._modify_local_tags([(tag, event, msg)], with_future=False)
 
     def IsRemoteTagName(self, tagname):
         return ':' in tagname
@@ -514,14 +518,9 @@ class TagStorage(object):
 
             if ret is tag and tag.IsCloud() and self._cloud: # FIXME "and self._cloud" is bullshit?
                 logging.debug('AcquireTag.subscribe(%s)' % tagname)
-                self._cloud.subscribe([tagname])
+                self._cloud.subscribe(tagname)
 
             return TagWrapper(ret)
-
-    def _is_tag_locally_set(self, name):
-        with self.lock: # FIXME useless lock
-            tag = self._RawTag(name, dont_create=True)
-            return tag.IsLocallySet() if tag else False
 
     def IsCloudTagName(self, name):
         return True
@@ -529,17 +528,40 @@ class TagStorage(object):
 
     def _create_tag(self, name):
         if self.IsRemoteTagName(name):
-            return RemoteTag(name, self._modify_local_tag)
+            return RemoteTag(name, self._modify_local_tag_safe)
         elif self.IsCloudTagName(name):
-            return CloudTag(name, self._modify_cloud_tag)
+            return CloudTag(name, self._modify_cloud_tag_safe)
         else:
-            return LocalTag(name, self._modify_local_tag)
+            return LocalTag(name, self._modify_local_tag_safe)
 
     def vivify_tags(self, tags):
         for tag in tags:
-            tag._request_modify = self._modify_cloud_tag if tag.IsCloud() else self._modify_local_tag
+            tag._request_modify = self._modify_cloud_tag_safe if tag.IsCloud() else self._modify_local_tag_safe
 
-    def _RawTag(self, tagname, dont_create=False):
+    #def _RawTagAsItMustBe(self, name): # XXX See tofileOldItems and ConnectionManager.register_share
+        #if not name:
+            #raise ValueError("False tag name")
+
+        #tag = self.inmem_items.get(name)
+        #if tag:
+            #return tag
+
+        #if self.IsCloudTagName(name):
+            #return CloudTag(name, self._modify_cloud_tag_safe)
+
+        #if not self.db_file_opened:
+            #self.DBConnect()
+
+        #serialized = self.infile_items.get(name, None)
+        #if serialized:
+            #tag = cPickle.loads(serialized)
+            #self.vivify_tags([tag])
+            #return tag
+
+        #cls = RemoteTag if self.IsRemoteTagName(name) else LocalTag
+        #return cls(name, self._modify_local_tag_safe)
+
+    def _RawTag(self, tagname):
         if not tagname:
             raise ValueError("Bad tag name")
 
@@ -552,8 +574,6 @@ class TagStorage(object):
             if tagDescr:
                 tag = cPickle.loads(tagDescr)
                 self.vivify_tags([tag])
-            elif dont_create:
-                return None
             else:
                 tag = self._create_tag(tagname)
 
@@ -602,34 +622,37 @@ class TagStorage(object):
         old_tags = set()
         unsub_tags = set()
 
+        now = time.time()
+
         for name, tag in self.inmem_items.items():
-            #tag for removing have no listeners and have no external links for himself (actualy 4 links)
-            if tag.GetListenersNumber() == 0 and sys.getrefcount(tag) == 4:
+            if tag.GetListenersNumber() == 0 \
+                and sys.getrefcount(tag) == 4 \
+                and getattr(tag, '_min_release_time', 0) < now:
+
                 if tag.IsCloud():
                     unsub_tags.add(name)
-                else:
-                    old_tags.add(name)
+
+                # Hack for hostA:RemoteTag -> hostB:CloudTag
+                # XXX Store old cloud tags to local DB too, so ConnectionManager.register_share
+                # will work from the box with cloud tags that have gone from inmem_items
+                old_tags.add(name)
 
         if not self.db_file_opened:
             with self.lock:
                 self.DBConnect()
 
-# XXX FIXME At this point GetListenersNumber and getrefcount may change
-        with self.lock:
-            for name in unsub_tags:
-                tag = self.inmem_items.pop(name)
-                tag.callbacks.clear() # j.i.c
+# XXX TODO At this point GetListenersNumber and getrefcount may change
 
+        with self.lock:
             if unsub_tags:
                 self._cloud.unsubscribe(unsub_tags)
 
             for name in old_tags:
                 tag = self.inmem_items.pop(name)
                 tag.callbacks.clear()
-                serialized = cPickle.dumps(tag)
+                tag.__dict__.pop('_min_release_time', None) # FIXME
                 try:
-                    #self.infile_items[name] = cPickle.dumps(tag)
-                    self.infile_items[name] = serialized
+                    self.infile_items[name] = cPickle.dumps(tag)
                 except bsddb3.error as e:
                     if 'BSDDB object has already been closed' in e.message:
                         self.db_file_opened = False

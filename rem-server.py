@@ -133,6 +133,10 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
 
 #########
 
+@traced_rpc_method()
+def get_safe_cloud_state():
+    pass # TODO XXX
+
 # TODO timeouts
 
 @readonly_method
@@ -153,8 +157,6 @@ def reset_tag(tagname, msg=""):
     return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get()
 
 #########
-
-# TODO timeouts
 
 @readonly_method
 @traced_rpc_method()
@@ -467,7 +469,7 @@ class ApiServer(object):
         while self.alive:
             rout, _, _ = select.select((rpc_fd,), (), (), 0.01)
             if rpc_fd in rout:
-                self.rpcserver.handle_request()
+                self.rpcserver.handle_request() # FIXME Can I use lower level API to not to hold threads?
 
     def start(self):
         self.xmlrpcworkers = [XMLRPCWorker(self.rpcserver.requests, self.rpcserver.process_request_thread)

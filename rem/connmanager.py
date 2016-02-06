@@ -375,17 +375,6 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
                 skip_logging=True
             )
 
-
-    def OnDone(self, tag):
-        self.RegisterTagEvent(tag, ETagEvent.Set)
-
-    def OnUndone(self, tag):
-        self.RegisterTagEvent(tag, ETagEvent.Unset)
-
-    def OnReset(self, (tag, message)):
-        self.RegisterTagEvent(tag, ETagEvent.Reset, message)
-
-
     def RegisterTagEvent(self, tag, event, message=None):
         if not self.alive:
             return
@@ -491,6 +480,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     @traced_rpc_method()
     def register_share(self, tags, clientname):
+        tagRef = self.scheduler.tagRef
         logging.debug("register_share %d tags for %s: %s", len(tags), clientname, tags)
         for tagname in tags:
             # XXX
@@ -499,7 +489,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
             # 3. also guard self.acceptors
             with self.lock:
                 self.acceptors.add(tagname, clientname)
-                if self.scheduler.tagRef._is_tag_locally_set(tagname):
+                if tagRef._RawTag(tagname).IsLocallySet():
                     self.RegisterTagEventForClient(clientname, tagname, ETagEvent.Set)
         logging.debug("register_share %d tags for %s: done", len(tags), clientname)
 
