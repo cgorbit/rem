@@ -34,7 +34,7 @@ def WaitForExecution(pck, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
         if cur_state in fin_states:
             break
 
-        logging.info("packet state: %s", cur_state)
+        logging.info("packet %s state: %s" % (pck.pck_id, cur_state))
         time.sleep(timeout)
 
     return cur_state
@@ -54,9 +54,16 @@ def WaitForExecutionList(pckList, fin_states=("SUCCESSFULL", "ERROR"), timeout=1
     while True:
         remclient.JobPacketInfo.multiupdate(pckList)
         waitPckCount = sum(1 for pck in pckList if pck.state not in fin_states)
-        logging.info("wait for %d packets, current states: %s", waitPckCount, [pck.state for pck in pckList])
+
+        stat = {}
+        for pck in pckList:
+            stat.setdefault(pck.state, [0])[0] += 1
+
+        logging.info("wait for %d packets for %s, current states: %s", waitPckCount, fin_states, stat)
+
         if waitPckCount == 0:
             return [pck.state for pck in pckList]
+
         time.sleep(timeout)
 
 
