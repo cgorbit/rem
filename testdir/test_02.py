@@ -138,34 +138,48 @@ class T02(unittest.TestCase):
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
         pckInfo.Delete()
 
-    def testSuspendKillJobs(self):
+    def testSuspendKillJobsNew(self):
         def contains(lst, val):
-            lst = list(lst)
-            logging.info(lst)
+            #logging.info(lst)
             return any(val in el for el in lst)
+
+        def list_processes():
+            p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
+            return [l.rstrip('\n') for l in p.stdout]
+
+        uniq_id = '12344321'
+        delay = 1.5
+
+        def sleep():
+            time.sleep(delay)
+
+        def check(res):
+            self.assertEqual(contains(list_processes(), uniq_id), res)
 
         pckname = "suspend-kill-%.f" % time.time()
         pck = self.connector.Packet(pckname, time.time())
-        pck.AddJob("sleep 10 && echo 12344321")
+        pck.AddJob("sleep 10 && echo %s" % uniq_id)
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
-        pckInfo = self.connector.PacketInfo(pck.id)
-        pckInfo.Stop()
-        time.sleep(0.2)
-        popen = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
-        logging.info("")
-        self.assertEqual(contains(popen.stdout, "12344321"), False)
-        pckInfo.Resume()
-        time.sleep(0.2)
-        pckInfo.Suspend()
-        popen = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
-        logging.info("")
-        self.assertEqual(contains(popen.stdout, "12344321"), True)
-        pckInfo.Stop()
-        time.sleep(0.2)
-        popen = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
-        logging.info("")
-        self.assertEqual(contains(popen.stdout, "12344321"), False)
-        pckInfo.Delete()
+
+        pck = self.connector.PacketInfo(pck.id)
+
+        pck.Stop()
+        sleep()
+
+        check(False)
+
+        pck.Resume()
+        sleep()
+        pck.Suspend()
+
+        check(True)
+
+        pck.Stop()
+        sleep()
+
+        check(False)
+
+        pck.Delete()
 
     def testTagsBulk(self):
         tags = ["bulk-tag-%d-%.0f" % (i, time.time()) for i in range(10)]
@@ -244,10 +258,17 @@ class T02(unittest.TestCase):
             tags = connector.ListObjects("tags", prefix="async-query-tag-", memory_only=False)
             self.assertEqual(NUM_TAGS, len(tags))
 
-        for i in range(NUM_TAGS):
-            tagname = "async-query-tag-%d" % i
-            self.connector.Tag(tagname).Set()
+        #for i in range(NUM_TAGS):
+            #tagname = "async-query-tag-%d" % i
+            #self.connector.Tag(tagname).Set()
+        updates = [
+            ("async-query-tag-%d" % i, 1, None)
+                for i in xrange(NUM_TAGS)
+        ]
+        self.connector.proxy.update_tags(updates)
+
         logging.info("tags are set")
+
         requesters = [Thread(target=queryFunction, args=[remclient.Connector(self.connector.GetURL())]) for _ in xrange(5)]
         map(lambda t: t.start(), requesters)
         map(lambda t: t.join(), requesters)

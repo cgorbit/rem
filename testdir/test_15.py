@@ -1,6 +1,7 @@
 import unittest
 import logging
 import remclient
+import time
 from testdir import *
 
 
@@ -18,9 +19,10 @@ class T15(unittest.TestCase):
         self.connector.Queue(TestingQueue.Get()).AddPacket(p)
         self.connector.Tag('tag_c-{}'.format(timestamp)).Set()
         self.connector.Tag('tag_a-{}'.format(timestamp)).Set()
-        self.connector.Tag('tag_a-{}'.format(timestamp)).Reset()
+        self.connector.Tag('tag_a-{}'.format(timestamp)).Reset('reason')
         self.connector.Tag('tag_a-{}'.format(timestamp)).Set()
         self.connector.Tag('tag_b-{}'.format(timestamp)).Set()
+        time.sleep(4)
         self.assertEqual(self.connector.PacketInfo(p).wait, [])
 
     def testUnresetablePacket(self):
@@ -51,7 +53,7 @@ class T15(unittest.TestCase):
         self.connector.Tag('r_tag_c-{}'.format(timestamp)).Set()
         self.connector2.Tag('r_tag_a-{}'.format(timestamp)).Set()
         time.sleep(4)
-        self.connector.Tag('r_tag_c-{}'.format(timestamp)).Reset()
+        self.connector.Tag('r_tag_c-{}'.format(timestamp)).Reset('reason')
         self.connector.Tag('r_tag_c-{}'.format(timestamp)).Set()
         self.connector2.Tag('r_tag_b-{}'.format(timestamp)).Set()
         time.sleep(4)
