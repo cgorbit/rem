@@ -373,7 +373,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self.changeState(PacketState.CREATED)
 
     def __repr__(self):
-        return "<JobPacket(id:%s; name: %s)>" % (getattr(self, "id", None), getattr(self, "name", None))
+        return "<JobPacket(id:%s; name: %s; state: %s)>" \
+            % (getattr(self, "id", None), getattr(self, "name", None), getattr(self, "state", None))
 
     def stream_file(self, jid, type):
         stream = self.streams.get((type, jid), None)
