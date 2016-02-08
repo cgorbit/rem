@@ -104,6 +104,7 @@ class T09(unittest.TestCase):
         for pck in checkerPackets:
             self.assertTrue(WaitForExecution(pck), "SUCCESSFULL")
 
+        time.sleep(5)
         logging.info('Checking tags "%s"', "dup_tag_*")
         for tagName in tags:
             tag = self.connector.Tag(tagName)
