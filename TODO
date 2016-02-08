@@ -1,7 +1,67 @@
+-2.
+    Subscriptions: {
+    "dup_tag_1454790267_1": 0x00007F26C401F0F0, 
+    "mass_remote_tag_2_295-1454785790": 0x00007F26C4001C60, 
+    ...........
+    "mass_remote_tag_2_306-1454785790": 0x00007F26C4001C60, 
+    }
+
+-1.
+    SafeCloud backuping and journaling
+
+0. LastResetComment instead of Comment in Journal
+
 0.
     Journal
     Reset
     request_modify
+
+0.5
+    ListTags
+
+0.6
+    + accepted 
+    (TSystemError) (Transport endpoint is not connected) util/network/socket.cpp:1103: shutdown socket error
+    + accepted 
+    + accepted 
+    (TSystemError) (Transport endpoint is not connected) util/network/socket.cpp:1103: shutdown socket error
+    + accepted 
+    (TSystemError) (Transport endpoint is not connected) util/network/socket.cpp:1103: shutdown socket error
+    terminate called after throwing an instance of 'NYT::TErrorException'
+    what():  Request queue limit reached
+        code            105
+        origin          ws30-511.yandex.ru on 2016-02-06T14:09:12.122548Z (pid 26160, tid 95ac8f28, fid 43560dea)
+        request_id      256ef-1a58ab35-4e9e498-fb2017fa
+        connection_id   1a-44953824-85cc53fb-2c9356cd
+        timeout         60000
+        method          Read
+        address         ws30-511.yandex.ru:46561
+        limit           10000
+        service         TabletService
+        interface_type  local
+
+4. Просто жесть
+    req.ack.failed
+
+4. Просто жесть 2
+
+    + accepted 
+    terminate called after throwing an instance of 'NYT::TErrorException'
+    what():  Error getting mount info for //home/trofimenkov/cpp/map
+        origin          ws30-511.yandex.ru on 2016-02-07T08:10:44.478811Z (pid 8846, tid 9bd8175c, fid d1a22d2c)
+
+    Request abandoned
+        code            2
+        origin          ws30-511.yandex.ru on 2016-02-07T08:10:44.478214Z (pid 25604, tid 54e38352, fid 14be5d56)
+        request_id      153e9-a54c0d37-c9e1d1d1-d60da8bb
+        connection_id   2-c0b52e57-b406649b-f4cbd302
+        timeout         5000
+        method          Execute
+        address         ws30-511.yandex.ru:35205
+        service         ObjectService
+        interface_type  local
+
+    Aborted
 
 1. Backup child process stderr: Failed to execute child function: '_request_modify'
 
@@ -19,6 +79,33 @@
     2016-02-04 23:29:18,095 7907 INFO     cloud_client: Stopping YtTags.Client (_ST_WAIT)
     2016-02-04 23:29:20,598 7785 DEBUG    cloud_client: Failed to connect: [Errno 111] Connection refused
 
+3.
+    2016-02-06 17:23:26,011 4555 WARNING  rem-server:»..rem-server».signal 15 has gotten
+    2016-02-06 17:23:26,012 4800 DEBUG    rem-server:»..rem-server».enter_stop       
+    2016-02-06 17:23:26,012 4800 DEBUG    rem-server:»..rem-server».rpc_stopped      
+    2016-02-06 17:23:26,012 4800 DEBUG    rem-server:»..rem-server».time_worker_stopped
+    2016-02-06 17:23:26,024 4800 DEBUG    rem-server:»..rem-server».workers_stopped  
+    2016-02-06 17:23:26,024 4800 INFO     cloud_client:»Stopping YtTags.Client (_ST_WAIT)
+    2016-02-06 17:23:27,382 4661 DEBUG    cloud_client:»Failed to connect: [Errno 111] Connection refused
+    2016-02-06 17:23:36,024 4800 INFO     cloud_client:»_ST_NOWAIT                   
+    2016-02-06 17:23:36,058 4777 ERROR    common:»..
+
+    Traceback (most recent call last):
+    File "/place/home/trofimenkov/rem/rem/common.py", line 53, in f
+        return func(*args)
+    File "rem-server.py", line 149, in set_tag
+        return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Set).get()
+    File "/place/home/trofimenkov/rem/rem/future.py", line 118, in get
+        return self._state.get(timeout)
+    File "/place/home/trofimenkov/rem/rem/cloud_client.py", line 287, in _connect_loop
+        raise ServiceStopped()
+    ServiceStopped
+
+    2016-02-06 17:23:36,074 4800 DEBUG    rem-server:»..rem-server».journal_stopped
+    2016-02-06 17:23:36,074 4800 DEBUG    rem-server:»..rem-server».before_backups_thread_join
+    2016-02-06 17:23:36,074 4800 DEBUG    rem-server:»..rem-server».after_backups_thread_join
+    2016-02-06 17:23:36,074 4800 DEBUG    rem-server:»..0 children founded after custom kill
+    2016-02-06 17:23:36,074 4800 DEBUG    rem-server:»..rem-server».start_final_backup
 
 3.
     + accepted 
@@ -44,4 +131,31 @@
     terminate called after throwing an instance of 'yexception'
     what():  yt/experiments/cloud_tags_server/server.cpp:351: Unknown message type
     Aborted
+
+10.
+    terminate called after throwing an instance of 'NYT::TErrorException'
+  what():  Query evaluation failed
+    origin          ws30-511.yandex.ru on 2016-02-06T15:37:38.346288Z (pid 3029, tid 6f3e225c, fid e4dfd590)
+
+  Query evaluation failed
+      origin          ws30-511.yandex.ru on 2016-02-06T15:37:38.344529Z (pid 26160, tid 241785d9, fid 15753f4b)
+      request_id      1c802-250afe85-f3e0aa47-8d7255b
+      connection_id   15-c06793a5-c229b6b2-833a7c47
+      timeout         60000
+      method          Execute
+      address         ws30-511.yandex.ru:46561
+      service         QueryService
+      interface_type  local
+
+    Query evaluation failed
+        origin          ws30-511.yandex.ru on 2016-02-06T15:37:38.343941Z (pid 26160, tid 4ee1cb7a, fid 156aa2a7)
+
+      Timed out waiting on blocked row
+          origin          ws30-511.yandex.ru on 2016-02-06T15:37:38.099305Z (pid 26160, tid 4ee1cb7a, fid 156aa2a7)
+          tablet_id       17-3f10-2be-734c77bc
+          lock            <primary>
+          timeout         5000
+          key             [100527000000u;]
+
+Aborted
 
