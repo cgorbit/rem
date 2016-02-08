@@ -775,7 +775,7 @@ class TagStorage(object):
         self._cloud_tags_masks = context.cloud_tags_masks
         self._cloud_tags_masks_reload_interval = context.cloud_tags_masks_reload_interval
 
-        logging.error("TagStorage.UpdateContext, masks = %s, server = %s" % (
+        logging.debug("TagStorage.UpdateContext, masks = %s, server = %s" % (
             self._cloud_tags_masks, self._cloud_tags_server))
 
     def Restore(self, timestamp):
