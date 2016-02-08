@@ -2,10 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import sys
-sys.path[0:0] = [
-    '/home/trofimenkov/arcadia/contrib/libs/protobuf/python',
-]
-
 from sys import stderr
 import time
 import socket
