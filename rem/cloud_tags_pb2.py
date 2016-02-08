@@ -1,0 +1,1 @@
+/home/trofimenkov/cloud_tags/tags_pb2.py
