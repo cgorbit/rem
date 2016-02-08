@@ -217,7 +217,7 @@ class SafeCloud(object):
 
     def update(self, update):
         with self._lock:
-            logging.debug("SafeCloud.update(%s)" % update)
+            logging.debug("SafeCloud.update(%s)" % str(update))
 
             id = self._alloc_id()
             done = self._cloud.serial_update(update)
