@@ -156,8 +156,6 @@ def unset_tag(tagname):
 def reset_tag(tagname, msg=""):
     return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get()
 
-#########
-
 @readonly_method
 @traced_rpc_method()
 def check_tags(tags):
@@ -178,8 +176,7 @@ def get_tag_local_state(tag):
 
     state = tag.__dict__.copy()
 
-# TODO Kosher
-
+    # TODO Kosher
     ret = {
         'is_set': state['done']
     }
@@ -195,7 +192,9 @@ def update_tags(updates):
     # TODO VERIFY `updates' HERE
     return _scheduler.tagRef._modify_tags_unsafe(updates).get()
 
-#########
+@traced_rpc_method("info")
+def list_cloud_tags_masks():
+    return _scheduler.tagRef.list_cloud_tags_masks()
 
 @readonly_method
 @traced_rpc_method()
@@ -456,6 +455,7 @@ class ApiServer(object):
             set_tag,
             unset_tag,
             update_tags,
+            list_cloud_tags_masks,
         ]
 
         if self.allow_backup_method:

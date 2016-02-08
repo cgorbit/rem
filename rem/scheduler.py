@@ -150,6 +150,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def __init__(self, context):
         getattr(super(Scheduler, self), "__init__")()
         self.UpdateContext(context)
+        self.tagRef.PreInit()
         self.ObjectRegistratorClass = FakeObjectRegistrator if context.execMode == "start" else ObjectRegistrator
         if context.useMemProfiler:
             self.initProfiler()
