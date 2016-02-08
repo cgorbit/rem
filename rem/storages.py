@@ -371,6 +371,7 @@ class TagsMasks(object):
                 raise RuntimeError("Initial regexp match non integer '%s' in '%s'" % (matched_group, str))
 
             #print >>sys.stderr, '+ val = %d, min_value = %d' % (val, min_values[group_idx])
+
             return val >= min_values[group_idx]
 
         match.count = len(with_min_value) + len(without_min_value)
@@ -413,7 +414,7 @@ class TagStorage(object):
         self._match_cloud_tag = TagsMasks.get_empty_matcher()
         self._masks_reload_thread = None
         self._masks_should_stop = threading.Event()
-        self._last_tag_mask_match_error_time = 0
+        self._last_tag_mask_error_report_time = 0
         if rhs:
             if isinstance(rhs, dict):
                 self.inmem_items = rhs
@@ -671,9 +672,9 @@ class TagStorage(object):
             return self._match_cloud_tag(name)
         except Exception as e:
             now = time.time()
-            if now - self._last_tag_mask_match_error_time > 5:
+            if now - self._last_tag_mask_error_report_time > 5:
                 logging.error("Failed to match tag masks: %s" % e)
-            self._last_tag_mask_match_error_time = now
+                self._last_tag_mask_error_report_time = now
             return False
 
     def _create_tag(self, name):
@@ -773,6 +774,9 @@ class TagStorage(object):
         self._cloud_tags_server = context.cloud_tags_server
         self._cloud_tags_masks = context.cloud_tags_masks
         self._cloud_tags_masks_reload_interval = context.cloud_tags_masks_reload_interval
+
+        logging.error("TagStorage.UpdateContext, masks = %s, server = %s" % (
+            self._cloud_tags_masks, self._cloud_tags_server))
 
     def Restore(self, timestamp):
         self.tag_logger.Restore(timestamp, self)
