@@ -273,10 +273,15 @@ class TagReprModifier(object):
         if len(update) >= 4:
             version = update[3]
 
-        tag._ModifyLocalState(event, msg, version) # FIXME try/except?
+        try:
+            tag._ModifyLocalState(event, msg, version)
+        except Exception:
+            logging.exception("Failed to process tag update %s" % (update,))
 
-    # FIXME try/except? NO!
-        self._connection_manager.RegisterTagEvent(tag, event, msg)
+        try:
+            self._connection_manager.RegisterTagEvent(tag, event, msg)
+        except Exception:
+            logging.exception("Failed to pass update to ConnectionManager %s" % (update,))
 
     def _worker(self, queue):
         while True:

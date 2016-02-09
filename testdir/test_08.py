@@ -155,9 +155,13 @@ class T08(unittest.TestCase):
         with ServiceTemporaryShutdown(self.srvdir):
             path = os.path.join("packets", pck.id)
             self.assertFalse(os.path.isdir(path))
+
         self.connector.Tag(tag).Reset()
+        self.assertEqual(WaitForExecution(pckInfo, ("SUSPENDED",)), "SUSPENDED")
+
         self.connector.Tag(tag).Set()
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
+
         pckInfo.Delete()
 
     def testRestoringNonexistingFile(self):
@@ -181,6 +185,7 @@ class T08(unittest.TestCase):
             self.assertTrue(os.path.isfile(path))
             os.remove(path)
         self.connector.Tag(tag).Reset()
+        self.assertEqual(WaitForExecution(pckInfo, ("SUSPENDED",)), "SUSPENDED")
         self.connector.Tag(tag).Set()
         self.assertEqual(WaitForExecution(pckInfo, ("WAITING", "SUCCESSFULL", "ERROR")), "WAITING")
         pckInfo.Suspend()
