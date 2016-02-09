@@ -29,7 +29,9 @@ binary_lifetime = 86400
 error_packet_lifetime = 604800 ; 7 дней
 success_packet_lifetime = 259200 ; 3 дня
 
-#cloud_tag_server = localhost:17777
+#cloud_tags_server = localhost:17773
+#cloud_tags_masks = svn+ssh://arcadia.yandex.ru/arc/trunk/...
+#cloud_tags_masks_reload_interval = 300
 
 [log]
 # директория с логами
