@@ -57,6 +57,7 @@ def traced_rpc_method(level="debug"):
 
         f.log_level = level
         f.__name__ = func.__name__
+        f.__module__ = func.__module__
 
         return f
 

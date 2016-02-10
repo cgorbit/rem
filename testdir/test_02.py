@@ -50,6 +50,12 @@ class T02(unittest.TestCase):
         finally:
             pckInfo.Delete()
 
+    def wait_tag(self, name, timeout=5):
+        for _ in xrange(timeout):
+            if self.connector.Tag(name).Check():
+                return True
+        return False
+
     def testWorkingPacket(self):
         pckname = "worktest-%d" % self.timestamp
         pck = self.connector.Packet(pckname, self.timestamp)
@@ -73,7 +79,7 @@ class T02(unittest.TestCase):
         self.assertEqual(pckInfo.state, "SUSPENDED")
         self.connector.Tag(tagname).Set()
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
-        self.assertEqual(self.connector.Tag(barriertag).Check(), True)
+        self.assertEqual(self.wait_tag(barriertag), True)
         pckInfo.Delete()
 
     def testBulkAdding(self):

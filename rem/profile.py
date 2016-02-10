@@ -7,12 +7,10 @@ import time
 import rem.osspec
 
 PROFILING_DIR = None
-HAS_PRCTL = False
 try:
     import prctl
     def set_thread_name(name):
         prctl.set_name(name)
-    HAS_PRCTL = True
 except ImportError:
     def set_thread_name(name):
         pass
@@ -41,6 +39,7 @@ class NamedThread(threading.Thread):
 
     def _set_thread_name(self):
         set_thread_name('rem-' + self.name)
+        logging.debug('ProfiledThread name for %d is %s' % (_gettid(), self.name))
 
     def run(self):
         self._set_thread_name()
@@ -56,9 +55,6 @@ class ProfiledThread(NamedThread):
 
     def run(self):
         self._set_thread_name()
-
-        if not HAS_PRCTL:
-            logging.debug('ProfiledThread name for %d is %s' % (_gettid(), self.name))
 
         func = getattr(self, '_run', threading.Thread.run.__get__(self))
 
