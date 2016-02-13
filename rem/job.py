@@ -120,6 +120,9 @@ class Job(Unpickable(err=nullobject,
         self.AddCallbackListener(self.packetRef)
         self.output_to_status = output_to_status
 
+    def __repr__(self):
+        return "<Job(id: %s; packet: %s)>" % (self.id, self.packetRef.id)
+
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
         sdict.pop('_process', None)
@@ -163,8 +166,8 @@ class Job(Unpickable(err=nullobject,
 
     def _timeoutNotify(self, working_time):
         self.cached_working_time = working_time
-        msgHelper = packet.PacketCustomLogic(self.packetRef).DoLongExecutionWarning(self)
-        SendEmail(self.packetRef.notify_emails, msgHelper)
+        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.packetRef.name, self.id)
+        self.packetRef.SendJobLongExecutionNotification(self)
         self._notified = True
 
     def CanStart(self):
@@ -215,7 +218,7 @@ class Job(Unpickable(err=nullobject,
         try:
             self.tries += 1
             self.working_time = 0
-            self.FireEvent("start")
+            self.packetRef._OnJobStart(self)
             startTime = time.localtime()
             self.errPipe = map(os.fdopen, os.pipe(), 'rw')
 
@@ -251,10 +254,10 @@ class Job(Unpickable(err=nullobject,
         finally:
             self._process = None
             self._finalize_job_iteration(jobResult)
-            self.CloseStreams()
-            self.FireEvent("done")
+            self.__CloseStreams()
+            self.packetRef._OnJobDone(self)
 
-    def CloseStreams(self):
+    def __CloseStreams(self):
         if self.output_to_status and self.output:
             try:
                 if not self.output.closed:

@@ -109,6 +109,9 @@ class Context(object):
         self.allow_backup_rpc_method = config.safe_getboolean("server", "allow_backup_rpc_method", False)
         self.initLogger(config, self.execMode != "start")
 
+    def send_email_async(self, rcpt, msg):
+        logging.debug("send_email_async(rcpt)\n" + msg)
+
     def initLogger(self, config, isTestMode):
         logLevel = logging.DEBUG if isTestMode \
             else getattr(logging, config.get("log", "warnlevel").upper())

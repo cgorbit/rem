@@ -24,10 +24,18 @@ class Queue(Unpickable(pending=PackSet.create,
                        errored_lifetime=(int, 0)),
             CallbackHolder,
             ICallbackAcceptor):
+
     VIEW_BY_ORDER = "pending", "waited", "errored", "suspended", "worked", "noninitialized"
-    VIEW_BY_STATE = {PacketState.SUSPENDED: "suspended", PacketState.WORKABLE: "suspended",
-                     PacketState.PENDING: "pending", PacketState.ERROR: "errored", PacketState.SUCCESSFULL: "worked",
-                     PacketState.WAITING: "waited", PacketState.NONINITIALIZED: "noninitialized"}
+
+    VIEW_BY_STATE = {
+        PacketState.SUSPENDED: "suspended",
+        PacketState.WORKABLE: "suspended",
+        PacketState.PENDING: "pending",
+        PacketState.ERROR: "errored",
+        PacketState.SUCCESSFULL: "worked",
+        PacketState.WAITING: "waited",
+        PacketState.NONINITIALIZED: "noninitialized"
+    }
 
     def __init__(self, name):
         super(Queue, self).__init__()
@@ -151,11 +159,14 @@ class Queue(Unpickable(pending=PackSet.create,
                 if not self.HasStartableJobs(False):
                     return None
                 pck, prior = self.pending.peak()
-                pendingJob = pck.Get()
+                pendingJob = pck.GetJobToRun()
                 if pendingJob == JobPacket.INCORRECT:
                     #possibly incorrect situation -> will fix if it would be repeated after small delay
                     if pck == pckIncorrect:
-                        PacketCustomLogic(pck).DoEmergencyAction()
+                        logging.error("incorrect state for 'Get' operation: %s, packet %s" \
+                                      " will be markered for delete",
+                                      pck.state, pck.name)
+                        pck.RegisterEmergency()
                         self.pending.pop()
                         return None
                     else:
@@ -194,6 +205,7 @@ class Queue(Unpickable(pending=PackSet.create,
         self.isSuspended = False
         for pck in list(self.suspended):
             try:
+# XXX No lock?
                 pck.Resume(resumeWorkable)
             except:
                 logging.error("can't resume packet %s", pck.id)

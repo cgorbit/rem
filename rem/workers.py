@@ -48,6 +48,7 @@ class ThreadJobWorker(KillableWorker):
                 if self.job:
                     self.job.Run()
             finally:
+                logging.debug('ThreadJobWorker done_with %s from %s' % (self.job, self.job.packetRef))
                 self.job = None
 
     def IsSuspended(self):

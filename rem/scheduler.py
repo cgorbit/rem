@@ -219,6 +219,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 if self.queues_with_jobs:
                     queue = self.queues_with_jobs.pop()
                     job = queue.Get(self.context)
+                    logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.packetRef))
                     if queue.HasStartableJobs():
                         self.queues_with_jobs.push(queue)
                         self.HasScheduledTask.notify()
@@ -555,8 +556,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                     logging.warning(
                         "can't restore packet directory: %s for packet %s. Packet marked as error from old state %s",
                         pck.directory, pck.name, pck.state)
-                    pck.SetFlag(PacketFlag.RCVR_ERROR)
-                    pck.changeState(PacketState.ERROR)
+                    pck.MarkAsFailedOnRestore()
                 dstStorage = self.packStorage
             dstStorage.Add(pck)
             if pck.state != PacketState.HISTORIED:

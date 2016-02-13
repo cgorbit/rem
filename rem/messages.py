@@ -1,6 +1,5 @@
 import cStringIO
 import time
-from packet import PacketState, PacketFlag
 
 def utf8ifunicode(str):
     return str.encode('utf-8') if isinstance(str, unicode) else str
@@ -26,34 +25,8 @@ class IMessageHelper(object):
                     print >>out, "\t%s: %s" % (k, utf8ifunicode(job.get(k, "N/A")))
             cls._outputJobResults(out, job)
 
-
-def GetHelper(helper_cls, *args):
-    if helper_cls:
-        assert issubclass(helper_cls, IMessageHelper)
-        return helper_cls(*args)
-
-
-def GetHelperByPacketState(pck, ctx):
-    if ctx and ctx.send_emails:
-        if not ctx.send_emergency_emails and pck.CheckFlag(PacketFlag.RCVR_ERROR):
-            return None
-        helper_cls = {PacketState.ERROR: PACKET_ERROR}#, PacketState.SUCCESSFULL: PACKET_SUCCESS}
-        return GetHelper(helper_cls.get(pck.state, None), pck, ctx)
-
-
-def GetEmergencyHelper(pck, ctx):
-    if ctx and ctx.send_emails and ctx.send_emergency_emails:
-        return EmergencyError(pck, ctx)
-
-
-def GetLongExecutionWarningHelper(job, ctx):
-    if job and job.packetRef.notify_emails:
-        return TooLongWorkingWarning(job, ctx)
-
-
-def GetResetNotificationHelper(pck, ctx, message):
-    if ctx:
-        return ResetNotification(pck, ctx, message)
+    def make(self):
+        return (self.subject(), self.message())
 
 class PacketExecutionError(IMessageHelper):
     def __init__(self, pck, ctx):
@@ -61,6 +34,8 @@ class PacketExecutionError(IMessageHelper):
         self.ctx = ctx
 
     def subject(self):
+        from packet import PacketFlag
+
         reason = "packet recovering error" if self.pck.CheckFlag(PacketFlag.RCVR_ERROR) \
             else "packet execution error"
         return "[REM@%(sname)s] Task '%(pname)s': %(reason)s" % {"pname": self.pck.name, "reason": reason,
@@ -79,28 +54,6 @@ class PacketExecutionError(IMessageHelper):
                 self._outputJobResults(mbuf, job)
         print >> mbuf, "=" * 80
         self._outputExtendedPacketStatus(mbuf, self.pck.id, p_state)
-        return mbuf.getvalue()
-
-
-class PacketExecutionSuccess(IMessageHelper):
-    def __init__(self, pck, ctx):
-        self.pck = pck
-        self.ctx = ctx
-
-    def subject(self):
-        return "[REM@%(sname)s] Task '%(pname)s': successfully executed." % {"pname": self.pck.name,
-                                                                             "sname": self.ctx.network_name}
-
-    def message(self):
-        mbuf = cStringIO.StringIO()
-        print >> mbuf, "Packet %(pname)s has successfully executed" % {"pname": self.pck.name}
-        print >> mbuf, "Extended packet status:"
-        print >> mbuf, "packet id:", self.pck.id
-        p_state = self.pck.Status()
-        print >> mbuf, "\n".join("%s: %s" % (k, v) for k, v in p_state.iteritems() if k not in ("jobs", "history"))
-        print >> mbuf, "history:"
-        for state, timestamp in p_state.get("history", []):
-            print >> mbuf, "\t%s: %s" % (time.ctime(timestamp), state)
         return mbuf.getvalue()
 
 
@@ -184,6 +137,14 @@ class ResetNotification(IMessageHelper):
         return mbuf.getvalue()
 
 
-PACKET_ERROR = PacketExecutionError
-PACKET_SUCCESS = PacketExecutionSuccess
+def FormatPacketErrorStateMessage(pck, ctx):
+    return PacketExecutionError(pck, ctx).make()
 
+def FormatPacketEmergencyError(pck, ctx):
+    return EmergencyError(pck, ctx).make()
+
+def FormatPacketResetNotificationMessage(pck, ctx, comment):
+    return ResetNotification(pck, ctx, comment).make()
+
+def FormatLongExecutionWarning(job, ctx):
+    return TooLongWorkingWarning(job, ctx).make()

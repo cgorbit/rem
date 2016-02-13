@@ -239,7 +239,7 @@ class REMService(Service):
             import xmlrpclib
 
             proxy = xmlrpclib.ServerProxy(self.serverURL, allow_none=True)
-            proxy.check_tag("start_tag")
+            proxy.get_tag_local_state("start_tag")
             return True
         except:
             time.sleep(max(endTime - time.time(), 0))

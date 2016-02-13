@@ -509,6 +509,10 @@ class RemDaemon(object):
                                               scheduler,
                                               allow_backup_method=context.allow_backup_rpc_method,
                                               readonly=True))
+
+        for srv in self.api_servers:
+            srv.rpcserver.logRequests = False
+
         self.regWorkers = []
         self.timeWorker = None
 
