@@ -5,7 +5,7 @@ import time
 import datetime
 
 from callbacks import CallbackHolder
-from common import FuncRunner, SendEmail, Unpickable, safeint, nullobject, zeroint, get_None, get_False
+from common import FuncRunner, Unpickable, safeint, nullobject, zeroint, get_None, get_False
 import osspec
 import packet
 import constants

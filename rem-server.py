@@ -605,6 +605,9 @@ class RemDaemon(object):
         for proc in multiprocessing.active_children():
             proc.terminate()
 
+    # TODO Make it nice
+        self.scheduler.Stop3()
+
     def _start_workers(self):
         self.scheduler.Start()
         self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self.scheduler.poolSize)]

@@ -7,7 +7,7 @@ import shutil
 import errno
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
-from common import BinaryFile, PickableRLock, SendEmail, Unpickable, safeStringEncode, get_None
+from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, get_None
 from job import Job, PackedExecuteResult
 import osspec
 import fork_locking

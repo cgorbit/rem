@@ -8,7 +8,7 @@ from collections import deque
 import gc
 from common import PickableStdQueue, PickableStdPriorityQueue
 import common
-from Queue import Empty
+from Queue import Empty, Queue as ThreadSafeQueue
 import cStringIO
 import StringIO
 import itertools
@@ -23,6 +23,7 @@ from queue import Queue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
+from rem.profile import ProfiledThread
 
 class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
                               lock=PickableLock,
@@ -126,6 +127,41 @@ class QueueList(object):
 
     def __len__(self):
         return len(self.__exists)
+
+class Mailer(object):
+    _STOP_INDICATOR = object()
+
+    def __init__(self, thread_count=1):
+        self._queue = ThreadSafeQueue()
+
+        self._threads = [
+            ProfiledThread(target=self._worker, name_prefix='Mailer')
+                for _ in xrange(thread_count)
+        ]
+
+        for t in self._threads:
+            t.start()
+
+    def stop(self):
+        for _ in self._threads:
+            self._queue.put(self._STOP_INDICATOR)
+
+        for t in self._threads:
+            t.join()
+
+    def _worker(self):
+        while True:
+            task = self._queue.get()
+
+            if task is self._STOP_INDICATOR:
+                break
+
+            osspec.send_email(*task)
+
+    def send_async(self, rcpt, subj, body):
+        logging.debug("send_email_async(" + str(rcpt) + ")\n" + subj + "\n" + body)
+        self._queue.put((rcpt, subj, body))
+
 
 class Scheduler(Unpickable(lock=PickableRLock,
                            qRef=dict, #queues by name
@@ -600,6 +636,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.schedWatcher.AddTaskT(timeout, fn, *args, **kws)
 
     def Start(self):
+        self._mailer = Mailer(self.context.mailer_thread_count)
         self.tagRef.Start()
         with self.lock:
             self.alive = True
@@ -615,6 +652,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def Stop2(self):
         self.tagRef.Stop()
 
+    def Stop3(self):
+        self._mailer.stop()
+
     def GetConnectionManager(self):
         return self.connManager
 
@@ -624,5 +664,5 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def OnPacketReinitRequest(self, code):
         code(self.context)
 
-    def send_email_async(self, rcpt, msg):
-        logging.debug("send_email_async(rcpt)\n" + str(msg))
+    def send_email_async(self, rcpt, (subj, body)):
+        self._mailer.send_async(rcpt, subj, body)
