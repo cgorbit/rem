@@ -21,6 +21,7 @@ from rem import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
 
+import rem.common
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -125,8 +126,10 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
     if pck is not None:
         if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
             raise RuntimeError("can't move \"live\" packet between queues")
-        _scheduler.Queue(src_queue).Remove(pck)
-        _scheduler.Queue(dst_queue).Add(pck)
+        pck._move_to_queue(
+            _scheduler.Queue(src_queue),
+            _scheduler.Queue(dst_queue)
+        )
         return
     raise AttributeError("nonexisted packet id: %s" % pck_id)
 
@@ -209,7 +212,7 @@ def queue_suspend(queue_name):
 
 @traced_rpc_method("info")
 def queue_resume(queue_name):
-    _scheduler.Queue(queue_name).Resume()
+    _scheduler.Queue(queue_name).Resume() # XXX
 
 
 @readonly_method
@@ -392,6 +395,11 @@ def get_backupable_state():
 def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
 
+@traced_rpc_method("warning")
+def get_acquiring():
+    e = rem.common.JsonEncoder()
+    return e.encode(rem.common._ACQUIRING)
+
 class ApiServer(object):
     def __init__(self, port, poolsize, scheduler, allow_backup_method=False, readonly=False):
         self.scheduler = scheduler
@@ -457,6 +465,8 @@ class ApiServer(object):
             update_tags,
             list_cloud_tags_masks,
         ]
+
+        funcs.append(get_acquiring) # XXX
 
         if self.allow_backup_method:
             funcs.append(do_backup)

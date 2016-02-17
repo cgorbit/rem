@@ -315,3 +315,6 @@ class FuncJob(object):
 
     def Run(self):
         self.runner()
+
+    def Terminate(self):
+        logging.warning("Can't Terminate FuncJob %s" % self.runner)

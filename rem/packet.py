@@ -14,15 +14,15 @@ import fork_locking
 import messages
 
 class PacketState(object):
-    CREATED = "CREATED"                 #created only packet
-    WORKABLE = "WORKABLE"               #working packet without pending jobs
-    PENDING = "PENDING"                 #working packet with pending jobs 
-    SUSPENDED = "SUSPENDED"            #suspended packet
-    ERROR = "ERROR"                     #unresolved error exists
-    SUCCESSFULL = "SUCCESSFULL"         #successfully done packet
-    HISTORIED = "HISTORIED"             #only for history archives
-    WAITING = "WAITING"                 #wait for executing (until job.continueTime)
-    NONINITIALIZED = "NONINITIALIZED"   #after reset
+    CREATED = "CREATED"
+    WORKABLE = "WORKABLE"               # working packet without pending jobs
+    PENDING = "PENDING"                 # working packet with pending jobs
+    SUSPENDED = "SUSPENDED"             # waiting for tags or manually suspended
+    ERROR = "ERROR"                     # unresolved error exists
+    SUCCESSFULL = "SUCCESSFULL"         # successfully done packet
+    HISTORIED = "HISTORIED"             # temporary state before removal
+    WAITING = "WAITING"                 # wait timeout for retry failed jobs
+    NONINITIALIZED = "NONINITIALIZED"
     allowed = {
         CREATED: (WORKABLE, SUSPENDED, NONINITIALIZED),
         WORKABLE: (SUSPENDED, ERROR, SUCCESSFULL, PENDING, WAITING, NONINITIALIZED),
@@ -543,7 +543,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                         self.FireEvent("job_get", self.jobs[leaf]) # queue.working.add(job)
                         self.leafs.remove(leaf)
                         job = self.jobs[leaf]
-                        self._clean_state = False
+                        self._clean_state = False # not 100% accurate
                         return job
             finally:
                 if not self.leafs:
@@ -697,7 +697,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             for tag in self._get_all_done_tags():
                 tag_op(tag)
 
-        if self._clean_state:
+        if self._clean_state and self.jobs: # force change state for packets without jobs
             # 1. Must put tag-change request into "queue" under JobPacket.lock
             # 2. Actual tag modification and reactions on it should be done async
             update_tags()
@@ -714,7 +714,10 @@ class JobPacket(Unpickable(lock=PickableRLock,
         for job in self.jobs.values():
             job.results = []
 
-        self._init(self._get_scheduler_ctx())
+        self.Reinit(self._get_scheduler_ctx(), suspend)
+
+    def Reinit(self, ctx, suspend=False): # FIXME Lock
+        self._init(ctx)
 
         if self.CheckFlag(PacketFlag.USER_SUSPEND) or suspend:
             self.changeState(PacketState.SUSPENDED)
@@ -731,7 +734,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def _get_all_done_tags(self):
         if self.done_indicator:
-            yield done_indicator
+            yield self.done_indicator
 
         for tag in self.job_done_indicator.itervalues():
             yield tag
@@ -742,7 +745,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 #yield tag
 
     def OnReset(self, (ref, comment)):
-        if isinstance(ref, Tag):
+        if isinstance(ref, TagBase):
             self._OnTagReset(ref, comment)
 
     def _send_reset_notification_if_need(self, comment):
@@ -765,11 +768,18 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self.waitTags.add(ref.GetFullname())
 
             if not self.isResetable:
-                self._send_reset_notification_if_need()
+                self._send_reset_notification_if_need(comment)
                 return
 
-            self.__Reset(suspend, lambda tag: tag.Reset())
+            self.__Reset(False, lambda tag: tag.Reset(comment))
 
+    def _move_to_queue(self, src_queue, dst_queue):
+        with self.lock:
+            if src_queue:
+                src_queue._detach_packet(self)
+            if dst_queue:
+                dst_queue._attach_packet(self)
+                self.Resume() # FIXME
 
 # Hack to restore from old backups (before refcatoring), when JobPacket was in
 import job

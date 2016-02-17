@@ -210,22 +210,31 @@ class Scheduler(Unpickable(lock=PickableRLock,
             while self.alive and not self.queues_with_jobs and self.schedWatcher.Empty():
                 self.HasScheduledTask.wait()
 
-            if self.alive:
-                if not self.schedWatcher.Empty():
-                    schedRunner = self.schedWatcher.GetTask()
-                    if schedRunner:
-                        return FuncJob(schedRunner)
+            if not self.alive:
+                return
 
-                if self.queues_with_jobs:
-                    queue = self.queues_with_jobs.pop()
-                    job = queue.Get(self.context)
-                    logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.packetRef))
-                    if queue.HasStartableJobs():
-                        self.queues_with_jobs.push(queue)
-                        self.HasScheduledTask.notify()
-                    return job # may be None
+            if not self.schedWatcher.Empty():
+                func = self.schedWatcher.GetTask()
+                if func:
+                    return FuncJob(func)
 
-                logging.warning("No tasks for execution after condition waking up")
+            if self.queues_with_jobs:
+                queue = self.queues_with_jobs.pop()
+
+        if queue:
+            # .Get not under lock to prevent deadlock
+            job = queue.Get(self.context)
+            if job:
+                logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.packetRef))
+
+            with self.lock:
+                if queue.HasStartableJobs() and queue not in self.queues_with_jobs:
+                    self.queues_with_jobs.push(queue)
+                    self.HasScheduledTask.notify()
+
+            return job # may be None
+
+        logging.warning("No tasks for execution after condition waking up")
 
     def Notify(self, ref):
         if isinstance(ref, Queue):
@@ -564,7 +573,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 pck.AddCallbackListener(self.packetNamesTracker)
             q.relocatePacket(pck)
         if q.IsAlive():
-            q.Resume(resumeWorkable=True)
+            q.Resume(resumeWorkable=True) # XXX
         self.qRef[q.name] = q
         if q.HasStartableJobs() and q not in self.queues_with_jobs:
             self.queues_with_jobs.push(q)
@@ -572,7 +581,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def AddPacketToQueue(self, qname, pck):
         queue = self.Queue(qname)
         self.packStorage.Add(pck)
-        queue.Add(pck)
+        pck._move_to_queue(None, queue)
         self.packetNamesTracker.Add(pck.name)
         pck.AddCallbackListener(self.packetNamesTracker)
 
@@ -614,3 +623,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def OnPacketReinitRequest(self, code):
         code(self.context)
+
+    def send_email_async(self, rcpt, msg):
+        logging.debug("send_email_async(rcpt)\n" + str(msg))

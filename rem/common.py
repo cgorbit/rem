@@ -233,25 +233,143 @@ class PickableLock(object):
     def __setstate__(self, state):
         pass
 
+from fork_locking import gettid
 
-class PickableRLock(object):
+_ACQUIRING = {}
+import traceback
+from threading import _get_ident
+import threading
+
+import json
+
+class JsonEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, _LockInfo):
+            return o.__for_json__()
+        return json.JSONEncoder.default(self, o)
+
+class _LockInfo(object):
+    class History(object):
+        def __init__(self):
+            self._impl = []
+
+        def pop(self):
+            #sys.stderr.write(' '.join(map(str, [id(self), 'before pop', len(self._impl)])))
+            self._impl.pop()
+
+        def push(self):
+            self._impl.append(traceback.extract_stack()[:-2])
+            #sys.stderr.write(' '.join(map(str, [id(self), 'after push', len(self._impl)])))
+
+        def __nonzero__(self):
+            return bool(self._impl)
+
+        def __for_json__(self):
+            return self._impl
+
+        #def __repr__(self):
+            #return repr(self._impl)
+
+    def __init__(self, name=None):
+        self.name = name
+        self.state = None
+        self.history = self.History()
+
+    #def __repr__(self):
+        #return repr([self. name, self.state, self.history])
+
+    def __for_json__(self):
+        return [self. name, self.state, self.history.__for_json__()]
+
+class PickableRLock(threading._RLock):
     def __init__(self, rhs=None):
-        self._object = fork_locking.RLock()
+        super(PickableRLock, self).__init__()
+        self._name = None
+        if rhs:
+            self._name = rhs
+        #self._object = fork_locking.RLock()
 
-    def __getattr__(self, attrname):
-        return getattr(self._object, attrname)
+    #def __getattr__(self, attrname):
+        #return getattr(self._object, attrname)
 
-    def __enter__(self):
-        return self._object.__enter__()
+    #def __enter__(self):
+        #global _ACQUIRING
+        ##info = [self.name, False, traceback.extract_stack()]
+        ##info[2].pop()
+        ##tid = str(gettid())
+        ##_ACQUIRING.setdefault(tid, []).append(info)
+        #ret = self._object.__enter__()
+        ##info[1] = True
+        #return ret
 
-    def __exit__(self, *args):
-        return self._object.__exit__(*args)
+    def _release_save(self):
+        state = self.__get_lock_info()
+        state.state = '_before_release_save'
+        #ret = self._object._release_save()
+        ret = super(PickableRLock, self)._release_save()
+        state.state = '_after_release_save'
+        return ret
+
+    def _acquire_restore(self, x):
+        state = self.__get_lock_info()
+        state.state = '_before_acquire_restore'
+        #ret = self._object._acquire_restore(x)
+        ret = super(PickableRLock, self)._acquire_restore(x)
+        state.state = '_after_acquire_restore'
+        return ret
+
+    def __get_lock_info(self):
+        global _ACQUIRING
+        return _ACQUIRING.setdefault(gettid(), {}).setdefault(id(self), _LockInfo(self._name))
+
+    def __pop_lock_info(self):
+        global _ACQUIRING
+        _ACQUIRING[gettid()].pop(id(self))
+
+    def release(self):
+        state = self.__get_lock_info()
+
+        state.state = '_before_release'
+        #ret = self._object.release()
+        ret = super(PickableRLock, self).release()
+        state.history.pop()
+        state.state = '_after_release'
+
+        if not state.history:
+            self.__pop_lock_info()
+
+        return ret
+
+
+    def acquire(self):
+        state = self.__get_lock_info()
+
+        state.state = '_before_acquire'
+        state.history.push()
+        #ret = self._object.acquire()
+        ret = super(PickableRLock, self).acquire()
+        state.state = '_after_acquire'
+
+        return ret
+
+    __enter__ = acquire
+
+    #def __exit__(self, *args):
+        #ret = self._object.__exit__(*args)
+        #if True:
+            #global _ACQUIRING
+            ##tid = str(gettid())
+            ##info = _ACQUIRING[tid]
+            ##info.pop()
+            ##if not info:
+                ##_ACQUIRING.pop(tid)
+        #return ret
 
     def __getstate__(self):
-        return None
+        return getattr(self, '_name', None)
 
     def __setstate__(self, state):
-        pass
+        self._name = state
 
 
 """Legacy structs for correct deserialization from old backups"""

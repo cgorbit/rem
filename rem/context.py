@@ -110,7 +110,7 @@ class Context(object):
         self.initLogger(config, self.execMode != "start")
 
     def send_email_async(self, rcpt, msg):
-        logging.debug("send_email_async(rcpt)\n" + msg)
+        self.Scheduler.send_email_async(rcpt, msg)
 
     def initLogger(self, config, isTestMode):
         logLevel = logging.DEBUG if isTestMode \

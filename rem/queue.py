@@ -79,11 +79,12 @@ class Queue(Unpickable(pending=PackSet.create,
         self.forgetQueueOldItems(self.errored, self.errored_lifetime or self.errorForgetTm)
 
     def forgetQueueOldItems(self, queue, expectedLifetime):
+        # XXX Don't use lock here
         barrierTm = time.time() - expectedLifetime
         while len(queue) > 0:
-            job, tm = queue.peak()
+            pck, tm = queue.peak()
             if tm < barrierTm:
-                job.changeState(PacketState.HISTORIED)
+                pck.changeState(PacketState.HISTORIED) # XXX_LOCK
             else:
                 break
 
@@ -121,27 +122,44 @@ class Queue(Unpickable(pending=PackSet.create,
     def IsAlive(self):
         return not self.isSuspended
 
-    def Add(self, pck):
+    def Add_OLD(self, pck):
         if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
             raise RuntimeError("can't add \"live\" packet into queue")
         with self.lock:
-            pck.AddCallbackListener(self)
-            self.working.update(pck.GetWorkingJobs())
+            pck.AddCallbackListener(self) # XXX_LOCK
+            self.working.update(pck.GetWorkingJobs()) # XXX_LOCK
         self.relocatePacket(pck)
-# XXX
-        pck.Resume()
+        pck.Resume() # XXX_LOCK
 
-    def Remove(self, pck):
+    def _attach_packet(self, pck):
+        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
+            raise RuntimeError("can't add \"live\" packet into queue")
+        with self.lock:
+            pck.AddCallbackListener(self) # XXX_LOCK
+            self.working.update(pck.GetWorkingJobs()) # XXX_LOCK
+        self.relocatePacket(pck)
+
+    def Remove_OLD(self, pck):
         if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
             raise RuntimeError("can't remove \"live\" packet from queue")
         if pck not in self.ListAllPackets():
             logging.info("%s", list(self.ListAllPackets()))
             raise RuntimeError("packet %s is not in queue %s" % (pck.id, self.name))
         with self.lock:
-            pck.DropCallbackListener(self)
-            self.working.difference_update(pck.GetWorkingJobs())
+            pck.DropCallbackListener(self) # XXX_LOCK
+            self.working.difference_update(pck.GetWorkingJobs()) # XXX_LOCK
         self.movePacket(pck, None)
 
+    def _detach_packet(self, pck):
+        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
+            raise RuntimeError("can't remove \"live\" packet from queue")
+        if pck not in self.ListAllPackets():
+            logging.info("%s", list(self.ListAllPackets()))
+            raise RuntimeError("packet %s is not in queue %s" % (pck.id, self.name))
+        with self.lock:
+            pck.DropCallbackListener(self) # XXX_LOCK
+            self.working.difference_update(pck.GetWorkingJobs()) # XXX_LOCK
+        self.movePacket(pck, None)
 
     def _CheckStartableJobs(self):
         return self.pending and len(self.working) < self.workingLimit and self.IsAlive()
@@ -153,26 +171,20 @@ class Queue(Unpickable(pending=PackSet.create,
         return self._CheckStartableJobs()
 
     def Get(self, context):
-        pckIncorrect = None
         while True:
             with self.lock:
                 if not self.HasStartableJobs(False):
                     return None
+
                 pck, prior = self.pending.peak()
-                pendingJob = pck.GetJobToRun()
-                if pendingJob == JobPacket.INCORRECT:
-                    #possibly incorrect situation -> will fix if it would be repeated after small delay
-                    if pck == pckIncorrect:
-                        logging.error("incorrect state for 'Get' operation: %s, packet %s" \
-                                      " will be markered for delete",
-                                      pck.state, pck.name)
-                        pck.RegisterEmergency()
-                        self.pending.pop()
-                        return None
-                    else:
-                        pckIncorrect = pck
-                else:
-                    return pendingJob
+
+            # .GetJobToRun not under lock to prevent deadlock
+            job = pck.GetJobToRun()
+
+            if job == JobPacket.INCORRECT:
+                continue
+
+            return job
 
     def ListAllPackets(self):
         return itertools.chain(*(getattr(self, q) for q in self.VIEW_BY_ORDER))
@@ -196,21 +208,22 @@ class Queue(Unpickable(pending=PackSet.create,
                 continue
             if prefix and not pck.name.startswith(prefix):
                 continue
-            if last_modified and (not pck.History() or pck.History()[-1][1] < last_modified):
+            if last_modified and (not pck.History() or pck.History()[-1][1] < last_modified): # XXX_LOCK
                 continue
             packets.append(pck)
         return packets
 
+# FIXME Kostyl' shto li?
     def Resume(self, resumeWorkable=False):
         self.isSuspended = False
+        # XXX Don't use lock or reinvent
         for pck in list(self.suspended):
             try:
-# XXX No lock?
-                pck.Resume(resumeWorkable)
+                pck.Resume(resumeWorkable) # XXX_LOCK
             except:
                 logging.error("can't resume packet %s", pck.id)
                 try:
-                    pck.changeState(PacketState.ERROR)
+                    pck.changeState(PacketState.ERROR) # XXX_LOCK
                 except:
                     logging.error("can't mark packet %s as errored")
         self.FireEvent("task_pending")
