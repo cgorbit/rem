@@ -608,8 +608,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 self.packetNamesTracker.Add(pck.name)
                 pck.AddCallbackListener(self.packetNamesTracker)
             q.relocatePacket(pck)
+
+    # XXX Will not resume 
         if q.IsAlive():
             q.Resume(resumeWorkable=True) # XXX
+
         self.qRef[q.name] = q
         if q.HasStartableJobs() and q not in self.queues_with_jobs:
             self.queues_with_jobs.push(q)

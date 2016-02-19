@@ -83,6 +83,7 @@ class PackedExecuteResult(IResult):
         else:
             IResult.__init__(self, "Successfull completion of packet work", 0, "%s/%s done" % (doneCount, allCount))
 
+raise RuntimeError("TODO:\n\t1. _run() itself\t\n2. IsCancelled()")
 
 class Job(Unpickable(err=nullobject,
                      results=list,
@@ -94,7 +95,7 @@ class Job(Unpickable(err=nullobject,
                      working_time=int,
                      _notified=bool,
                      output_to_status=bool,
-                     _should_stop=get_False,
+                     _should_stop=(bool, False),
                      _process=get_None),
           CallbackHolder):
     ERR_PENALTY_FACTOR = 6
@@ -175,25 +176,6 @@ class Job(Unpickable(err=nullobject,
             return self.limitter.CanStart()
         return True
 
-    def _finalize_job_iteration(self, result):
-        try:
-            if result is not None:
-                self.results.append(result)
-            if (result is None) \
-                or (result.IsFailed() and self.tries >= self.maxTryCount \
-                    and self.packetRef.state in (packet.PacketState.WORKABLE, packet.PacketState.PENDING)):
-                if result is not None:
-                    logging.info("Job`s %s result: TriesExceededResult", self.id)
-                    self.results.append(TriesExceededResult(self.tries))
-                if self.packetRef.kill_all_jobs_on_error:
-                    self.packetRef.Suspend(kill_jobs=True)
-                    self.packetRef.changeState(packet.PacketState.ERROR)
-        except:
-            logging.exception("some error during job finalization")
-            if self.packetRef.kill_all_jobs_on_error:
-                self.packetRef.Suspend(kill_jobs=True)
-                self.packetRef.changeState(packet.PacketState.ERROR)
-
     def _make_run_args(self):
         return [osspec.get_shell_location()] \
             + (["-o", "pipefail"] if self.pipe_fail else []) \
@@ -209,55 +191,87 @@ class Job(Unpickable(err=nullobject,
             kwargs['wrapper_binary'] = wrapper
             return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
 
-    def Run(self):
-        self._should_stop = False
-        self.input = self.output = None
+    def _run(self):
+        self.input = None
+        self.output = None
         self.errPipe = None
-        jobResult = None
         proc = None
+        pck = self.packetRef
+# TODO inputs
+
+        self.errPipe = map(os.fdopen, os.pipe(), 'rw')
+
+        run_args = DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
+                    else self._make_run_args()
+
+        logging.debug("out: %s, in: %s", self.output, self.input)
+
+        self.working_time = 0
+        start_time = time.localtime()
+        self.tries += 1
+
+        self._process = proc = self.start_process(
+            run_args,
+            stdout=self.output.fileno(),
+            stdin=self.input.fileno(),
+            stderr=self.errPipe[1].fileno(),
+            close_fds=True,
+            cwd=pck.directory,
+        )
+
+        self.errPipe[1].close()
+
+        if self._should_stop:
+            proc.terminate()
+
+        _, err = self.__wait_process(proc, self.errPipe[0])
+        proc_status = proc.wait()
+
+        # This is approximation
+        was_cancelled = proc.was_signal_sent()
+
+        return CommandLineResult(
+            proc_status, start_time, time.localtime(), err, getattr(self, "max_err_len", None)
+        )
+
+    def Run(self):
         try:
-            self.tries += 1
-            self.working_time = 0
-            self.packetRef._OnJobStart(self)
-            startTime = time.localtime()
-            self.errPipe = map(os.fdopen, os.pipe(), 'rw')
-
-            run_args = DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
-                       else self._make_run_args()
-
-            logging.debug("out: %s, in: %s", self.output, self.input)
-
-            self._process = proc = self.start_process(
-                run_args,
-                stdout=self.output.fileno(),
-                stdin=self.input.fileno(),
-                stderr=self.errPipe[1].fileno(),
-                close_fds=True,
-                cwd=self.packetRef.directory,
-            )
-
-            self.errPipe[1].close()
-
-            if self._should_stop:
-                proc.terminate()
-
-            _, err = self.__wait_process(proc, self.errPipe[0])
-            retCode = proc.wait()
-
-            jobResult = CommandLineResult(retCode, startTime, time.localtime(), err,
-                                       getattr(self, "max_err_len", None))
+            result = self._run()
         except Exception as e:
-            if not proc or isinstance(e, pgrpguard.ProcessStartError): # TODO don't use pgrpguard here
-                jobResult = JobStartErrorResult(None, str(e))
+            # execve(user_program) failed or not even called
+            user_program_was_not_started = not proc \
+                or isinstance(e, pgrpguard.ProcessStartError) # TODO don't use pgrpguard constants here
+
+            if user_program_was_not_started:
+                result = JobStartErrorResult(None, str(e))
+
             logging.exception("Run job %s exception: %s", self.id, e)
 
         finally:
             self._process = None
-            self._finalize_job_iteration(jobResult)
-            self.__CloseStreams()
-            self.packetRef._OnJobDone(self)
+            self._close_streams()
+            #self._finalize_job_iteration(jobResult)
+            pck.on_job_done(self, result)
 
-    def __CloseStreams(self):
+    def _finalize_job_iteration(self, result):
+        if result is not None:
+            self.results.append(result)
+
+        if (result is None) \
+            or (result.IsFailed() and self.tries >= self.maxTryCount \
+                and self.packetRef.state in (packet.PacketState.WORKABLE, packet.PacketState.PENDING)):
+            if result is not None:
+                logging.info("Job's %s result: TriesExceededResult", self.id)
+                self.results.append(TriesExceededResult(self.tries))
+
+            return True
+            # TODO Ignore this if we have call _kill_jobs():
+            #if self.packetRef.kill_all_jobs_on_error:
+                #self.packetRef.Suspend(kill_jobs=True)
+                #self.packetRef.changeState(packet.PacketState.ERROR)
+        return False
+
+    def _close_streams(self):
         if self.output_to_status and self.output:
             try:
                 if not self.output.closed:

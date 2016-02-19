@@ -55,13 +55,13 @@ class Queue(Unpickable(pending=PackSet.create,
         self.errored_lifetime = lifetime
 
     def OnJobGet(self, ref):
-        #lock has been already gotten in Queue.Get
-        self.working.add(ref)
+        with self.lock:
+            self.working.add(ref)
 
     def OnJobDone(self, ref):
         with self.lock:
             self.working.discard(ref)
-        if self.HasStartableJobs():
+        if self._has_startable_jobs():
             self.FireEvent("task_pending")
 
     def OnChange(self, ref):
@@ -79,7 +79,7 @@ class Queue(Unpickable(pending=PackSet.create,
         self.forgetQueueOldItems(self.errored, self.errored_lifetime or self.errorForgetTm)
 
     def forgetQueueOldItems(self, queue, expectedLifetime):
-        # XXX Don't use lock here
+        # XXX Don't use lock here to prevent deadlock
         barrierTm = time.time() - expectedLifetime
         while len(queue) > 0:
             pck, tm = queue.peak()
@@ -96,7 +96,17 @@ class Queue(Unpickable(pending=PackSet.create,
             logging.debug("queue %s\tmoving packet %s typed as %s", self.name, pck.name, pck.state)
             self.movePacket(pck, dest_queue)
 
-    def movePacket(self, pck, dest_queue):
+    def _find_packet_queue(self, pck):
+        ret = None
+        for qname in self.VIEW_BY_ORDER:
+            queue = getattr(self, qname, {})
+            if pck in queue:
+                if ret is not None:
+                    logging.warning("packet %r is in several queues", pck)
+                ret = queue
+        return ret
+
+    def movePacketOld(self, pck, dest_queue):
         src_queue = None
         for qname in self.VIEW_BY_ORDER:
             queue = getattr(self, qname, {})
@@ -113,6 +123,22 @@ class Queue(Unpickable(pending=PackSet.create,
             if pck.state == PacketState.PENDING:
                 self.FireEvent("task_pending")
 
+    def movePacket(self, pck, dst_queue):
+        with self.lock:
+            src_queue = self._find_packet_queue(pck)
+
+            if src_queue == dst_queue:
+                return
+
+            if src_queue is not None:
+                src_queue.remove(pck)
+
+            if dst_queue is not None:
+                dst_queue.add(pck)
+
+        if pck.state == PacketState.PENDING:
+            self.FireEvent("task_pending")
+
     def OnPacketReinitRequest(self, code):
         self.FireEvent('packet_reinit_request', code)
 
@@ -122,58 +148,27 @@ class Queue(Unpickable(pending=PackSet.create,
     def IsAlive(self):
         return not self.isSuspended
 
-    def Add_OLD(self, pck):
-        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
-            raise RuntimeError("can't add \"live\" packet into queue")
-        with self.lock:
-            pck.AddCallbackListener(self) # XXX_LOCK
-            self.working.update(pck.GetWorkingJobs()) # XXX_LOCK
-        self.relocatePacket(pck)
-        pck.Resume() # XXX_LOCK
-
     def _attach_packet(self, pck):
-        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
-            raise RuntimeError("can't add \"live\" packet into queue")
         with self.lock:
             pck.AddCallbackListener(self) # XXX_LOCK
-            self.working.update(pck.GetWorkingJobs()) # XXX_LOCK
+            self.working.update(pck._get_working_jobs()) # XXX_LOCK
         self.relocatePacket(pck)
-
-    def Remove_OLD(self, pck):
-        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
-            raise RuntimeError("can't remove \"live\" packet from queue")
-        if pck not in self.ListAllPackets():
-            logging.info("%s", list(self.ListAllPackets()))
-            raise RuntimeError("packet %s is not in queue %s" % (pck.id, self.name))
-        with self.lock:
-            pck.DropCallbackListener(self) # XXX_LOCK
-            self.working.difference_update(pck.GetWorkingJobs()) # XXX_LOCK
-        self.movePacket(pck, None)
 
     def _detach_packet(self, pck):
-        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
-            raise RuntimeError("can't remove \"live\" packet from queue")
-        if pck not in self.ListAllPackets():
-            logging.info("%s", list(self.ListAllPackets()))
-            raise RuntimeError("packet %s is not in queue %s" % (pck.id, self.name))
         with self.lock:
+            if not self._find_packet_queue(pck):
+                raise RuntimeError("packet %s is not in queue %s" % (pck.id, self.name))
             pck.DropCallbackListener(self) # XXX_LOCK
-            self.working.difference_update(pck.GetWorkingJobs()) # XXX_LOCK
+            self.working.difference_update(pck._get_working_jobs()) # XXX_LOCK
         self.movePacket(pck, None)
 
-    def _CheckStartableJobs(self):
+    def _has_startable_jobs(self):
         return self.pending and len(self.working) < self.workingLimit and self.IsAlive()
-
-    def HasStartableJobs(self, block=True):
-        if block:
-            with self.lock:
-                return self._CheckStartableJobs()
-        return self._CheckStartableJobs()
 
     def Get(self, context):
         while True:
             with self.lock:
-                if not self.HasStartableJobs(False):
+                if not self._has_startable_jobs():
                     return None
 
                 pck, prior = self.pending.peak()
@@ -213,7 +208,6 @@ class Queue(Unpickable(pending=PackSet.create,
             packets.append(pck)
         return packets
 
-# FIXME Kostyl' shto li?
     def Resume(self, resumeWorkable=False):
         self.isSuspended = False
         # XXX Don't use lock or reinvent
@@ -240,7 +234,7 @@ class Queue(Unpickable(pending=PackSet.create,
 
     def ChangeWorkingLimit(self, lmtValue):
         self.workingLimit = int(lmtValue)
-        if self._CheckStartableJobs:
+        if self._has_startable_jobs():
             self.FireEvent('task_pending')
 
     def Empty(self):

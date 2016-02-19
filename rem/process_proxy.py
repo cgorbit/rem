@@ -36,6 +36,10 @@ class ProcessProxyBase(object):
     def __init__(self):
         # Lock for waitpid(2) call
         self._lock = threading.Lock() # no need in fork_locking.Lock
+        self._signal_was_sent = False
+
+    def was_signal_sent(self):
+        return self._signal_was_sent
 
     def _waited(self):
         return self._impl.returncode is not None
@@ -81,9 +85,11 @@ class ProcessProxy(ProcessProxyBase):
         self._impl = subprocess.Popen(*args, **kwargs)
 
     def _send_term_to_process(self):
+        self._signal_was_sent = True
         os.kill(self._impl.pid, signal.SIGTERM)
 
     def _send_kill_to_group(self):
+        self._signal_was_sent = True
         os.killpg(self._impl.pid, signal.SIGKILL)
 
     def terminate(self):
@@ -111,9 +117,11 @@ class ProcessGroupGuardProxy(ProcessProxyBase):
         self._impl = pgrpguard.ProcessGroupGuard(*args, **kwargs)
 
     def _send_term_to_process(self):
+        self._signal_was_sent = True
         self._impl.send_term_to_process()
 
     def _send_kill_to_group(self):
+        self._signal_was_sent = True
         self._impl.send_kill_to_group()
 
     def terminate(self):
