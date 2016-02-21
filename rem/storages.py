@@ -65,7 +65,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
             while len(self.packets) > 0:
                 pck_id, (tm, pck) = self.packets.peak()
                 if tm < barrierTm:
-                    pck.ReleasePlace()
+                    pck._release_place()
                     self.packets.pop(pck.id)
                 else:
                     break
@@ -674,6 +674,7 @@ class TagStorage(object):
             return False
 
         try:
+            #return hash(name) % 3 != 0
             return self._match_cloud_tag(name)
         except Exception as e:
             now = time.time()

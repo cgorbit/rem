@@ -3,6 +3,7 @@ import logging
 import os
 import time
 import datetime
+import sys
 
 from callbacks import CallbackHolder
 from common import FuncRunner, Unpickable, safeint, nullobject, zeroint, get_None, get_False
@@ -11,16 +12,9 @@ import packet
 import constants
 from rem.profile import ProfiledThread
 import process_proxy
-import pgrpguard # TODO remove
+import pgrpguard
 
 DUMMY_COMMAND_CREATOR = None
-
-def cut_message(msg, BEG_LEN=None, FIN_LEN=None):
-    BEG_LEN = BEG_LEN or 1000
-    FIN_LEN = FIN_LEN or 1000
-    if msg and len(msg) > BEG_LEN + FIN_LEN + 5:
-        msg = msg[:BEG_LEN] + "\n...\n" + msg[-FIN_LEN:]
-    return msg or ""
 
 class IResult(Unpickable(type=str,
                          code=safeint,
@@ -46,12 +40,14 @@ class IResult(Unpickable(type=str,
 class CommandLineResult(IResult):
     time_format = "%Y/%m/%d %H:%M:%S"
 
-    def __init__(self, code, start_time, fin_time, err, max_err_len=None):
+    def __init__(self, code, start_time, finish_time, err):
+        def format_time(t):
+            if t is None:
+                return None
+            return time.strftime(self.time_format, time.localtime(t))
+
         IResult.__init__(self, "OS exit code", code, "started: %s; finished: %s;%s" \
-                                                     % (
-            time.strftime(self.time_format, start_time), time.strftime(self.time_format, fin_time),
-            "\n" + cut_message(err, max_err_len / 2 if max_err_len else None,
-                               max_err_len / 2 if max_err_len else None) if err else ""))
+            % (format_time(start_time), format_time(finish_time), "\n" + (err or "")))
 
 
 class JobStartErrorResult(CommandLineResult):
@@ -83,7 +79,6 @@ class PackedExecuteResult(IResult):
         else:
             IResult.__init__(self, "Successfull completion of packet work", 0, "%s/%s done" % (doneCount, allCount))
 
-raise RuntimeError("TODO:\n\t1. _run() itself\t\n2. IsCancelled()")
 
 class Job(Unpickable(err=nullobject,
                      results=list,
@@ -93,18 +88,13 @@ class Job(Unpickable(err=nullobject,
                      max_working_time=(int, constants.KILL_JOB_DEFAULT_TIMEOUT),
                      notify_timeout=(int, constants.NOTIFICATION_TIMEOUT),
                      working_time=int,
-                     _notified=bool,
-                     output_to_status=bool,
-                     _should_stop=(bool, False),
-                     _process=get_None),
-          CallbackHolder):
+                     output_to_status=bool)):
     ERR_PENALTY_FACTOR = 6
 
-    def __init__(self, shell, parents, pipe_parents, packetRef, maxTryCount, limitter, max_err_len=None,
+    def __init__(self, shell, parents, pipe_parents, packetRef, maxTryCount, max_err_len=None,
                  retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
         super(Job, self).__init__()
         self.maxTryCount = maxTryCount
-        self.limitter = limitter
         self.shell = shell
         self.parents = parents
         self.inputs = pipe_parents
@@ -115,71 +105,28 @@ class Job(Unpickable(err=nullobject,
         self.description = description
         self.notify_timeout = notify_timeout
         self.max_working_time = max_working_time
-        if self.limitter:
-            self.AddCallbackListener(self.limitter)
         self.packetRef = packetRef
-        self.AddCallbackListener(self.packetRef)
         self.output_to_status = output_to_status
 
     def __repr__(self):
         return "<Job(id: %s; packet: %s)>" % (self.id, self.packetRef.id)
 
     def __getstate__(self):
-        sdict = CallbackHolder.__getstate__(self)
-        sdict.pop('_process', None)
-        sdict.pop('_should_stop', None)
-        return sdict
+        return self.__dict__.copy()
 
-    @staticmethod
-    def __read_stream(fh, buffer):
-        buffer.append(fh.read())
-
-    def __wait_process(self, process, err_pipe):
-        out = []
-        stderrReadThread = ProfiledThread(
-            target=Job.__read_stream,
-            args=(err_pipe, out),
-            name_prefix='StdErr',
-        )
-        stderrReadThread.setDaemon(True)
-        stderrReadThread.start()
-        if process.stdin:
-            process.stdin.close()
-        last_update_time = time.time()
-        working_time = 0
-        poll = process.poll
-        _time = time.time
-        while poll() is None:
-            working_time += _time() - last_update_time
-            last_update_time = _time()
-            if working_time < self.notify_timeout < self.max_working_time and not self._notified:
-                if process.wait(self.notify_timeout - working_time) is None:
-                    self._timeoutNotify(working_time + _time() - last_update_time)
-
-            elif working_time < self.max_working_time:
-                if process.wait(self.max_working_time - working_time) is None:
-                    process.terminate()
-                    self.results.append(TimeOutExceededResult(self.id))
-                    break
-            time.sleep(0.001)
-        stderrReadThread.join()
-        return "", out[0]
-
-    def _timeoutNotify(self, working_time):
-        self.cached_working_time = working_time
-        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.packetRef.name, self.id)
-        self.packetRef.SendJobLongExecutionNotification(self)
-        self._notified = True
-
-    def CanStart(self):
-        if self.limitter:
-            return self.limitter.CanStart()
-        return True
-
-    def _make_run_args(self):
+    def __make_run_args(self):
         return [osspec.get_shell_location()] \
             + (["-o", "pipefail"] if self.pipe_fail else []) \
             + ["-c", self.shell]
+
+    def make_run_args(self):
+        return DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
+                    else self.__make_run_args()
+
+    def _notify_long_execution(self, working_time):
+        self.cached_working_time = working_time
+        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.packetRef.name, self.id)
+        self.packetRef.SendJobLongExecutionNotification(self)
 
     @staticmethod
     def start_process(*args, **kwargs):
@@ -191,135 +138,240 @@ class Job(Unpickable(err=nullobject,
             kwargs['wrapper_binary'] = wrapper
             return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
 
-    def _run(self):
-        self.input = None
-        self.output = None
-        self.errPipe = None
-        proc = None
-        pck = self.packetRef
-# TODO inputs
+    def last_result(self):
+        return self.results[-1] if self.results else None
 
-        self.errPipe = map(os.fdopen, os.pipe(), 'rw')
+    def _create_file_handles(self):
+        return self.packetRef._create_job_file_handles(self)
 
-        run_args = DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
-                    else self._make_run_args()
+    def get_working_directory(self):
+        return self.packetRef.directory
 
-        logging.debug("out: %s, in: %s", self.output, self.input)
+    def produce_legacy_stderr_output(self, filename):
+        return self._produce_legacy_stderr_output(filename, self.max_err_len or 2000)
 
-        self.working_time = 0
-        start_time = time.localtime()
-        self.tries += 1
+    @staticmethod
+    def _produce_legacy_stderr_output(filename, max_err_len):
+        full_size = os.stat(filename).st_size
 
-        self._process = proc = self.start_process(
-            run_args,
-            stdout=self.output.fileno(),
-            stdin=self.input.fileno(),
-            stderr=self.errPipe[1].fileno(),
-            close_fds=True,
-            cwd=pck.directory,
-        )
+        with open(filename) as input:
+            if full_size > max_err_len + 5:
+                msg = input.read(max_err_len / 2)
+                msg += '\n...\n'
+                input.seek(-(max_err_len / 2), os.SEEK_END)
+                msg += input.read()
+            else:
+                msg = input.read()
 
-        self.errPipe[1].close()
+        return msg
 
-        if self._should_stop:
-            proc.terminate()
+    @staticmethod
+    def _produce_stdout_status(filename):
+        with open(filename) as stream:
+            ret  = ""
+            ret += '\nOutput:\n'
+            ret += '-' * 80
+            ret += '\n' + stream.read()
+        return ret
 
-        _, err = self.__wait_process(proc, self.errPipe[0])
-        proc_status = proc.wait()
+    def on_done(self, runner):
+        self.packetRef.on_job_done(runner)
 
-        # This is approximation
-        was_cancelled = proc.was_signal_sent()
 
-        return CommandLineResult(
-            proc_status, start_time, time.localtime(), err, getattr(self, "max_err_len", None)
-        )
+class JobRunner(object):
+    def __init__(self, job):
+        self._job = job
+        self._cancelled = False
 
-    def Run(self):
+        self._process = None
+        self._start_time = None
+        self._finish_time = None
+        self._timedout = False
+
+        self._environment_error = None
+        self._process_start_error = None
+
+        self._stderr_summary = None
+        self._stdout_summary = None
+
+    def _wait_process(self, process):
+        job = self._job
+        start_time = time.time() # FIXME set earlier
+
+        code = None
+
+        if job.notify_timeout < job.max_working_time: # FIXME bullshit?
+            code = process.wait(deadline=start_time + job.notify_timeout)
+
+            if code is None:
+                job._notify_long_execution(time.time() - start_time)
+            else:
+                return code
+
+        code = process.wait(deadline=start_time + job.max_working_time)
+
+        if code is None:
+            process.terminate()
+            self._timedout = process.was_signal_sent() # there's race with self._cancelled
+
+        return process.wait()
+
+    def _run_process_inner(self, argv, stdin, stdout, stderr):
+        job = self._job
+        self._start_time = time.time()
+
         try:
-            result = self._run()
+            process = job.start_process(
+                argv,
+                stdout=stdout.fileno(),
+                stdin=stdin.fileno(),
+                stderr=stderr.fileno(),
+                close_fds=True,
+                cwd=job.get_working_directory(),
+            )
+
+        except pgrpguard.Error as e:
+            t, e, tb = sys.exc_info()
+            raise t, e, tb
+
         except Exception as e:
-            # execve(user_program) failed or not even called
-            user_program_was_not_started = not proc \
-                or isinstance(e, pgrpguard.ProcessStartError) # TODO don't use pgrpguard constants here
+            self._process_start_error = e
+            return False
 
-            if user_program_was_not_started:
-                result = JobStartErrorResult(None, str(e))
+        self._process = process
 
-            logging.exception("Run job %s exception: %s", self.id, e)
+        if self._cancelled:
+            process.terminate()
 
-        finally:
-            self._process = None
-            self._close_streams()
-            #self._finalize_job_iteration(jobResult)
-            pck.on_job_done(self, result)
+        try:
+            self._wait_process(process)
+        except Exception as e:
+            t, e, tb = sys.exc_info()
+            try:
+                process.terminate()
+            except:
+                pass
+            raise t, e, tb
 
-    def _finalize_job_iteration(self, result):
-        if result is not None:
-            self.results.append(result)
+        self._finish_time = time.time()
 
-        if (result is None) \
-            or (result.IsFailed() and self.tries >= self.maxTryCount \
-                and self.packetRef.state in (packet.PacketState.WORKABLE, packet.PacketState.PENDING)):
-            if result is not None:
-                logging.info("Job's %s result: TriesExceededResult", self.id)
-                self.results.append(TriesExceededResult(self.tries))
+        return True
 
-            return True
-            # TODO Ignore this if we have call _kill_jobs():
-            #if self.packetRef.kill_all_jobs_on_error:
-                #self.packetRef.Suspend(kill_jobs=True)
-                #self.packetRef.changeState(packet.PacketState.ERROR)
+    def _run_process(self, *args):
+        try:
+            return self._run_process_inner(*args)
+
+        except (pgrpguard.WrapperNotFoundError, pgrpguard.WrapperStartError) as e:
+            self._environment_error = e
+
+        except pgrpguard.ProcessStartOSError as e:
+            self._process_start_error = e
+
         return False
 
-    def _close_streams(self):
-        if self.output_to_status and self.output:
+    def _run(self):
+        job = self._job
+
+        argv = job.make_run_args()
+
+        try:
+            stdin, stdout, stderr = job._create_file_handles()
+        except Exception as e:
+            self._environment_error = e
+            return
+
+        with stdin:
+            with stdout:
+                with stderr:
+                    logging.debug("out: %s, in: %s", stdout, stdin)
+                    logging.debug("job %s\tstarted", job.shell) # FIXME was called in packet.py
+
+                    if not self._run_process(argv, stdin, stdout, stderr):
+                        return
+
+                    self._stderr_summary = job.produce_legacy_stderr_output(stderr.name)
+
+                    if job.output_to_status:
+                        self._stdout_summary = job._produce_stdout_status(stdout.name)
+
+    def _append_results(self):
+        job = self._job
+
+        def append_result(result):
+            job.results.append(result)
+
+        if self._timedout:
+            append_result(TimeOutExceededResult(job.id))
+
+        as_legacy_start_error = self._process_start_error or self._environment_error
+
+        if as_legacy_start_error:
+            append_result(JobStartErrorResult(job.id, str(as_legacy_start_error)))
+
+        elif self._finish_time:
+            append_result(
+                CommandLineResult(self._process.returncode,
+                                    self._start_time,
+                                    self._finish_time,
+                                    self._stderr_summary)
+            )
+
+        if job.tries >= job.maxTryCount:
+            logging.info("Job's %s result: TriesExceededResult", job.id)
+            append_result(TriesExceededResult(job.tries))
+
+        if job.output_to_status and job.results and self._stdout_summary:
+            last = job.results[-1]
+            last.message = last.message or ""
+            last.message += self._stdout_summary
+
+    def run(self):
+        job = self._job
+
+        try:
             try:
-                if not self.output.closed:
-                    self.output.close()
-                if self.output.closed:
-                    try:
-                        self.output = open(self.output.name, 'r')
-                    except IOError:
-                        #packet probably was deleted and place released
-                        self.output = open('/dev/null', 'r')
+                self._run()
+            except Exception as e:
+                # FIXME Do something more than logging?
+                logging.exception("Run job %s exception", job.id)
 
-                if len(self.results):
-                    self.results[-1].message = self.results[-1].message or ""
-                    self.results[-1].message += '\nOutput:\n'
-                    self.results[-1].message += '-'*80
-                    self.results[-1].message += '\n'+'\n'.join(self.output.readlines())
-            except:
-                logging.exception("can't save jobs output")
+            if not(self._environment_error or self._cancelled):
+                job.tries += 1
 
-        closingStreamGenerators = (
-            lambda: self.input,
-            lambda: self.output,
-            lambda: self.errPipe[0] if self.errPipe else None,
-            lambda: self.errPipe[1] if self.errPipe else None
-        )
+            self._append_results()
 
-        for fn in closingStreamGenerators:
-            stream = fn()
-            if stream is not None:
-                try:
-                    if isinstance(stream, file):
-                        if not stream.closed:
-                            stream.close()
-                    elif isinstance(stream, int):
-                        os.close(stream)
-                    else:
-                        raise RuntimeError("can't close unknown file object %r" % stream)
-                except:
-                    logging.exception('close stream error')
+        finally:
+            job.on_done(self)
 
-    def Terminate(self):
-        self._should_stop = True
+    def cancel(self):
+        self._cancelled = True
         proc = self._process
         if proc:
             proc.terminate()
 
-    def Result(self):
-        return self.results[-1] if self.results else None
+    def is_cancelled(self):
+        return self._cancelled
+
+    @property
+    def returncode(self):
+        if not self._finish_time:
+            return None
+        return self._process.returncode
+
+    #@property
+    #def job_id(self):
+        #return self._job.id
+
+    @property
+    def job(self):
+        return self._job
+
+    @property
+    def pck(self):
+        return self._job.packetRef
+
+    def __repr__(self):
+        return '<JobRunner for %s>' % repr(self._job)
 
 
 class FuncJob(object):
@@ -327,8 +379,8 @@ class FuncJob(object):
         assert isinstance(runner, FuncRunner), "incorrent arguments for FuncJob initializing"
         self.runner = runner
 
-    def Run(self):
+    def run(self):
         self.runner()
 
-    def Terminate(self):
+    def cancel(self):
         logging.warning("Can't Terminate FuncJob %s" % self.runner)

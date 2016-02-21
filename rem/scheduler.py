@@ -261,7 +261,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             # .Get not under lock to prevent deadlock
             job = queue.Get(self.context)
             if job:
-                logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.packetRef))
+                logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.pck))
 
             with self.lock:
                 if queue.HasStartableJobs() and queue not in self.queues_with_jobs:
@@ -601,15 +601,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
                     logging.warning(
                         "can't restore packet directory: %s for packet %s. Packet marked as error from old state %s",
                         pck.directory, pck.name, pck.state)
-                    pck.MarkAsFailedOnRestore()
+                    pck.MarkAsFailedOnRecovery()
                 dstStorage = self.packStorage
             dstStorage.Add(pck)
             if pck.state != PacketState.HISTORIED:
                 self.packetNamesTracker.Add(pck.name)
                 pck.AddCallbackListener(self.packetNamesTracker)
+            pck._init_jobs_dependencies() # XXX TODO
             q.relocatePacket(pck)
 
-    # XXX Will not resume 
         if q.IsAlive():
             q.Resume(resumeWorkable=True) # XXX
 

@@ -58,11 +58,26 @@ class _Popen(subprocess.Popen):
         os.closerange(but0 + 1, but1)
         os.closerange(but1 + 1, subprocess.MAXFD)
 
-class ProcessStartError(Exception):
+
+class Error(Exception):
     pass
 
-class ProcessStartOSError(OSError, ProcessStartError):
+class WrapperUsageError(Error):
     pass
+
+class WrapperNotFoundError(Error):
+    pass
+class WrapperStartError(Error):
+    pass
+class WrapperStartOSError(OSError, WrapperStartError):
+    pass
+
+class ProcessStartOSError(OSError, Error):
+    pass
+
+class WrapperProtocolError(Error):
+    pass
+
 
 class ProcessGroupGuard(object):
     def __init__(self, argv, *args, **kwargs):
@@ -72,7 +87,7 @@ class ProcessGroupGuard(object):
             argv = list(argv)
 
         if not argv:
-            raise RuntimeError("No command to executer")
+            raise ValueError("No command to executer")
 
         if 'preexec_fn' in kwargs:
             raise ValueError('preexec_fn in arguments')
@@ -99,9 +114,11 @@ class ProcessGroupGuard(object):
         except Exception:
             try:
                 t, e, tb = sys.exc_info()
-                if isinstance(e, OSError) and e.errno == errno.ENOENT:
-                    raise ProcessStartOSError, ProcessStartOSError(e.errno, "Can't find wrapper binary"), tb
-                raise
+                if isinstance(e, OSError):
+                    if e.errno == errno.ENOENT:
+                        raise WrapperNotFoundError, WrapperNotFoundError("Can't find wrapper binary"), tb
+                    raise WrapperStartOSError, WrapperStartOSError(e.errno, "Failed to run wrapper binary: %s" % e.strerror), tb
+                raise WrapperStartError, WrapperStartError("Failed to run wrapper binary: %s" % e.message), tb
             finally:
                 for fd in report_pipe:
                     try:
@@ -141,10 +158,10 @@ class ProcessGroupGuard(object):
             ret = _handle_status(get_int())
 
         else:
-            raise RuntimeError("Unknown report type %d" % type)
+            raise WrapperProtocolError("Unknown report type %d" % type)
 
         if offset[0] != len(str):
-            raise RuntimeError('Extra data in wrapper report')
+            raise WrapperProtocolError('Extra data in wrapper report')
 
         return ret
 
@@ -153,31 +170,31 @@ class ProcessGroupGuard(object):
             with os.fdopen(self._report_fd) as in_:
                 report_str = in_.read()
         except Exception as e:
-            self._result = e
+            self._result = WrapperProtocolError("Failed to read report: %s" % e.message)
             return
         finally:
             self._report_fd = None
 
         if wrapper_status < 0:
-            result = RuntimeError("Wrapper was terminated by %s signal" % -wrapper_status)
+            result = WrapperProtocolError("Wrapper was terminated by %s signal" % -wrapper_status)
 
         elif wrapper_status == _EXIT_NO_ARGV:
-            result = ProcessStartError("No enough arguments for %s" % self._wrapper_filename)
+            result = WrapperUsageError("No enough arguments for %s" % self._wrapper_filename)
 
         elif wrapper_status == _EXIT_BAD_REPORT_FD:
-            result = ProcessStartError("Bad report fd for %s" % self._wrapper_filename)
+            result = WrapperUsageError("Bad report fd for %s" % self._wrapper_filename)
 
         elif wrapper_status == _EXIT_NOT_SUPER_USER:
-            result = ProcessStartError("No set-uid root on %s" % self._wrapper_filename)
+            result = WrapperUsageError("No set-uid root on %s" % self._wrapper_filename)
 
         elif wrapper_status == _EXIT_STATUS_IN_FILE:
             try:
                 result = self._parse_report(report_str)
             except Exception as e:
-                result = RuntimeError("Failed to parse report from %s: %s" % (self._wrapper_filename, e))
+                result = WrapperProtocolError("Failed to parse report from %s: %s" % (self._wrapper_filename, e))
 
         elif wrapper_status == _EXIT_FAILED_REPORT:
-            result = RuntimeError("%s failed to write report" % self._wrapper_filename)
+            result = WrapperProtocolError("%s failed to write report" % self._wrapper_filename)
 
         else:
             result = wrapper_status

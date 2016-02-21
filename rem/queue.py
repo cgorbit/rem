@@ -61,7 +61,7 @@ class Queue(Unpickable(pending=PackSet.create,
     def OnJobDone(self, ref):
         with self.lock:
             self.working.discard(ref)
-        if self._has_startable_jobs():
+        if self.HasStartableJobs():
             self.FireEvent("task_pending")
 
     def OnChange(self, ref):
@@ -84,7 +84,9 @@ class Queue(Unpickable(pending=PackSet.create,
         while len(queue) > 0:
             pck, tm = queue.peak()
             if tm < barrierTm:
-                pck.changeState(PacketState.HISTORIED) # XXX_LOCK
+# FIXME How to fix race? TODO
+#       Packet may be reseted after peak and before next line
+                pck.RemoveAsOld()
             else:
                 break
 
@@ -162,13 +164,14 @@ class Queue(Unpickable(pending=PackSet.create,
             self.working.difference_update(pck._get_working_jobs()) # XXX_LOCK
         self.movePacket(pck, None)
 
-    def _has_startable_jobs(self):
-        return self.pending and len(self.working) < self.workingLimit and self.IsAlive()
+    def HasStartableJobs(self):
+        with self.lock:
+            return self.pending and len(self.working) < self.workingLimit and self.IsAlive()
 
     def Get(self, context):
         while True:
             with self.lock:
-                if not self._has_startable_jobs():
+                if not self.HasStartableJobs():
                     return None
 
                 pck, prior = self.pending.peak()
@@ -217,7 +220,7 @@ class Queue(Unpickable(pending=PackSet.create,
             except:
                 logging.error("can't resume packet %s", pck.id)
                 try:
-                    pck.changeState(PacketState.ERROR) # XXX_LOCK
+                    pck.RegisterAfterBackupResumeError() # XXX_LOCK
                 except:
                     logging.error("can't mark packet %s as errored")
         self.FireEvent("task_pending")
@@ -234,7 +237,7 @@ class Queue(Unpickable(pending=PackSet.create,
 
     def ChangeWorkingLimit(self, lmtValue):
         self.workingLimit = int(lmtValue)
-        if self._has_startable_jobs():
+        if self.HasStartableJobs():
             self.FireEvent('task_pending')
 
     def Empty(self):

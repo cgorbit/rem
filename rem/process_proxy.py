@@ -9,9 +9,11 @@ import threading
 _inf = float('inf')
 _MAX_WAIT_DELAY = 2.0
 
-def _wait(f, timeout=None):
-    deadline = time.time() + timeout if timeout is not None else None
-    delay = 0.0005
+def _wait(f, timeout=None, deadline=None):
+    if timeout is not None:
+        deadline = time.time() + timeout
+
+    delay = 0.005
 
     while True:
         res = f()
@@ -48,8 +50,8 @@ class ProcessProxyBase(object):
     def returncode(self):
         return self._impl.returncode
 
-    def wait(self, timeout=None):
-        return _wait(self.poll, timeout)
+    def wait(self, timeout=None, deadline=None):
+        return _wait(self.poll, timeout, deadline)
 
     def poll(self):
         with self._lock:
@@ -103,7 +105,7 @@ class ProcessProxy(ProcessProxyBase):
             def poll_zombie():
                 return True if _get_process_state(pid) == 'Z' else None
 
-            _wait(poll_zombie, self.BEFORE_KILL_DELAY)
+            _wait(poll_zombie, timeout=self.BEFORE_KILL_DELAY)
 
             self._send_kill_to_group()
 

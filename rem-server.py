@@ -124,8 +124,6 @@ def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPL
 def pck_moveto_queue(pck_id, src_queue, dst_queue):
     pck = _scheduler.GetPacket(pck_id)
     if pck is not None:
-        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
-            raise RuntimeError("can't move \"live\" packet between queues")
         pck._move_to_queue(
             _scheduler.Queue(src_queue),
             _scheduler.Queue(dst_queue)
@@ -291,11 +289,11 @@ def pck_resume(pck_id):
 @traced_rpc_method("info")
 def pck_delete(pck_id):
     pck = _scheduler.GetPacket(pck_id)
-    if pck is not None:
-        if not pck.canChangeState(PacketState.HISTORIED):
-            raise AssertionError("couldn't delete packet '%s' stated as '%s'" % (pck_id, pck.state))
-        return pck.changeState(PacketState.HISTORIED)
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    if pck is None:
+        raise AttributeError("nonexisted packet id: %s" % pck_id)
+        #if not pck.canChangeState(PacketState.HISTORIED):
+            #raise AssertionError("couldn't delete packet '%s' stated as '%s'" % (pck_id, pck.state))
+    return pck.RemoveByUser()
 
 @traced_rpc_method("info")
 def pck_reset(pck_id, suspend=False, reset_tag=False, reset_message=None):
