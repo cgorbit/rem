@@ -454,7 +454,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
             if not self.canChangeState(state):
                 logging.warning("packet %s\tincorrect state change request %r => %r" % (self.name, self.state, state))
-                assert False # TODO
+                assert False, "Can't change state" # TODO
                 return
 
             prev_state = self.state
@@ -485,9 +485,14 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 self._release_place()
 
     def RemoveByUser(self):
-        self._change_state(PacketState.HISTORIED)
+        with self.lock:
+            new_state = PacketState.HISTORIED
+            if not self.canChangeState(new_state):
+                raise RuntimeError("Can't remove packet in %s state" % self.state)
+            self._change_state(new_state)
 
-    RemoveAsOld = RemoveByUser
+    def RemoveAsOld(self):
+        self._change_state(PacketState.HISTORIED)
 
     def RegisterAfterBackupResumeError(self):
 # FIXME `Resume' (some init actually) all packets on backup loading
@@ -527,7 +532,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def OnStart(self, ref):
         if isinstance(ref, Job):
-            assert False
+            assert False, "OnStart method is obsolete"
 
     def OnUndone(self, ref):
         pass
@@ -585,7 +590,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def OnDone(self, ref):
         if isinstance(ref, Job):
             #self.on_job_done(ref)
-            assert False
+            assert False, "OnDone method is obsolete for Job"
         elif isinstance(ref, TagBase):
             self._process_tag_set_event(ref)
 
