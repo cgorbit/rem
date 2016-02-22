@@ -153,14 +153,19 @@ class T02(unittest.TestCase):
             p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
             return [l.rstrip('\n') for l in p.stdout]
 
-        uniq_id = '12344321'
+        uniq_id = '12344321%s' % time.time()
         delay = 1.5
 
         def sleep():
             time.sleep(delay)
 
         def check(res):
-            self.assertEqual(contains(list_processes(), uniq_id), res)
+            processes = list_processes()
+            #import sys
+            #logging.debug(processes)
+            #for idx, p in enumerate(processes):
+                #print >>sys.stderr, '%03d: %s' % (idx, p)
+            self.assertEqual(contains(processes, uniq_id), res)
 
         pckname = "suspend-kill-%.f" % time.time()
         pck = self.connector.Packet(pckname, time.time())
@@ -171,18 +176,17 @@ class T02(unittest.TestCase):
 
         pck.Stop()
         sleep()
-
         check(False)
 
         pck.Resume()
         sleep()
-        pck.Suspend()
+        check(True)
 
+        pck.Suspend()
         check(True)
 
         pck.Stop()
         sleep()
-
         check(False)
 
         pck.Delete()

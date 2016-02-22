@@ -247,6 +247,8 @@ class JobPacketImpl(object):
             logging.debug("packet %s\twaiting for %s sec", self.name, delay)
 
         else:
+            self.leafs.add(job.id) # FIXME
+
             if self.kill_all_jobs_on_error:
                 self._kill_jobs()
                 self._drop_jobs_results()
@@ -566,7 +568,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self._process_jobs_results(self._apply_job_result)
 
     def _drop_jobs_results(self):
-        self._process_jobs_results(None)
+        def revert_leaf(job, runner):
+            self.leafs.add(job.id)
+        self._process_jobs_results(revert_leaf)
 
     # this function called under lock and in "non-job-running" state
     def _kill_jobs(self):
@@ -600,6 +604,12 @@ class JobPacket(Unpickable(lock=PickableRLock,
         with self.lock:
             if self.state not in (PacketState.CREATED, PacketState.SUSPENDED):
                 raise RuntimeError("incorrect state for \"Add\" operation: %s" % self.state)
+
+# TODO XXX XXX XXX XXX
+# We need to do something like _init_jobs_dependencies some time after Add(),
+# but SUSPENDED may contains running jobs, so we can't simply call _init_jobs_dependencies
+# because it will corrupt .leafs etc.
+# TODO XXX XXX XXX XXX
 
             parents = list(set(p.id for p in parents + pipe_parents))
             pipe_parents = list(p.id for p in pipe_parents)
@@ -818,7 +828,11 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self._change_state(PacketState.SUSPENDED)
             if kill_jobs:
                 self._kill_jobs()
-                self._apply_jobs_results()
+
+                # TODO In ideal world it's better to "apply" jobs that will be
+                # finished racy just before kill(2)
+                #self._apply_jobs_results()
+                self._drop_jobs_results()
 
     def UserResume(self):
         with self.lock:
