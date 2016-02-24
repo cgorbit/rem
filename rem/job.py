@@ -72,14 +72,6 @@ class TimeOutExceededResult(IResult):
         IResult.__init__(self, "Timeout exceeded", 1, "Job %s timelimit exceeded at %s" % (jobId, ts.strftime(self.time_format)))
 
 
-class PackedExecuteResult(IResult):
-    def __init__(self, doneCount, allCount):
-        if doneCount != allCount:
-            IResult.__init__(self, "Unsuccessfull completion of packet work", 1, "%s/%s done" % (doneCount, allCount))
-        else:
-            IResult.__init__(self, "Successfull completion of packet work", 0, "%s/%s done" % (doneCount, allCount))
-
-
 class Job(Unpickable(err=nullobject,
                      results=list,
                      tries=int,

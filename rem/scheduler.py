@@ -231,15 +231,34 @@ class Scheduler(Unpickable(lock=PickableRLock,
                     return True
         return False
 
-    def Queue(self, qname, create=True):
-        if qname in self.qRef:
-            return self.qRef[qname]
-        if not create:
-            raise KeyError("Queue '%s' doesn't exist" % qname)
+    def _create_queue(self, name):
+        q = Queue(name)
+        self.qRef[name] = q
+
+        q.UpdateContext(self.context)
+        q.AddCallbackListener(self)
+
+        return q
+
+    def Queue(self, name, create=True):
         with self.lock:
-            q = Queue(qname)
-            self.RegisterQueue(q)
-            return q
+            q = self.qRef.get(name)
+            if q:
+                return q
+
+            if not create:
+                raise KeyError("Queue '%s' doesn't exist" % name)
+
+            return self._create_queue(name)
+
+    def _add_queue_as_non_empty_if_need(self, q):
+        # this racy code may add empty queue to queues_with_jobs,
+        # but it's better, than deadlock
+        if q.HasStartableJobs():
+            with self.lock:
+                if q not in self.queues_with_jobs:
+                    self.queues_with_jobs.push(q)
+                    self.HasScheduledTask.notify()
 
     def Get(self):
         with self.lock:
@@ -258,15 +277,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 queue = self.queues_with_jobs.pop()
 
         if queue:
-            # .Get not under lock to prevent deadlock
+            # .Get not under lock to prevent deadlock with Notify
             job = queue.Get(self.context)
             if job:
                 logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.pck))
 
-            with self.lock:
-                if queue.HasStartableJobs() and queue not in self.queues_with_jobs:
-                    self.queues_with_jobs.push(queue)
-                    self.HasScheduledTask.notify()
+            self._add_queue_as_non_empty_if_need(queue)
 
             return job # may be None
 
@@ -274,14 +290,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Notify(self, ref):
         if isinstance(ref, Queue):
-            queue = ref
-            if not queue.HasStartableJobs():
-                return
-            with self.lock:
-                if queue.HasStartableJobs():
-                    if queue not in self.queues_with_jobs:
-                        self.queues_with_jobs.push(queue)
-                        self.HasScheduledTask.notify()
+            self._add_queue_as_non_empty_if_need(ref)
+
         elif isinstance(ref, SchedWatcher):
             if ref.Empty():
                 return
@@ -471,7 +481,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
-            self.RegisterQueues(qRef)
+            self._vivify_queues(qRef)
 
             self.schedWatcher.Clear() # remove tasks from Queue.relocatePacket
             self.FillSchedWatcher(prevWatcher)
@@ -518,7 +528,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             return packets
 
-        def produce_packets_to_reinit():
+        def list_noninitialized_packets():
             packets1 = list_packets_in_queues(PacketState.NONINITIALIZED)
 
             logging.debug("NONINITIALIZED packets in Queue's for schedWatcher: %s" % [pck.id for pck in packets1])
@@ -535,86 +545,38 @@ class Scheduler(Unpickable(lock=PickableRLock,
         for pck in produce_packets_to_wait():
             self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
 
+        # XXX
+        # from :rem-20-more-packet-locks-2 fork_locking guarantee that
+        # backups will not contain packets in NONINITIALIZED,
+        # _but_ not all servers ATW has enabled backup_in_child option
+
         ctx = self.context
-        for pck in produce_packets_to_reinit():
-            dir = None
-            if pck.directory:
-                dir = pck.directory
-            elif pck.id:
-                dir = os.path.join(ctx.packets_directory, pck.id)
+        for pck in list_noninitialized_packets():
+            pck.try_recover_noninitialized_from_backup(ctx)
 
-            # FIXME links in pck
-            pck.id = None
-            pck.directory = None
+    def _vivify_queues(self, qRef):
+        for name, q in qRef.iteritems():
+            self._vivify_queue(q)
+            self.qRef[name] = q
 
-            if dir and os.path.isdir(dir):
-                try:
-                    shutil.rmtree(dir, onerror=None)
-                except:
-                    pass
+    def _vivify_queue(self, q):
+        ctx = self.context
 
-            try:
-                pck.Reinit(ctx)
-            except Exception as e:
-                logging.exception("Can't Reinit packet %s %s" % (pck.name, pck.id))
-
-    def RegisterQueues(self, qRef):
-        for q in qRef.itervalues():
-            self.RegisterQueue(q)
-
-    def RegisterQueue(self, q):
-        q.UpdateContext(self.context)
+        q.UpdateContext(ctx)
         q.AddCallbackListener(self)
+
         for pck in list(q.ListAllPackets()):
-            dstStorage = self.packStorage
             pck.UpdateTagDependencies(self.tagRef)
-            if pck.directory:
-                if os.path.isdir(pck.directory):
-                    parentDir, dirname = os.path.split(pck.directory)
-                    if parentDir != self.context.packets_directory:
-                        dst_loc = os.path.join(self.context.packets_directory, pck.id)
-                        try:
-                            logging.warning("relocates directory %s to %s", pck.directory, dst_loc)
-                            shutil.copytree(pck.directory, dst_loc)
-                            pck.directory = dst_loc
-                        except:
-                            logging.exception("relocation FAIL")
-                            dstStorage = None
-                else:
-                    if pck.AreLinksAlive(self.context):
-                        try:
-                            logging.warning("resurrects directory for packet %s", pck.id)
-                            pck.directory = None
-                            pck.CreatePlace(self.context)
-                        except:
-                            logging.exception("resurrecton FAIL")
-                            dstStorage = None
-                    else:
-                        dstStorage = None
-            else:
-                if pck.state != PacketState.SUCCESSFULL:
-                    dstStorage = None
-            if dstStorage is None:
-                #do not print about already errored packets
-                if not pck.CheckFlag(PacketFlag.RCVR_ERROR):
-                    logging.warning(
-                        "can't restore packet directory: %s for packet %s. Packet marked as error from old state %s",
-                        pck.directory, pck.name, pck.state)
-                    pck.MarkAsFailedOnRecovery()
-                dstStorage = self.packStorage
-            dstStorage.Add(pck)
+            pck.try_recover_after_backup_loading(ctx)
+            q.relocatePacket(pck) # j.i.c force?
+
+            self.packStorage.Add(pck)
+
             if pck.state != PacketState.HISTORIED:
                 self.packetNamesTracker.Add(pck.name)
                 pck.AddCallbackListener(self.packetNamesTracker)
-            pck._init_jobs_dependencies() # XXX TODO
-            q.relocatePacket(pck)
 
-        if q.IsAlive():
-            q.Resume(resumeWorkable=True) # XXX
-
-        self.qRef[q.name] = q
-        if q.HasStartableJobs() and q not in self.queues_with_jobs:
-            self.queues_with_jobs.push(q)
+        self._add_queue_as_non_empty_if_need(q)
 
     def AddPacketToQueue(self, qname, pck):
         queue = self.Queue(qname)
@@ -663,8 +625,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def OnTaskPending(self, ref):
         self.Notify(ref)
 
-    def OnPacketReinitRequest(self, code):
-        code(self.context)
+    #def OnPacketReinitRequest(self, code):
+        #code(self.context)
 
     def send_email_async(self, rcpt, (subj, body)):
         self._mailer.send_async(rcpt, subj, body)

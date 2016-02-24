@@ -210,7 +210,7 @@ def queue_suspend(queue_name):
 
 @traced_rpc_method("info")
 def queue_resume(queue_name):
-    _scheduler.Queue(queue_name).Resume() # XXX
+    _scheduler.Queue(queue_name).Resume()
 
 
 @readonly_method
@@ -576,15 +576,18 @@ class RemDaemon(object):
         logging.debug("rem-server\ttime_worker_stopped")
 
         self.scheduler.Stop1()
+        logging.debug("rem-server\tafter_stop1")
 
         for worker in self.regWorkers:
             worker.Suspend()
+        logging.debug("rem-server\tafter_suspend_workers")
 
         for worker in self.regWorkers:
             try:
                 worker.Kill()
             except Exception:
                 logging.exception("worker.Kill() failed")
+        logging.debug("rem-server\tafter_kill_workers")
 
         for worker in self.regWorkers:
             worker.join()

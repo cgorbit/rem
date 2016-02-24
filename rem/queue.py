@@ -92,11 +92,13 @@ class Queue(Unpickable(pending=PackSet.create,
 
 # TODO See rem-xx-more-packet-locks.patch
     def relocatePacket(self, pck):
-        dest_queue_name = self.VIEW_BY_STATE.get(pck.state, None)
+        dest_queue_name = self.VIEW_BY_STATE.get(pck.state)
         dest_queue = getattr(self, dest_queue_name) if dest_queue_name else None
-        if not (dest_queue and pck in dest_queue):
-            logging.debug("queue %s\tmoving packet %s typed as %s", self.name, pck.name, pck.state)
-            self.movePacket(pck, dest_queue)
+
+        with self.lock:
+            if not(dest_queue and pck in dest_queue):
+                logging.debug("queue %s\tmoving packet %s typed as %s", self.name, pck.name, pck.state)
+                self.movePacket(pck, dest_queue)
 
     def _find_packet_queue(self, pck):
         ret = None
@@ -141,11 +143,11 @@ class Queue(Unpickable(pending=PackSet.create,
         if pck.state == PacketState.PENDING:
             self.FireEvent("task_pending")
 
-    def OnPacketReinitRequest(self, code):
-        self.FireEvent('packet_reinit_request', code)
+    #def OnPacketReinitRequest(self, code):
+        #self.FireEvent('packet_reinit_request', code)
 
-    def OnPendingPacket(self, ref):
-        self.FireEvent("task_pending")
+    #def OnPendingPacket(self, ref):
+        #self.FireEvent("task_pending")
 
     def IsAlive(self):
         return not self.isSuspended
@@ -211,18 +213,8 @@ class Queue(Unpickable(pending=PackSet.create,
             packets.append(pck)
         return packets
 
-    def Resume(self, resumeWorkable=False):
+    def Resume(self):
         self.isSuspended = False
-        # XXX Don't use lock or reinvent
-        for pck in list(self.suspended):
-            try:
-                pck.Resume(resumeWorkable) # XXX_LOCK
-            except:
-                logging.error("can't resume packet %s", pck.id)
-                try:
-                    pck.RegisterAfterBackupResumeError() # XXX_LOCK
-                except:
-                    logging.error("can't mark packet %s as errored")
         self.FireEvent("task_pending")
 
     def Suspend(self):

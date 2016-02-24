@@ -65,7 +65,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
             while len(self.packets) > 0:
                 pck_id, (tm, pck) = self.packets.peak()
                 if tm < barrierTm:
-                    pck._release_place()
+                    pck.RemoveAsOld()
                     self.packets.pop(pck.id)
                 else:
                     break

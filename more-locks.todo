@@ -1,0 +1,15 @@
+1.
+    1) scheduler.py
+        pck._init_jobs_dependencies() # XXX TODO XXX XXX XXX
+
+    2) Убить resumeWorkable
+
+2.
+    булшит
+    def _change_state(...):
+        if prev_state == PacketState.CREATED:
+            self._init_jobs_dependencies()
+
+3. проверить использования _release_place
+
+4. проверить использования _kill_jobs
