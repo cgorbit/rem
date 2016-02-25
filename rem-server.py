@@ -63,6 +63,11 @@ def CreateScheduler(context, canBeClear=False, restorer=None):
                 except Exception, e:
                     logging.exception("can't restore from file \"%s\" : %s", backupFile, e)
                     wasRestoreTry = True
+
+                # May fail on all backups for the same reason, but backup loading
+                # has side-effects on file system, so try only last
+                break
+
     if wasRestoreTry and not canBeClear:
         raise RuntimeError("can't restore from backup")
     sched.tagRef.Restore(0)
