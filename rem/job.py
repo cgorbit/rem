@@ -71,6 +71,8 @@ class TimeOutExceededResult(IResult):
         ts = datetime.datetime.fromtimestamp(time.time())
         IResult.__init__(self, "Timeout exceeded", 1, "Job %s timelimit exceeded at %s" % (jobId, ts.strftime(self.time_format)))
 
+class PackedExecuteResult(object): # for old backups
+    pass
 
 class Job(Unpickable(err=nullobject,
                      results=list,
