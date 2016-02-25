@@ -574,7 +574,10 @@ class RemDaemon(object):
         self._stop()
 
         logging.debug("rem-server\tstart_final_backup")
-        self.scheduler.RollBackup()
+        try:
+            self.scheduler.RollBackup()
+        except:
+            logging.exception("final backup failed")
 
         logging.debug("rem-server\tstopped")
         self._stopped.set()
