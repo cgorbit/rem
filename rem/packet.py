@@ -308,7 +308,7 @@ class _ActiveJobs(object):
 #raise RuntimeError("""TODO:
     #1. is_cancelled()
     #3. Think again about _kill_jobs
-    #4. _init_jobs_dependencies usage
+    #4. _init_job_deps_graph usage
     #5. What can happend if on_job_done willn't be called?
 #""")
 
@@ -471,8 +471,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self.FireEvent("change") # queue.relocatePacket
 
             # FIXME Better?
-            if prev_state == PacketState.CREATED:
-                self._init_jobs_dependencies()
+            #if prev_state == PacketState.CREATED:
+                #self._init_job_deps_graph()
 
             if state == PacketState.ERROR:
                 # _kill_jobs_drop_results() called if need in outer scope
@@ -557,11 +557,11 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
         if failed:
             self._mark_as_failed_on_recovery()
-        elif self.state not in [PacketState.HISTORIED]:
+        elif self.state not in [PacketState.HISTORIED]: # FIXME
             try:
-                self._init_jobs_dependencies()
+                self._init_job_deps_graph()
             except:
-                logging.exception("_init_jobs_dependencies failed")
+                logging.exception("_init_job_deps_graph failed")
                 self._mark_as_failed_on_recovery()
 
     def try_recover_noninitialized_from_backup(self, ctx):
@@ -677,17 +677,22 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 raise RuntimeError("incorrect state for \"Add\" operation: %s" % self.state)
 
             # XXX
-            # We need to do something like _init_jobs_dependencies some time
+            # We need to do something like _init_job_deps_graph some time
             # after Add(), but SUSPENDED may contains running jobs, so we can't
-            # simply call _init_jobs_dependencies because it will corrupt
+            # simply call _init_job_deps_graph because it will corrupt
             # .leafs etc.
 
             # TODO
             # We must _update_ .{leafs,waitJobs,edges} on each call to Add()
-            # and use _init_jobs_dependencies only after backup loading
+            # and use _init_job_deps_graph only after backup loading
 
             parents = list(set(p.id for p in parents + pipe_parents))
             pipe_parents = list(p.id for p in pipe_parents)
+
+            for dep_id in parents:
+                if dep_id not in self.jobs:
+                    raise RuntimeError("No job with id = %s in packet %s" % (dep_id, self.id))
+
             job = Job(shell, parents, pipe_parents, self, maxTryCount=tries,
                       max_err_len=max_err_len, retry_delay=retry_delay,
                       pipe_fail=pipe_fail, description=description, notify_timeout=notify_timeout, max_working_time=max_working_time, output_to_status=output_to_status)
@@ -697,14 +702,26 @@ class JobPacket(Unpickable(lock=PickableRLock,
             if set_tag:
                 self.job_done_indicator[job.id] = set_tag
 
-            self.edges[job.id] = []
-
-            for p in parents:
-                self.edges[p].append(job.id)
+            self._update_job_deps_graph(job)
 
             return job
 
-    def _init_jobs_dependencies(self):
+    def _update_job_deps_graph(self, job):
+        # waitJobs[child] -> parents
+        # edges[parent]   -> children -- STATIC
+
+        parents = job.parents
+
+        self.edges[job.id] = []
+        for p in parents:
+            self.edges[p].append(job.id)
+
+        self.waitJobs[job.id] = [jid for jid in parents if jid not in self.done]
+
+        if not self.waitJobs[job.id]:
+            self.leafs.add(job.id)
+
+    def _init_job_deps_graph(self):
         def visit(startJID):
             st = [[startJID, 0]]
             discovered.add(startJID)
@@ -727,25 +744,20 @@ class JobPacket(Unpickable(lock=PickableRLock,
                     finished.add(jid)
 
         with self.lock:
-            assert not self._active_jobs, "_init_jobs_dependencies called when _active_jobs is not empty"
+            assert not self._active_jobs, "_init_job_deps_graph called when _active_jobs is not empty"
 
             discovered = set()
             finished = set()
 
-            self.waitJobs = dict((jid, set()) for jid in self.jobs if jid not in self.done)
+            self.waitJobs = {jid: set() for jid in self.jobs if jid not in self.done}
 
             for jid in self.jobs:
                 if jid not in discovered and jid not in self.done:
                     visit(jid)
 
-            #reset tries count for discovered jobs
-            for jid in discovered:
-                self.jobs[jid].tries = 0
-
             self.leafs = set(jid for jid in discovered if not self.waitJobs[jid])
 
-    # XXX Diese Funktion ist Wunderwaffe
-    # FIXME TODO Split this function and use pieces
+    # FIXME Diese Funktion ist Wunderwaffe
     def _resume(self):
         allowed_states = [PacketState.CREATED, PacketState.SUSPENDED]
 
@@ -756,6 +768,12 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 self._change_state(PacketState.SUSPENDED)
             else:
                 self._change_state(PacketState.WORKABLE)
+
+                # Legacy behaviour for
+                # 1. _move_to_queue
+                # 2. UserResume
+                for job in self.jobs.values():
+                    job.tries = 0
 
                 if self.leafs:
                     self._change_state(PacketState.PENDING)
@@ -773,7 +791,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
                     self.FireEvent("job_get", job) # queue.working.add(job)
                     self.as_in_queue_working.add(jid)
                     self.leafs.remove(jid)
-                    self._clean_state = False # not 100% accurate place
                     return job
 
             job = get_job()
@@ -789,10 +806,10 @@ class JobPacket(Unpickable(lock=PickableRLock,
             if not self.leafs:
                 self._change_state(PacketState.WORKABLE)
 
+            self._clean_state = False
+
             runner = JobRunner(job)
-
             self._active_jobs.add(runner)
-
             return runner
 
     def IsDone(self):
@@ -932,13 +949,10 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def _reset(self, suspend, tag_op):
         def update_tags():
-    # FIXME Better always Reset tags
             for tag in self._get_all_done_tags():
                 tag_op(tag)
 
-        if self._clean_state and self.jobs: # force change state for packets without jobs
-            # 1. Must put tag-change request into "queue" under JobPacket.lock
-            # 2. Actual tag modification and reactions on it should be done async
+        if self._clean_state and self.jobs: # XXX force change state for packets without jobs
             update_tags()
             return
 
@@ -946,11 +960,16 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self._change_state(PacketState.NONINITIALIZED)
         self._kill_jobs_drop_results()
 
-        update_tags()
+        self._init_job_deps_graph()
 
         self.done.clear()
+
         for job in self.jobs.values():
             job.results = []
+            job.tries = 0
+
+    # FIXME order
+        update_tags()
 
         self._reinit(self._get_scheduler_ctx(), suspend)
 
@@ -1021,5 +1040,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
             if dst_queue:
                 dst_queue._attach_packet(self)
-                self._resume() # FIXME
+                # Support legacy behaiour
+                self._resume() # TODO on ERROR this previously clear .tries!!!
 
