@@ -551,7 +551,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         elif self.state not in [PacketState.HISTORIED]: # FIXME
             try:
                 self._init_job_deps_graph()
-                self._resume() # TODO TEST
+                self._resume() # TODO write tests
             except:
                 logging.exception("_init_job_deps_graph failed")
                 self._mark_as_failed_on_recovery()
@@ -925,7 +925,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             if self.state == PacketState.SUSPENDED:
                 self._clear_flag(PacketFlag.USER_SUSPEND)
 
-# TODO TEST
+                # TODO write tests
                 # Repeat legacy bullshit behaviour
                 for job in self.jobs.values():
                     job.tries = 0
