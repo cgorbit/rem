@@ -551,7 +551,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         elif self.state not in [PacketState.HISTORIED]: # FIXME
             try:
                 self._init_job_deps_graph()
-                self._resume() # TODO write tests
+                self._resume(resume_workable=True, silent_noop=True) # TODO write tests
             except:
                 logging.exception("_init_job_deps_graph failed")
                 self._mark_as_failed_on_recovery()
@@ -756,21 +756,31 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self.leafs = set(jid for jid in discovered if not self.waitJobs[jid])
 
     # FIXME Diese Funktion ist Wunderwaffe
-    def _resume(self):
+    def _resume(self, resume_workable=False, silent_noop=False):
         allowed_states = [PacketState.CREATED, PacketState.SUSPENDED]
+        if resume_workable:
+            allowed_states.append(PacketState.WORKABLE)
 
         if self.state in allowed_states and not self.CheckFlag(PacketFlag.USER_SUSPEND):
             self._clear_flag(~0)
 
             if self.waitTags:
-                self._change_state(PacketState.SUSPENDED)
+                new_state = PacketState.SUSPENDED
             else:
+                if self.leafs:
+                    new_state = PacketState.PENDING
+                elif len(self.done) == len(self.jobs):
+                    new_state = PacketState.SUCCESSFULL
+                else:
+                    new_state = PacketState.WORKABLE
+
+            if silent_noop and new_state == self.state:
+                return
+
+            if new_state in [PacketState.PENDING, PacketState.SUCCESSFULL]:
                 self._change_state(PacketState.WORKABLE)
 
-                if self.leafs:
-                    self._change_state(PacketState.PENDING)
-                elif len(self.done) == len(self.jobs):
-                    self._change_state(PacketState.SUCCESSFULL)
+            self._change_state(new_state)
 
     def GetJobToRun(self):
         with self.lock:
