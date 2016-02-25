@@ -8,7 +8,7 @@ import errno
 import threading
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
-from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, get_None
+from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
 from job import Job, JobRunner
 import osspec
 import fork_locking
@@ -183,7 +183,7 @@ class JobPacketImpl(object):
         self._create_links(context)
         self.streams.clear() # FIXME
 
-    def ListFiles(self):
+    def rpc_list_files(self):
         files = []
         with self.lock:
             if self.directory:
@@ -193,10 +193,10 @@ class JobPacketImpl(object):
                     logging.exception("directory %s listing error", self.directory)
         return files
 
-    def GetFile(self, filename):
+    def rpc_get_file(self, filename):
         with self.lock:
             if not self.directory:
-                raise RuntimeError("working directory doesn't exist")
+                raise RpcUserError(RuntimeError("working directory doesn't exist"))
             path = os.path.join(self.directory, filename)
             if not os.path.isfile(path):
                 raise AttributeError("not existing file: %s" % filename)
@@ -208,9 +208,6 @@ class JobPacketImpl(object):
             return file.read()
 
     def _apply_job_result(self, job, runner):
-        # FIXME This bullshit checks
-        #if job.id in self.jobs and job.id in self.as_in_queue_working:
-
         # TODO
         # 1. kill_all_jobs_on_error=False doesn't work correctly:
         #       Another running jobs may change ERROR to PENDING
@@ -264,7 +261,7 @@ class _ActiveJobs(object):
     def __nonzero__(self):
         return bool(len(self))
 
-# FIXME Not obvious meaning?
+    # FIXME Non-obvious meaning?
     def __len__(self):
         with self._lock:
             return len(self._active) + len(self._results)
@@ -305,32 +302,32 @@ class _ActiveJobs(object):
         return ret
 
 
-#raise RuntimeError("""TODO:
-    #1. is_cancelled()
-    #3. Think again about _kill_jobs
-    #4. _init_job_deps_graph usage
-    #5. What can happend if on_job_done willn't be called?
-#""")
+def always(ctor):
+    def always(*args):
+        return ctor()
+    return always
+
 
 class JobPacket(Unpickable(lock=PickableRLock,
                            jobs=dict,
                            edges=dict,
                            done=set,
                            leafs=set,
-                           _active_jobs=lambda *args: _ActiveJobs(),
+                           _active_jobs=always(_ActiveJobs),
                            job_done_indicator=dict,
                            waitingDeadline=int,
                            allTags=set,
                            waitTags=set,
                            binLinks=dict,
                            state=(str, PacketState.CREATED), # FIXME not CREATED?
-                           history=(list, []),
-                           notify_emails=(list, []),
+                           history=list,
+                           notify_emails=list,
                            flags=int,
                            kill_all_jobs_on_error=(bool, True),
 
-                        # FIXME equal to _active_jobs.{_active + _results}?
-                           as_in_queue_working=(set, []), # Need to be consistent with Queue.working
+                           # FIXME equal to _active_jobs.{_active + _results}?
+                           # Need to be consistent with Queue.working under JobPacket.lock
+                           as_in_queue_working=always(set),
 
                            _clean_state=(bool, False), # False for loading old backups
                            isResetable=(bool, True),
@@ -343,7 +340,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
     INCORRECT = -1
 
     # FIXME Why WORKABLE too?
-    # TODO Actually WAITING and ERROR sometimes applicable too run jobs (see _apply_job_result)
+    # Actually WAITING and ERROR sometimes applicable too run jobs (see _apply_job_result)
     _ALLOWED_TO_RUN_NEW_JOBS_STATES = [PacketState.WORKABLE, PacketState.PENDING]
 
     def __init__(self, name, priority, context, notify_emails, wait_tags=(), set_tag=None, kill_all_jobs_on_error=True, isResetable=True):
@@ -462,21 +459,14 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 assert False, "Can't change state from %s to %s" % (self.state, state) # FIXME
                 return
 
-            prev_state = self.state
-
             self.state = state
             self.history.append((self.state, time.time()))
             logging.debug("packet %s\tnew state %r", self.name, self.state)
 
             self.FireEvent("change") # queue.relocatePacket
 
-            # FIXME Better?
-            #if prev_state == PacketState.CREATED:
-                #self._init_job_deps_graph()
-
             if state == PacketState.ERROR:
-                # _kill_jobs_drop_results() called if need in outer scope
-                self._send_email_on_error_state_if_need()
+                self._try_send_email_on_error_state_if_need()
 
             if state == PacketState.SUCCESSFULL:
                 if self.done_indicator:
@@ -485,19 +475,20 @@ class JobPacket(Unpickable(lock=PickableRLock,
             if state in [PacketState.SUCCESSFULL, PacketState.HISTORIED]:
                 self._release_place() # will kill jobs if need
 
-    def RemoveByUser(self):
+    def rpc_remove(self):
         with self.lock:
             new_state = PacketState.HISTORIED
             if self.state == new_state:
                 return
             if not self.canChangeState(new_state):
-                raise RuntimeError("Can't remove packet in %s state" % self.state)
+                raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self.state))
             self._change_state(new_state)
 
     def RemoveAsOld(self):
-        #with self.lock:
-            #if self.state != HISTORIED:
-        self._change_state(PacketState.HISTORIED)
+        with self.lock:
+            if self.state == PacketState.CREATED: # hack for ShortStorage
+                self._change_state(PacketState.SUSPENDED)
+            self._change_state(PacketState.HISTORIED)
 
     def _mark_as_failed_on_recovery(self):
         with self.lock:
@@ -560,6 +551,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         elif self.state not in [PacketState.HISTORIED]: # FIXME
             try:
                 self._init_job_deps_graph()
+                self._resume() # TODO TEST
             except:
                 logging.exception("_init_job_deps_graph failed")
                 self._mark_as_failed_on_recovery()
@@ -611,6 +603,12 @@ class JobPacket(Unpickable(lock=PickableRLock,
         msg = messages.FormatPacketErrorStateMessage(self, ctx)
         ctx.send_email_async(self.notify_emails, msg)
 
+    def _try_send_email_on_error_state_if_need(self):
+        try:
+            self._send_email_on_error_state_if_need()
+        except:
+            logging.exception("Failed to send error message for %s" % self.id)
+
     def OnStart(self, ref):
         if isinstance(ref, Job):
             assert False, "OnStart method is obsolete"
@@ -630,13 +628,19 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def _process_jobs_results(self, processor):
         for runner in self._active_jobs.pop_results():
-            job = runner.job
-            logging.debug("job %s\tdone [%s]", job.shell, job.last_result())
-            self.as_in_queue_working.discard(job.id) # FIXME Here or better somewhere between _apply_job_result lines?
-            self.FireEvent("job_done", job) # queue.working.discard(job)
+            try:
+                self._process_job_result(processor, runner)
+            except Exception:
+                logging.exception("Failed to process job result for %s" % runner.job)
 
-            if processor:
-                processor(job, runner)
+    def _process_job_result(self, processor, runner):
+        job = runner.job
+        assert job.id in self.jobs
+        logging.debug("job %s\tdone [%s]", job.shell, job.last_result())
+        self.as_in_queue_working.discard(job.id) # FIXME Here or better somewhere between _apply_job_result lines?
+        self.FireEvent("job_done", job) # queue.working.discard(job)
+        if processor:
+            processor(job, runner)
 
     def _apply_jobs_results(self):
         self._process_jobs_results(self._apply_job_result)
@@ -646,7 +650,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self.leafs.add(job.id)
         self._process_jobs_results(revert_leaf)
 
-    # this function called under lock
     def _kill_jobs(self):
         if self.state in self._ALLOWED_TO_RUN_NEW_JOBS_STATES:
             logging.error("_kill_jobs on %s in %s" % (self.id, self.state))
@@ -669,29 +672,24 @@ class JobPacket(Unpickable(lock=PickableRLock,
         elif isinstance(ref, TagBase):
             self._process_tag_set_event(ref)
 
-    def Add(self, shell, parents, pipe_parents, set_tag, tries,
-            max_err_len, retry_delay, pipe_fail, description, notify_timeout, max_working_time, output_to_status):
+    def rpc_add_job(self, shell, parents, pipe_parents, set_tag, tries,
+            max_err_len, retry_delay, pipe_fail, description, notify_timeout,
+            max_working_time, output_to_status):
 
         with self.lock:
-            if self.state not in (PacketState.CREATED, PacketState.SUSPENDED):
-                raise RuntimeError("incorrect state for \"Add\" operation: %s" % self.state)
+            # Actually, pck_add_job use only tempStorage, so SUSPENDED is not used
+            if self.state not in [PacketState.CREATED, PacketState.SUSPENDED]:
+                raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
 
-            # XXX
-            # We need to do something like _init_job_deps_graph some time
-            # after Add(), but SUSPENDED may contains running jobs, so we can't
-            # simply call _init_job_deps_graph because it will corrupt
-            # .leafs etc.
-
-            # TODO
-            # We must _update_ .{leafs,waitJobs,edges} on each call to Add()
-            # and use _init_job_deps_graph only after backup loading
+            if self.state == PacketState.SUSPENDED:
+                logging.warning("JobPacket.rpc_add_job for %s in SUSPENDED" % self.id)
 
             parents = list(set(p.id for p in parents + pipe_parents))
             pipe_parents = list(p.id for p in pipe_parents)
 
             for dep_id in parents:
                 if dep_id not in self.jobs:
-                    raise RuntimeError("No job with id = %s in packet %s" % (dep_id, self.id))
+                    raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.id)))
 
             job = Job(shell, parents, pipe_parents, self, maxTryCount=tries,
                       max_err_len=max_err_len, retry_delay=retry_delay,
@@ -699,16 +697,16 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
             self.jobs[job.id] = job
 
+            self._add_job_to_graph(job)
+
             if set_tag:
                 self.job_done_indicator[job.id] = set_tag
 
-            self._update_job_deps_graph(job)
-
             return job
 
-    def _update_job_deps_graph(self, job):
+    def _add_job_to_graph(self, job):
         # waitJobs[child] -> parents
-        # edges[parent]   -> children -- STATIC
+        # edges[parent]   -> children (constant between calls to Add)
 
         parents = job.parents
 
@@ -769,12 +767,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
             else:
                 self._change_state(PacketState.WORKABLE)
 
-                # Legacy behaviour for
-                # 1. _move_to_queue
-                # 2. UserResume
-                for job in self.jobs.values():
-                    job.tries = 0
-
                 if self.leafs:
                     self._change_state(PacketState.PENDING)
                 elif len(self.done) == len(self.jobs):
@@ -796,17 +788,16 @@ class JobPacket(Unpickable(lock=PickableRLock,
             job = get_job()
 
             if not job:
-                # FIXME
                 if self.state == PacketState.PENDING:
-                    self._notify_incorrect_action()
                     self._change_state(PacketState.ERROR)
                     self._kill_jobs_drop_results()
+                    self._notify_incorrect_action()
                 return self.INCORRECT
+
+            self._clean_state = False
 
             if not self.leafs:
                 self._change_state(PacketState.WORKABLE)
-
-            self._clean_state = False
 
             runner = JobRunner(job)
             self._active_jobs.add(runner)
@@ -915,7 +906,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def _clear_flag(self, flag):
         self.flags &= ~flag
 
-    def UserSuspend(self, kill_jobs=False):
+    def rpc_suspend(self, kill_jobs=False):
         with self.lock:
             self._set_flag(PacketFlag.USER_SUSPEND)
             self.Suspend(kill_jobs)
@@ -929,10 +920,17 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 # finished racy just before kill(2)
                 self._kill_jobs_drop_results()
 
-    def UserResume(self):
+    def rpc_resume(self):
         with self.lock:
-            self._clear_flag(PacketFlag.USER_SUSPEND)
-            self._resume()
+            if self.state == PacketState.SUSPENDED:
+                self._clear_flag(PacketFlag.USER_SUSPEND)
+
+# TODO TEST
+                # Repeat legacy bullshit behaviour
+                for job in self.jobs.values():
+                    job.tries = 0
+
+                self._resume()
 
     def _close_streams(self):
         try:
@@ -952,23 +950,23 @@ class JobPacket(Unpickable(lock=PickableRLock,
             for tag in self._get_all_done_tags():
                 tag_op(tag)
 
-        if self._clean_state and self.jobs: # XXX force change state for packets without jobs
-            update_tags()
-            return
+        # XXX force call to _change_state for packets without jobs
+        #if self._clean_state and self.jobs:
+            #update_tags()
+            #return
 
-        # _change_state first, then _kill_jobs
         self._change_state(PacketState.NONINITIALIZED)
-        self._kill_jobs_drop_results()
 
-        self._init_job_deps_graph()
+        if not self._clean_state:
+            self._kill_jobs_drop_results()
 
-        self.done.clear()
+            self.done.clear()
+            for job in self.jobs.values():
+                job.results = []
+                job.tries = 0
 
-        for job in self.jobs.values():
-            job.results = []
-            job.tries = 0
+            self._init_job_deps_graph()
 
-    # FIXME order
         update_tags()
 
         self._reinit(self._get_scheduler_ctx(), suspend)
@@ -990,16 +988,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
         #return self._get_scheduler().context
 
     def _get_all_done_tags(self):
-        if self.done_indicator:
-            yield self.done_indicator
-
-        for tag in self.job_done_indicator.itervalues():
-            yield tag
-
-        #for job_id in self.done: # FIXME job_done_indicator.values()
-            #tag = self.job_done_indicator.get(job_id)
-            #if tag:
-                #yield tag
+        return self.job_done_indicator.values() + \
+            ([self.done_indicator] if self.done_indicator else [])
 
     def OnReset(self, (ref, comment)):
         if isinstance(ref, TagBase):
@@ -1030,16 +1020,22 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
             self._reset(False, lambda tag: tag.Reset(comment))
 
-    def _move_to_queue(self, src_queue, dst_queue):
+    def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
         with self.lock:
             if self.state not in [PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR]:
-                raise RuntimeError("can't move 'live' packet between queues")
+                raise as_rpc_user_error(from_rpc,
+                                        RuntimeError("can't move 'live' packet between queues"))
 
             if src_queue:
                 src_queue._detach_packet(self)
 
             if dst_queue:
                 dst_queue._attach_packet(self)
-                # Support legacy behaiour
-                self._resume() # TODO on ERROR this previously clear .tries!!!
 
+    def rpc_move_to_queue(self, src_queue, dst_queue):
+        self._move_to_queue(src_queue, dst_queue, from_rpc=True)
+
+    def _attach_to_queue(self, queue):
+        with self.lock:
+            self._move_to_queue(None, queue)
+            self._resume()

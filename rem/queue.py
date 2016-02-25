@@ -82,15 +82,13 @@ class Queue(Unpickable(pending=PackSet.create,
         # XXX Don't use lock here to prevent deadlock
         barrierTm = time.time() - expectedLifetime
         while len(queue) > 0:
+            # Race with RPC
             pck, tm = queue.peak()
             if tm < barrierTm:
-# FIXME How to fix race? TODO
-#       Packet may be reseted after peak and before next line
                 pck.RemoveAsOld()
             else:
                 break
 
-# TODO See rem-xx-more-packet-locks.patch
     def relocatePacket(self, pck):
         dest_queue_name = self.VIEW_BY_STATE.get(pck.state)
         dest_queue = getattr(self, dest_queue_name) if dest_queue_name else None

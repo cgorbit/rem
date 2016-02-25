@@ -63,6 +63,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
         barrierTm = time.time() - self.PCK_LIFETIME
         with self.lock:
             while len(self.packets) > 0:
+                # Race with RPC
                 pck_id, (tm, pck) = self.packets.peak()
                 if tm < barrierTm:
                     pck.RemoveAsOld()

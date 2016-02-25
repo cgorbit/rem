@@ -2,8 +2,6 @@
     1) scheduler.py
         pck._init_jobs_dependencies() # XXX TODO XXX XXX XXX
 
-    2) Убить resumeWorkable
-
 2.
     булшит
     def _change_state(...):

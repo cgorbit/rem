@@ -6,7 +6,7 @@ import os
 import re
 from collections import deque
 import gc
-from common import PickableStdQueue, PickableStdPriorityQueue
+from common import PickableStdQueue, PickableStdPriorityQueue, as_rpc_user_error, RpcUserError
 import common
 from Queue import Empty, Queue as ThreadSafeQueue
 import cStringIO
@@ -162,7 +162,6 @@ class Mailer(object):
         logging.debug("send_email_async(" + str(rcpt) + ")\n" + subj + "\n" + body)
         self._queue.put((rcpt, subj, body))
 
-
 class Scheduler(Unpickable(lock=PickableRLock,
                            qRef=dict, #queues by name
                            tagRef=TagStorage, #inversed taglist for searhing tags by name
@@ -220,13 +219,13 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.HpyInstance = guppy.hpy()
         self.LastHeap = None
 
-    def DeleteUnusedQueue(self, qname):
+    def rpc_delete_queue(self, qname):
         if qname in self.qRef:
             with self.lock:
                 q = self.qRef.get(qname, None)
                 if q:
-                    if not q.Empty():
-                        raise AttributeError("can't delete non-empty queue")
+                    if not q.Empty(): # race
+                        raise RpcUserError(AttributeError("can't delete non-empty queue"))
                     self.qRef.pop(qname)
                     return True
         return False
@@ -240,16 +239,19 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         return q
 
-    def Queue(self, name, create=True):
+    def _queue(self, name, create=True, from_rpc=False):
         with self.lock:
             q = self.qRef.get(name)
             if q:
                 return q
 
             if not create:
-                raise KeyError("Queue '%s' doesn't exist" % name)
+                raise as_rpc_user_error(from_rpc, KeyError("Queue '%s' doesn't exist" % name))
 
             return self._create_queue(name)
+
+    def rpc_get_queue(self, name, create=True):
+        return self._queue(name, create, from_rpc=True)
 
     def _add_queue_as_non_empty_if_need(self, q):
         # this racy code may add empty queue to queues_with_jobs,
@@ -579,9 +581,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self._add_queue_as_non_empty_if_need(q)
 
     def AddPacketToQueue(self, qname, pck):
-        queue = self.Queue(qname)
+        queue = self._queue(qname)
         self.packStorage.Add(pck)
-        pck._move_to_queue(None, queue)
+        pck._attach_to_queue(queue)
         self.packetNamesTracker.Add(pck.name)
         pck.AddCallbackListener(self.packetNamesTracker)
 
