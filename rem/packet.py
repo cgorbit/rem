@@ -440,7 +440,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self._create_output(job.id, "err")
         )
 
-    def canChangeState(self, state):
+    def _can_change_state(self, state):
         return state in PacketState.allowed[self.state]
 
     def stopWaiting(self):
@@ -454,7 +454,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 logging.debug("packet %s useless state change to current %s" % (self.id, state))
                 return
 
-            if not self.canChangeState(state):
+            if not self._can_change_state(state):
                 logging.error("packet %s\tincorrect state change request %r => %r" % (self.name, self.state, state))
                 assert False, "Can't change state from %s to %s" % (self.state, state) # FIXME
                 return
@@ -480,7 +480,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             new_state = PacketState.HISTORIED
             if self.state == new_state:
                 return
-            if not self.canChangeState(new_state):
+            if not self._can_change_state(new_state):
                 raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self.state))
             self._change_state(new_state)
 
@@ -809,8 +809,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def History(self):
         return self.history or []
 
-# FIXME It's better for debug to allow this call from RPC without lock
-#       * From messages it's called under lock actually
+    # FIXME It's better for debug to allow this call from RPC without lock
+    #       * From messages it's called under lock actually
     def Status(self):
         #with self.lock:
         return self._Status()
@@ -893,7 +893,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 )
         return status
 
-    def AddBinary(self, binname, file):
+    def rpc_add_binary(self, binname, file):
         with self.lock:
             self._add_link(binname, file)
 
@@ -971,7 +971,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
         self._reinit(self._get_scheduler_ctx(), suspend)
 
-    def _reinit(self, ctx, suspend=False): # FIXME Lock
+    def _reinit(self, ctx, suspend=False):
         self._init(ctx)
 
         if self.CheckFlag(PacketFlag.USER_SUSPEND) or suspend:

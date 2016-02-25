@@ -338,7 +338,7 @@ def pck_add_binary(pck_id, binname, checksum):
     pck = _scheduler.tempStorage.GetPacket(pck_id) or _scheduler.GetPacket(pck_id)
     file = _scheduler.binStorage.GetFileByHash(checksum)
     if pck is not None and file is not None:
-        pck.AddBinary(binname, file)
+        pck.rpc_add_binary(binname, file)
         return
     raise MakeNonExistedPacketException(pck_id)
 
