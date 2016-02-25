@@ -443,6 +443,7 @@ class ApiServer(object):
             get_backupable_state,
             get_dependent_packets_for_tag,
             get_tag_local_state,
+            list_cloud_tags_masks,
             list_queues,
             list_tags,
             lookup_tags,
@@ -472,7 +473,6 @@ class ApiServer(object):
             set_tag,
             unset_tag,
             update_tags,
-            list_cloud_tags_masks,
         ]
 
         funcs.append(get_acquiring) # XXX
