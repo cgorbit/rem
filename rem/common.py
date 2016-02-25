@@ -70,7 +70,7 @@ def traced_rpc_method(level="debug"):
                 e = e.exc
                 raise type(e), e, tb
             except:
-                logging.exception("")
+                logging.exception("RPC method %s failed" % func.__name__)
                 raise
 
         f.log_level = level
