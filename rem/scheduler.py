@@ -351,7 +351,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         if self.backupInChild:
             child = fork_locking.run_in_child(lambda : backup(True), child_max_working_time)
 
-            logging.debug("backup fork stats: %s", child.timings)
+            logging.debug("backup fork stats: %s", {k: round(v, 3) for k, v in child.timings.items()})
 
             if child.errors:
                 logging.warning("Backup child process stderr: " + child.errors)
