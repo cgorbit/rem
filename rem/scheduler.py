@@ -97,8 +97,6 @@ class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
         return {}
 
 class QueueList(object):
-    __slots__ = ['__list', '__exists']
-
     def __init__(self):
         self.__list = deque()
         self.__exists = set()
@@ -474,8 +472,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             tagStorage = self.tagRef
 
-            #for tag in registrator.tags:
-                # FIXME nothing listeners to drop
             tagStorage.vivify_tags(registrator.tags)
 
             for pck in registrator.packets:
@@ -484,6 +480,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
             self._vivify_queues(qRef)
+
+            # No vivifying of tempStorage packets
 
             self.schedWatcher.Clear() # remove tasks from Queue.relocatePacket
             self.FillSchedWatcher(prevWatcher)
@@ -530,31 +528,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             return packets
 
-        def list_noninitialized_packets():
-            packets1 = list_packets_in_queues(PacketState.NONINITIALIZED)
-
-            logging.debug("NONINITIALIZED packets in Queue's for schedWatcher: %s" % [pck.id for pck in packets1])
-
-            packets2 = [
-                task.args[0]
-                    for _, task in list_schedwatcher_tasks(Queue, 'RestoreNoninitialized')]
-
-            if prev_watcher:
-                logging.debug("NONINITIALIZED packets in old schedWatcher: %s" % [pck.id for pck in packets2])
-
-            return packets1 + packets2
-
         for pck in produce_packets_to_wait():
             self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
-
-        # XXX
-        # from :rem-20-more-packet-locks-2 fork_locking guarantee that
-        # backups will not contain packets in NONINITIALIZED,
-        # _but_ not all servers ATW has enabled backup_in_child option
-
-        ctx = self.context
-        for pck in list_noninitialized_packets():
-            pck.try_recover_noninitialized_from_backup(ctx)
 
     def _vivify_queues(self, qRef):
         for name, q in qRef.iteritems():

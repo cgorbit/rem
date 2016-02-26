@@ -35,6 +35,7 @@ class Queue(Unpickable(pending=PackSet.create,
         PacketState.SUCCESSFULL: "worked",
         PacketState.WAITING: "waited",
         PacketState.NONINITIALIZED: "noninitialized"
+        # no CREATED
     }
 
     def __init__(self, name):

@@ -41,12 +41,18 @@ class PacketFlag:
     USER_SUSPEND = 0x01              #suspended by user
     RCVR_ERROR = 0x02              #recovering error detected
 
+
 class PacketCustomLogic(object):
     SchedCtx = None
 
     @classmethod
     def UpdateContext(cls, context):
         cls.SchedCtx = context
+
+
+def reraise(msg):
+    t, e, tb = sys.exc_info()
+    raise RuntimeError, RuntimeError('%s: %s' % (msg, e)), tb
 
 
 class JobPacketImpl(object):
@@ -168,11 +174,13 @@ class JobPacketImpl(object):
         while True:
             directory = tempfile.mktemp(dir=context.packets_directory, prefix="pck-")
             id = os.path.split(directory)[-1]
-            if not (context.Scheduler.GetPacket(id) or os.path.isdir(directory)):
+            if not (context.Scheduler.GetPacket(id) or os.path.isdir(directory)): # race
                 try:
                     os.makedirs(directory)
-                except OSError:
-                    pass
+                except OSError as e:
+                    if e.errno == errno.EEXIST:
+                        continue
+                    raise
                 else:
                     self.directory = directory
                     self.id = id
@@ -181,7 +189,7 @@ class JobPacketImpl(object):
         osspec.set_common_readable(self.directory)
         osspec.set_common_executable(self.directory)
         self._create_links(context)
-        self.streams.clear() # FIXME
+        self.streams.clear()
 
     def rpc_list_files(self):
         files = []
@@ -319,7 +327,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                            allTags=set,
                            waitTags=set,
                            binLinks=dict,
-                           state=(str, PacketState.CREATED), # FIXME not CREATED?
+                           state=(str, PacketState.ERROR),
                            history=list,
                            notify_emails=list,
                            flags=int,
@@ -387,6 +395,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def __repr__(self):
         return "<JobPacket(id: %s; name: %s; state: %s)>" % (self.id, self.name, self.state)
+
+    # TODO Don't store filehandles in self, only filenames
 
     def _stream_file(self, jid, type):
         stream = self.streams.get((type, jid), None)
@@ -492,12 +502,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def _mark_as_failed_on_recovery(self):
         with self.lock:
-            if self.CheckFlag(PacketFlag.RCVR_ERROR) and self.state == PacketState.ERROR:
+            if self.check_flag(PacketFlag.RCVR_ERROR) and self.state == PacketState.ERROR:
                 return
-
-            logging.error(
-                "can't restore packet directory: %s for packet %s. Packet marked as error from old state %s",
-                self.directory, self.name, self.state)
 
             self._set_flag(PacketFlag.RCVR_ERROR)
             self._change_state(PacketState.ERROR)
@@ -506,77 +512,74 @@ class JobPacket(Unpickable(lock=PickableRLock,
             # will be changed to SUSPENDED and then WORKABLE?
             self._release_place()
 
-    def _try_recovery_directory(self, ctx):
+    def _try_recover_directory(self, ctx):
         if os.path.isdir(self.directory):
             parentDir, dirname = os.path.split(self.directory)
             if parentDir != ctx.packets_directory:
                 dst_loc = os.path.join(ctx.packets_directory, self.id)
                 try:
-                    logging.error("relocates directory %s to %s", self.directory, dst_loc)
+                    logging.debug("relocates directory %s to %s", self.directory, dst_loc)
                     shutil.copytree(self.directory, dst_loc)
                     self.directory = dst_loc
                 except:
-                    logging.exception("relocation failed")
-                    return False
+                    reraise("Failed to relocate directory")
+
         else:
-            if self._are_links_alive(ctx):
-                try:
-                    logging.error("resurrects directory for packet %s", self.id)
-                    self.directory = None
-                    self._create_place(ctx)
-                except:
-                    logging.exception("resurrecton failed")
-                    return False
-            else:
-                return False
+            if not self._are_links_alive(ctx):
+                raise RuntimeError("Not all links alive")
 
-        return True
+            try:
+                self.directory = None
+                self._create_place(ctx)
+            except:
+                reraise("Failed to resurrect directory")
 
-    def try_recover_after_backup_loading(self, ctx):
-        failed = False
+    def _try_recover_after_backup_loading(self, ctx):
+        if self.state == PacketState.ERROR and self.check_flag(PacketFlag.RCVR_ERROR) \
+                or self.state == PacketState.HISTORIED:
+            if self.directory:
+                self._release_place()
+            return
 
-        # {HISTORIED,SUCCESSFULL} -> .directory = None -> ...
-        # NONINITIALIZED -> .directory = '...' -> CREATED ->
+        # Can exists only in tempStorage or in backups wo locks+backup_in_child
+        if self.state == PacketState.CREATED:
+            raise RuntimeError("Can't restore packets in CREATED state")
 
-        # FIXME Don't even try to recover RCVR_ERROR?
+        if self.state == PacketState.NONINITIALIZED:
+            self._recover_noninitialized(ctx)
 
         if self.directory:
-            failed = not self._try_recovery_directory(ctx)
-        elif self.state not in [PacketState.SUCCESSFULL, PacketState.HISTORIED]:
-            # TODO Actually ERROR with previous RCVR_ERROR will not contains directory too
-            failed = True
+            self._try_recover_directory(ctx)
 
-        if failed:
+        elif self.state != PacketState.SUCCESSFULL:
+            # FIXME try: _create_place
+            raise RuntimeError("No .directory set for packet in %s state" % self.state)
+
+        self._init_job_deps_graph()
+        self._resume(resume_workable=True, silent_noop=True) # TODO write tests
+
+    def try_recover_after_backup_loading(self, ctx):
+        #logging.debug('\nRESTORE\n' + str(self.Status()) + '\n')
+
+        descr = '[%s, directory = %s]' % (self, self.directory)
+
+        try:
+            self._try_recover_after_backup_loading(ctx)
+        except Exception as e:
+            logging.exception("Failed to recover packet %s" % descr)
             self._mark_as_failed_on_recovery()
-        elif self.state not in [PacketState.HISTORIED]: # FIXME
-            try:
-                self._init_job_deps_graph()
-                self._resume(resume_workable=True, silent_noop=True) # TODO write tests
-            except:
-                logging.exception("_init_job_deps_graph failed")
-                self._mark_as_failed_on_recovery()
 
-    def try_recover_noninitialized_from_backup(self, ctx):
+    def _recover_noninitialized(self, ctx):
         dir = None
         if self.directory:
             dir = self.directory
         elif self.id:
             dir = os.path.join(ctx.packets_directory, self.id)
+        else:
+            raise RuntimeError("No .id in NONINITIALIZED packet %s" % self.id)
 
-        # FIXME links in self
-        self.id = None
-        self.directory = None
-
-        if dir and os.path.isdir(dir):
-            try:
-                shutil.rmtree(dir, onerror=None)
-            except:
-                pass
-
-        try:
-            self._reinit(ctx)
-        except Exception as e:
-            logging.exception("Can't _reinit packet %s %s" % (self.name, self.id))
+        self._release_place()
+        self._reinit(ctx)
 
 # This was for INCORRECT Get in Queue
     def _notify_incorrect_action(self):
@@ -597,7 +600,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         ctx = self._get_scheduler_ctx()
         if not ctx.send_emails:
             return
-        if not ctx.send_emergency_emails and self.CheckFlag(PacketFlag.RCVR_ERROR):
+        if not ctx.send_emergency_emails and self.check_flag(PacketFlag.RCVR_ERROR):
             return
 
         msg = messages.FormatPacketErrorStateMessage(self, ctx)
@@ -761,7 +764,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         if resume_workable:
             allowed_states.append(PacketState.WORKABLE)
 
-        if self.state in allowed_states and not self.CheckFlag(PacketFlag.USER_SUSPEND):
+        if self.state in allowed_states and not self.check_flag(PacketFlag.USER_SUSPEND):
             self._clear_flag(~0)
 
             if self.waitTags:
@@ -853,9 +856,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
                       last_modified=history[-1][1],
                       waiting_time=waiting_time)
         extra_flags = set()
-        if self.state == PacketState.ERROR and self.CheckFlag(PacketFlag.RCVR_ERROR):
+        if self.state == PacketState.ERROR and self.check_flag(PacketFlag.RCVR_ERROR):
             extra_flags.add("can't-be-recovered")
-        if self.CheckFlag(PacketFlag.USER_SUSPEND):
+        if self.check_flag(PacketFlag.USER_SUSPEND):
             extra_flags.add("manually-suspended")
         if extra_flags:
             status["extra_flags"] = ";".join(extra_flags)
@@ -910,6 +913,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def CheckFlag(self, flag):
         return bool(self.flags & flag)
 
+    check_flag = CheckFlag
+
     def _set_flag(self, flag):
         self.flags |= flag
 
@@ -918,6 +923,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def rpc_suspend(self, kill_jobs=False):
         with self.lock:
+            if self.state == PacketState.ERROR and self.check_flag(PacketFlag.RCVR_ERROR):
+                raise RpcUserError(
+                    RuntimeError("Can't suspend ERROR'ed packet %s with RCVR_ERROR flag set" % self.id))
             self._set_flag(PacketFlag.USER_SUSPEND)
             self.Suspend(kill_jobs)
 
@@ -932,6 +940,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def rpc_resume(self):
         with self.lock:
+            # FIXME raise on non-SUSPENDED states?
+
             if self.state == PacketState.SUSPENDED:
                 self._clear_flag(PacketFlag.USER_SUSPEND)
 
@@ -984,7 +994,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def _reinit(self, ctx, suspend=False):
         self._init(ctx)
 
-        if self.CheckFlag(PacketFlag.USER_SUSPEND) or suspend:
+        if self.check_flag(PacketFlag.USER_SUSPEND) or suspend:
             self._change_state(PacketState.SUSPENDED)
         else:
             self._resume()
@@ -1033,8 +1043,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
         with self.lock:
             if self.state not in [PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR]:
-                raise as_rpc_user_error(from_rpc,
-                                        RuntimeError("can't move 'live' packet between queues"))
+                raise as_rpc_user_error(
+                    from_rpc, RuntimeError("can't move 'live' packet between queues"))
 
             if src_queue:
                 src_queue._detach_packet(self)
