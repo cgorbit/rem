@@ -22,6 +22,7 @@ from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
 from rem.common import as_rpc_user_error, RpcUserError
 import rem.common
+import rem.fork_locking
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -697,7 +698,17 @@ def scheduler_test():
         runner, runtm = sc.schedWatcher.tasks.get()
         print runtm, runner
 
+def _init_fork_locking(ctx):
+    set_timeout = getattr(rem.fork_locking, 'set_fork_friendly_acquire_timeout', None)
+
+    if not set_timeout:
+        return
+
+    set_timeout(ctx.backup_fork_lock_friendly_timeout)
+
 def start_daemon(ctx, sched, wait=True):
+    _init_fork_locking(ctx)
+
     should_stop = [False]
 
     def _log_signal(sig):

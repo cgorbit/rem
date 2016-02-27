@@ -23,6 +23,11 @@ except AttributeError:
     def gettid():
         return None
 
+try:
+    set_fork_friendly_acquire_timeout = _fork_locking.set_fork_friendly_acquire_timeout
+except AttributeError:
+    pass
+
 def acquire_lock(lock, blocking=True):
     if not blocking:
         raise RuntimeError("Non-blocking acquire not implemented")
