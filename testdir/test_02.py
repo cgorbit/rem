@@ -160,12 +160,7 @@ class T02(unittest.TestCase):
             time.sleep(delay)
 
         def check(res):
-            processes = list_processes()
-            #import sys
-            #logging.debug(processes)
-            #for idx, p in enumerate(processes):
-                #print >>sys.stderr, '%03d: %s' % (idx, p)
-            self.assertEqual(contains(processes, uniq_id), res)
+            self.assertEqual(contains(list_processes(), uniq_id), res)
 
         pckname = "suspend-kill-%.f" % time.time()
         pck = self.connector.Packet(pckname, time.time())
