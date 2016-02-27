@@ -59,7 +59,6 @@ class T14(unittest.TestCase):
         warningConnector.Queue('test_warning').AddPacket(p2)
         self.assertEqual(1, len(warningConnector.Queue('test_warning').ListPackets('all')))
         for p in warningConnector.Queue('test_warning').ListPackets('all'):
-            p.Stop()
             p.Delete()
         warningConnector.Queue('test_warning').Delete()
 

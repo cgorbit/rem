@@ -46,9 +46,12 @@ class ThreadJobWorker(KillableWorker):
             try:
                 self.job = self.scheduler.Get()
                 if self.job:
-                    self.job.Run()
+                    self.job.run()
             finally:
-                self.job = None
+                if self.job:
+                    #if hasattr(self.job, 'packetRef'):
+                        #logging.debug('ThreadJobWorker done_with %s from %s' % (self.job, self.job.packetRef))
+                    self.job = None
 
     def IsSuspended(self):
         return self.suspended
@@ -58,7 +61,7 @@ class ThreadJobWorker(KillableWorker):
 
         job = self.job
         if job:
-            job.Terminate()
+            job.cancel()
 
     def Resume(self):
         self.suspended = False

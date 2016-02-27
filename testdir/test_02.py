@@ -153,7 +153,7 @@ class T02(unittest.TestCase):
             p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
             return [l.rstrip('\n') for l in p.stdout]
 
-        uniq_id = '12344321'
+        uniq_id = '12344321%s' % time.time()
         delay = 1.5
 
         def sleep():
@@ -171,18 +171,17 @@ class T02(unittest.TestCase):
 
         pck.Stop()
         sleep()
-
         check(False)
 
         pck.Resume()
         sleep()
-        pck.Suspend()
+        check(True)
 
+        pck.Suspend()
         check(True)
 
         pck.Stop()
         sleep()
-
         check(False)
 
         pck.Delete()

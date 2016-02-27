@@ -6,9 +6,9 @@ import os
 import re
 from collections import deque
 import gc
-from common import PickableStdQueue, PickableStdPriorityQueue
+from common import PickableStdQueue, PickableStdPriorityQueue, as_rpc_user_error, RpcUserError
 import common
-from Queue import Empty
+from Queue import Empty, Queue as ThreadSafeQueue
 import cStringIO
 import StringIO
 import itertools
@@ -23,6 +23,7 @@ from queue import Queue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
+from rem.profile import ProfiledThread
 
 class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
                               lock=PickableLock,
@@ -125,6 +126,45 @@ class QueueList(object):
     def __len__(self):
         return len(self.__exists)
 
+
+class Mailer(object):
+    _STOP_INDICATOR = object()
+
+    def __init__(self, thread_count=1):
+        self._queue = ThreadSafeQueue()
+
+        self._threads = [
+            ProfiledThread(target=self._worker, name_prefix='Mailer')
+                for _ in xrange(thread_count)
+        ]
+
+        for t in self._threads:
+            t.start()
+
+    def stop(self):
+        for _ in self._threads:
+            self._queue.put(self._STOP_INDICATOR)
+
+        for t in self._threads:
+            t.join()
+
+    def _worker(self):
+        while True:
+            task = self._queue.get()
+
+            if task is self._STOP_INDICATOR:
+                break
+
+            try:
+                osspec.send_email(*task)
+            except Exception:
+                logging.exception("Failed to send email {To: %s, Subject: %s}" % (task[0], task[1]))
+
+    def send_async(self, rcpt, subj, body):
+        #logging.debug("send_email_async(" + str(rcpt) + ")\n" + subj + "\n" + body)
+        self._queue.put((rcpt, subj, body))
+
+
 class Scheduler(Unpickable(lock=PickableRLock,
                            qRef=dict, #queues by name
                            tagRef=TagStorage, #inversed taglist for searhing tags by name
@@ -182,58 +222,81 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.HpyInstance = guppy.hpy()
         self.LastHeap = None
 
-    def DeleteUnusedQueue(self, qname):
+    def rpc_delete_queue(self, qname):
         if qname in self.qRef:
             with self.lock:
                 q = self.qRef.get(qname, None)
                 if q:
-                    if not q.Empty():
-                        raise AttributeError("can't delete non-empty queue")
+                    if not q.Empty(): # race
+                        raise RpcUserError(AttributeError("can't delete non-empty queue"))
                     self.qRef.pop(qname)
                     return True
         return False
 
-    def Queue(self, qname, create=True):
-        if qname in self.qRef:
-            return self.qRef[qname]
-        if not create:
-            raise KeyError("Queue '%s' doesn't exist" % qname)
+    def _create_queue(self, name):
+        q = Queue(name)
+        self.qRef[name] = q
+
+        q.UpdateContext(self.context)
+        q.AddCallbackListener(self)
+
+        return q
+
+    def _queue(self, name, create=True, from_rpc=False):
         with self.lock:
-            q = Queue(qname)
-            self.RegisterQueue(q)
-            return q
+            q = self.qRef.get(name)
+            if q:
+                return q
+
+            if not create:
+                raise as_rpc_user_error(from_rpc, KeyError("Queue '%s' doesn't exist" % name))
+
+            return self._create_queue(name)
+
+    def rpc_get_queue(self, name, create=True):
+        return self._queue(name, create, from_rpc=True)
+
+    def _add_queue_as_non_empty_if_need(self, q):
+        # this racy code may add empty queue to queues_with_jobs,
+        # but it's better, than deadlock
+        if q.HasStartableJobs():
+            with self.lock:
+                if q not in self.queues_with_jobs:
+                    self.queues_with_jobs.push(q)
+                    self.HasScheduledTask.notify()
 
     def Get(self):
         with self.lock:
             while self.alive and not self.queues_with_jobs and self.schedWatcher.Empty():
                 self.HasScheduledTask.wait()
 
-            if self.alive:
-                if not self.schedWatcher.Empty():
-                    schedRunner = self.schedWatcher.GetTask()
-                    if schedRunner:
-                        return FuncJob(schedRunner)
+            if not self.alive:
+                return
 
-                if self.queues_with_jobs:
-                    queue = self.queues_with_jobs.pop()
-                    job = queue.Get(self.context)
-                    if queue.HasStartableJobs():
-                        self.queues_with_jobs.push(queue)
-                        self.HasScheduledTask.notify()
-                    return job # may be None
+            if not self.schedWatcher.Empty():
+                func = self.schedWatcher.GetTask()
+                if func:
+                    return FuncJob(func)
 
-                logging.warning("No tasks for execution after condition waking up")
+            if self.queues_with_jobs:
+                queue = self.queues_with_jobs.pop()
+
+        if queue:
+            # .Get not under lock to prevent deadlock with Notify
+            job = queue.Get(self.context)
+            #if job:
+                #logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.pck))
+
+            self._add_queue_as_non_empty_if_need(queue)
+
+            return job # may be None
+
+        logging.warning("No tasks for execution after condition waking up")
 
     def Notify(self, ref):
         if isinstance(ref, Queue):
-            queue = ref
-            if not queue.HasStartableJobs():
-                return
-            with self.lock:
-                if queue.HasStartableJobs():
-                    if queue not in self.queues_with_jobs:
-                        self.queues_with_jobs.push(queue)
-                        self.HasScheduledTask.notify()
+            self._add_queue_as_non_empty_if_need(ref)
+
         elif isinstance(ref, SchedWatcher):
             if ref.Empty():
                 return
@@ -291,7 +354,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         if self.backupInChild:
             child = fork_locking.run_in_child(lambda : backup(True), child_max_working_time)
 
-            logging.debug("backup fork stats: %s", child.timings)
+            logging.debug("backup fork stats: %s", {k: round(v, 3) for k, v in child.timings.items()})
 
             if child.errors:
                 logging.warning("Backup child process stderr: " + child.errors)
@@ -414,17 +477,16 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             tagStorage = self.tagRef
 
-            #for tag in registrator.tags:
-                # FIXME nothing listeners to drop
             tagStorage.vivify_tags(registrator.tags)
 
             for pck in registrator.packets:
-                pck.working.clear()
                 pck.VivifyDoneTagsIfNeed(tagStorage)
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
-            self.RegisterQueues(qRef)
+            self._vivify_queues(qRef)
+
+            # No vivifying of tempStorage packets
 
             self.schedWatcher.Clear() # remove tasks from Queue.relocatePacket
             self.FillSchedWatcher(prevWatcher)
@@ -471,106 +533,37 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             return packets
 
-        def produce_packets_to_reinit():
-            packets1 = list_packets_in_queues(PacketState.NONINITIALIZED)
-
-            logging.debug("NONINITIALIZED packets in Queue's for schedWatcher: %s" % [pck.id for pck in packets1])
-
-            packets2 = [
-                task.args[0]
-                    for _, task in list_schedwatcher_tasks(Queue, 'RestoreNoninitialized')]
-
-            if prev_watcher:
-                logging.debug("NONINITIALIZED packets in old schedWatcher: %s" % [pck.id for pck in packets2])
-
-            return packets1 + packets2
-
         for pck in produce_packets_to_wait():
             self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
 
+    def _vivify_queues(self, qRef):
+        for name, q in qRef.iteritems():
+            self._vivify_queue(q)
+            self.qRef[name] = q
+
+    def _vivify_queue(self, q):
         ctx = self.context
-        for pck in produce_packets_to_reinit():
-            dir = None
-            if pck.directory:
-                dir = pck.directory
-            elif pck.id:
-                dir = os.path.join(ctx.packets_directory, pck.id)
 
-            # FIXME links in pck
-            pck.id = None
-            pck.directory = None
-
-            if dir and os.path.isdir(dir):
-                try:
-                    shutil.rmtree(dir, onerror=None)
-                except:
-                    pass
-
-            try:
-                pck.Reinit(ctx)
-            except Exception as e:
-                logging.exception("Can't Reinit packet %s %s" % (pck.name, pck.id))
-
-    def RegisterQueues(self, qRef):
-        for q in qRef.itervalues():
-            self.RegisterQueue(q)
-
-    def RegisterQueue(self, q):
-        q.UpdateContext(self.context)
+        q.UpdateContext(ctx)
         q.AddCallbackListener(self)
+
         for pck in list(q.ListAllPackets()):
-            dstStorage = self.packStorage
             pck.UpdateTagDependencies(self.tagRef)
-            if pck.directory:
-                if os.path.isdir(pck.directory):
-                    parentDir, dirname = os.path.split(pck.directory)
-                    if parentDir != self.context.packets_directory:
-                        dst_loc = os.path.join(self.context.packets_directory, pck.id)
-                        try:
-                            logging.warning("relocates directory %s to %s", pck.directory, dst_loc)
-                            shutil.copytree(pck.directory, dst_loc)
-                            pck.directory = dst_loc
-                        except:
-                            logging.exception("relocation FAIL")
-                            dstStorage = None
-                else:
-                    if pck.AreLinksAlive(self.context):
-                        try:
-                            logging.warning("resurrects directory for packet %s", pck.id)
-                            pck.directory = None
-                            pck.CreatePlace(self.context)
-                        except:
-                            logging.exception("resurrecton FAIL")
-                            dstStorage = None
-                    else:
-                        dstStorage = None
-            else:
-                if pck.state != PacketState.SUCCESSFULL:
-                    dstStorage = None
-            if dstStorage is None:
-                #do not print about already errored packets
-                if not pck.CheckFlag(PacketFlag.RCVR_ERROR):
-                    logging.warning(
-                        "can't restore packet directory: %s for packet %s. Packet marked as error from old state %s",
-                        pck.directory, pck.name, pck.state)
-                    pck.SetFlag(PacketFlag.RCVR_ERROR)
-                    pck.changeState(PacketState.ERROR)
-                dstStorage = self.packStorage
-            dstStorage.Add(pck)
+            pck.try_recover_after_backup_loading(ctx)
+            q.relocatePacket(pck) # j.i.c force?
+
+            self.packStorage.Add(pck)
+
             if pck.state != PacketState.HISTORIED:
                 self.packetNamesTracker.Add(pck.name)
                 pck.AddCallbackListener(self.packetNamesTracker)
-            q.relocatePacket(pck)
-        if q.IsAlive():
-            q.Resume(resumeWorkable=True)
-        self.qRef[q.name] = q
-        if q.HasStartableJobs() and q not in self.queues_with_jobs:
-            self.queues_with_jobs.push(q)
+
+        self._add_queue_as_non_empty_if_need(q)
 
     def AddPacketToQueue(self, qname, pck):
-        queue = self.Queue(qname)
+        queue = self._queue(qname)
         self.packStorage.Add(pck)
-        queue.Add(pck)
+        pck._attach_to_queue(queue)
         self.packetNamesTracker.Add(pck.name)
         pck.AddCallbackListener(self.packetNamesTracker)
 
@@ -589,6 +582,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.schedWatcher.AddTaskT(timeout, fn, *args, **kws)
 
     def Start(self):
+        self._mailer = Mailer(self.context.mailer_thread_count)
         self.tagRef.Start()
         with self.lock:
             self.alive = True
@@ -604,11 +598,14 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def Stop2(self):
         self.tagRef.Stop()
 
+    def Stop3(self):
+        self._mailer.stop()
+
     def GetConnectionManager(self):
         return self.connManager
 
     def OnTaskPending(self, ref):
         self.Notify(ref)
 
-    def OnPacketReinitRequest(self, code):
-        code(self.context)
+    def send_email_async(self, rcpt, (subj, body)):
+        self._mailer.send_async(rcpt, subj, body)

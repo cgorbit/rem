@@ -9,9 +9,11 @@ import threading
 _inf = float('inf')
 _MAX_WAIT_DELAY = 2.0
 
-def _wait(f, timeout=None):
-    deadline = time.time() + timeout if timeout is not None else None
-    delay = 0.0005
+def _wait(f, timeout=None, deadline=None):
+    if timeout is not None:
+        deadline = time.time() + timeout
+
+    delay = 0.005
 
     while True:
         res = f()
@@ -36,6 +38,10 @@ class ProcessProxyBase(object):
     def __init__(self):
         # Lock for waitpid(2) call
         self._lock = threading.Lock() # no need in fork_locking.Lock
+        self._signal_was_sent = False
+
+    def was_signal_sent(self):
+        return self._signal_was_sent
 
     def _waited(self):
         return self._impl.returncode is not None
@@ -44,8 +50,8 @@ class ProcessProxyBase(object):
     def returncode(self):
         return self._impl.returncode
 
-    def wait(self, timeout=None):
-        return _wait(self.poll, timeout)
+    def wait(self, timeout=None, deadline=None):
+        return _wait(self.poll, timeout, deadline)
 
     def poll(self):
         with self._lock:
@@ -81,9 +87,11 @@ class ProcessProxy(ProcessProxyBase):
         self._impl = subprocess.Popen(*args, **kwargs)
 
     def _send_term_to_process(self):
+        self._signal_was_sent = True
         os.kill(self._impl.pid, signal.SIGTERM)
 
     def _send_kill_to_group(self):
+        self._signal_was_sent = True
         os.killpg(self._impl.pid, signal.SIGKILL)
 
     def terminate(self):
@@ -97,7 +105,7 @@ class ProcessProxy(ProcessProxyBase):
             def poll_zombie():
                 return True if _get_process_state(pid) == 'Z' else None
 
-            _wait(poll_zombie, self.BEFORE_KILL_DELAY)
+            _wait(poll_zombie, timeout=self.BEFORE_KILL_DELAY)
 
             self._send_kill_to_group()
 
@@ -111,9 +119,11 @@ class ProcessGroupGuardProxy(ProcessProxyBase):
         self._impl = pgrpguard.ProcessGroupGuard(*args, **kwargs)
 
     def _send_term_to_process(self):
+        self._signal_was_sent = True
         self._impl.send_term_to_process()
 
     def _send_kill_to_group(self):
+        self._signal_was_sent = True
         self._impl.send_kill_to_group()
 
     def terminate(self):

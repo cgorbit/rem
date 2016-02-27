@@ -20,7 +20,8 @@ from rem import CheckEmailAddress, DefaultContext, JobPacket, PacketState, Sched
 from rem import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
-
+from rem.common import as_rpc_user_error, RpcUserError
+import rem.common
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -81,16 +82,21 @@ def readonly_method(func):
     func.readonly_method = True
     return func
 
+def rpc_assert(cond, msg):
+    if not cond:
+        raise RpcUserError(AssertionError(msg))
+
+def MakeDuplicatePackageNameException(pck_name):
+    return RpcUserError(DuplicatePackageNameException(pck_name, _context.network_name))
 
 @traced_rpc_method("info")
 def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag, kill_all_jobs_on_error=True, packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY, resetable=True):
     if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
-        ex = DuplicatePackageNameException(packet_name, _context.network_name)
-        raise xmlrpclib.Fault(1, ex.message)
+        raise MakeDuplicatePackageNameException(packet_name)
     if notify_emails is not None:
-        assert isinstance(notify_emails, list), "notify_emails must be list or None"
+        rpc_assert(isinstance(notify_emails, list), "notify_emails must be list or None")
         for email in notify_emails:
-            assert CheckEmailAddress(email), "incorrect e-mail: " + email
+            rpc_assert(CheckEmailAddress(email), "incorrect e-mail: " + email)
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck = JobPacket(packet_name, priority, _context, notify_emails,
                     wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
@@ -99,6 +105,8 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag, 
     logging.info('packet %s registered as %s', packet_name, pck.id)
     return pck.id
 
+def MakeNonExistedPacketException(pck_id):
+    return RpcUserError(AttributeError("nonexisted packet id: %s" % pck_id))
 
 @traced_rpc_method()
 def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
@@ -109,10 +117,13 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
             shell = shell.encode('utf-8')
         parents = [pck.jobs[int(jid)] for jid in parents]
         pipe_parents = [pck.jobs[int(jid)] for jid in pipe_parents]
-        job = pck.Add(shell, parents, pipe_parents, set_tag and _scheduler.tagRef.AcquireTag(set_tag), tries, \
-                      max_err_len, retry_delay, pipe_fail, description, notify_timeout, max_working_time, output_to_status)
+        job = pck.rpc_add_job(shell, parents, pipe_parents,
+                              set_tag and _scheduler.tagRef.AcquireTag(set_tag),
+                              tries, max_err_len, retry_delay, pipe_fail,
+                              description, notify_timeout, max_working_time,
+                              output_to_status)
         return str(job.id)
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @traced_rpc_method("info")
@@ -120,24 +131,23 @@ def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPL
     pck = _scheduler.tempStorage.PickPacket(pck_id)
     packet_name = pck.name
     if packet_name_policy & (constants.DENY_DUPLICATE_NAMES_POLICY | constants.WARN_DUPLICATE_NAMES_POLICY) and _scheduler.packetNamesTracker.Exist(packet_name):
-        ex = DuplicatePackageNameException(packet_name, _context.network_name)
-        raise xmlrpclib.Fault(1, ex.message)
+        raise MakeDuplicatePackageNameException(packet_name)
     if pck is not None:
         _scheduler.AddPacketToQueue(queue_name, pck)
         return
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @traced_rpc_method("info")
 def pck_moveto_queue(pck_id, src_queue, dst_queue):
     pck = _scheduler.GetPacket(pck_id)
     if pck is not None:
-        if pck.state not in (PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR):
-            raise RuntimeError("can't move \"live\" packet between queues")
-        _scheduler.Queue(src_queue).Remove(pck)
-        _scheduler.Queue(dst_queue).Add(pck)
+        pck.rpc_move_to_queue(
+            _scheduler.rpc_get_queue(src_queue),
+            _scheduler.rpc_get_queue(dst_queue)
+        )
         return
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 #########
@@ -146,34 +156,32 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
 def get_safe_cloud_state():
     pass # TODO XXX
 
-# TODO timeouts
-
 @readonly_method
 @traced_rpc_method()
 def check_tag(tagname):
-    return _scheduler.tagRef._are_tags_set([tagname]).get()[tagname]
+    return _scheduler.tagRef._are_tags_set([tagname]).get()[tagname] # TODO timeout
 
 @traced_rpc_method("info")
 def set_tag(tagname):
-    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Set).get()
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Set).get() # TODO timeout
 
 @traced_rpc_method("info")
 def unset_tag(tagname):
-    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Unset).get()
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Unset).get() # TODO timeout
 
 @traced_rpc_method()
 def reset_tag(tagname, msg=""):
-    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get()
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get() # TODO timeout
 
 @readonly_method
 @traced_rpc_method()
 def check_tags(tags):
-    return _scheduler.tagRef._are_tags_set(tags).get()
+    return _scheduler.tagRef._are_tags_set(tags).get() # TODO timeout
 
 @readonly_method
 @traced_rpc_method()
 def lookup_tags(tags):
-    return _scheduler.tagRef._lookup_tags(tags).get()
+    return _scheduler.tagRef._lookup_tags(tags).get() # TODO timeout
 
 @readonly_method
 @traced_rpc_method()
@@ -199,7 +207,7 @@ def get_tag_local_state(tag):
 @traced_rpc_method("info")
 def update_tags(updates):
     # TODO VERIFY `updates' HERE
-    return _scheduler.tagRef._modify_tags_unsafe(updates).get()
+    return _scheduler.tagRef._modify_tags_unsafe(updates).get() # TODO timeout
 
 @traced_rpc_method("info")
 def list_cloud_tags_masks():
@@ -213,18 +221,18 @@ def get_dependent_packets_for_tag(tagname):
 
 @traced_rpc_method("info")
 def queue_suspend(queue_name):
-    _scheduler.Queue(queue_name).Suspend()
+    _scheduler.rpc_get_queue(queue_name).Suspend()
 
 
 @traced_rpc_method("info")
 def queue_resume(queue_name):
-    _scheduler.Queue(queue_name).Resume()
+    _scheduler.rpc_get_queue(queue_name).Resume()
 
 
 @readonly_method
 @traced_rpc_method()
 def queue_status(queue_name):
-    q = _scheduler.Queue(queue_name, create=False)
+    q = _scheduler.rpc_get_queue(queue_name, create=False)
     return q.Status()
 
 
@@ -232,25 +240,25 @@ def queue_status(queue_name):
 @traced_rpc_method()
 def queue_list(queue_name, filter, name_regex=None, prefix=None):
     name_regex = name_regex and re.compile(name_regex)
-    q = _scheduler.Queue(queue_name, create=False)
+    q = _scheduler.rpc_get_queue(queue_name, create=False)
     return [pck.id for pck in q.ListPackets(filter=filter, name_regex=name_regex, prefix=prefix)]
 
 
 @readonly_method
 @traced_rpc_method()
 def queue_list_updated(queue_name, last_modified, filter=None):
-    q = _scheduler.Queue(queue_name, create=False)
+    q = _scheduler.rpc_get_queue(queue_name, create=False)
     return [pck.id for pck in q.ListPackets(last_modified=last_modified, filter=filter)]
 
 
 @traced_rpc_method("info")
 def queue_change_limit(queue_name, limit):
-    _scheduler.Queue(queue_name).ChangeWorkingLimit(limit)
+    _scheduler.rpc_get_queue(queue_name).ChangeWorkingLimit(limit)
 
 
 @traced_rpc_method("info")
 def queue_delete(queue_name):
-    return _scheduler.DeleteUnusedQueue(queue_name)
+    return _scheduler.rpc_delete_queue(queue_name)
 
 
 @readonly_method
@@ -275,39 +283,37 @@ def pck_status(pck_id):
     pck = _scheduler.GetPacket(pck_id) or _scheduler.tempStorage.GetPacket(pck_id)
     if pck is not None:
         return pck.Status()
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @traced_rpc_method("info")
 def pck_suspend(pck_id, kill_jobs=False):
     pck = _scheduler.GetPacket(pck_id)
     if pck is not None:
-        return pck.UserSuspend(kill_jobs)
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+        return pck.rpc_suspend(kill_jobs)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @traced_rpc_method("info")
 def pck_resume(pck_id):
     pck = _scheduler.GetPacket(pck_id)
     if pck is not None:
-        return pck.UserResume()
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+        return pck.rpc_resume()
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @traced_rpc_method("info")
 def pck_delete(pck_id):
     pck = _scheduler.GetPacket(pck_id)
-    if pck is not None:
-        if not pck.canChangeState(PacketState.HISTORIED):
-            raise AssertionError("couldn't delete packet '%s' stated as '%s'" % (pck_id, pck.state))
-        return pck.changeState(PacketState.HISTORIED)
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    if pck is None:
+        raise MakeNonExistedPacketException(pck_id)
+    return pck.rpc_remove()
 
 @traced_rpc_method("info")
 def pck_reset(pck_id, suspend=False, reset_tag=False, reset_message=None):
     pck = _scheduler.GetPacket(pck_id)
     if pck is None:
-        raise AttributeError("nonexisted packet id: %s" % pck_id)
+        raise MakeNonExistedPacketException(pck_id)
 
     if reset_tag:
         tag = pck.done_indicator
@@ -341,9 +347,9 @@ def pck_add_binary(pck_id, binname, checksum):
     pck = _scheduler.tempStorage.GetPacket(pck_id) or _scheduler.GetPacket(pck_id)
     file = _scheduler.binStorage.GetFileByHash(checksum)
     if pck is not None and file is not None:
-        pck.AddBinary(binname, file)
+        pck.rpc_add_binary(binname, file)
         return
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @readonly_method
@@ -351,9 +357,9 @@ def pck_add_binary(pck_id, binname, checksum):
 def pck_list_files(pck_id):
     pck = _scheduler.GetPacket(pck_id)
     if pck is not None:
-        files = pck.ListFiles()
+        files = pck.rpc_list_files()
         return files
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @readonly_method
@@ -361,20 +367,20 @@ def pck_list_files(pck_id):
 def pck_get_file(pck_id, filename):
     pck = _scheduler.GetPacket(pck_id)
     if pck is not None:
-        file = pck.GetFile(filename)
+        file = pck.rpc_get_file(filename)
         return xmlrpclib.Binary(file)
-    raise AttributeError("nonexisted packet id: %s" % pck_id)
+    raise MakeNonExistedPacketException(pck_id)
 
 
 @traced_rpc_method()
 def queue_set_success_lifetime(queue_name, lifetime):
-    q = _scheduler.Queue(queue_name, create=False)
+    q = _scheduler.rpc_get_queue(queue_name, create=False)
     q.SetSuccessLifeTime(lifetime)
 
 
 @traced_rpc_method()
 def queue_set_error_lifetime(queue_name, lifetime):
-    q = _scheduler.Queue(queue_name, create=False)
+    q = _scheduler.rpc_get_queue(queue_name, create=False)
     q.SetErroredLifeTime(lifetime)
 
 
@@ -435,6 +441,7 @@ class ApiServer(object):
             get_backupable_state,
             get_dependent_packets_for_tag,
             get_tag_local_state,
+            list_cloud_tags_masks,
             list_queues,
             list_tags,
             lookup_tags,
@@ -464,7 +471,6 @@ class ApiServer(object):
             set_tag,
             unset_tag,
             update_tags,
-            list_cloud_tags_masks,
         ]
 
         if self.allow_backup_method:
@@ -505,8 +511,6 @@ class RemDaemon(object):
         self._should_stop = threading.Event()
         self._stopped = threading.Event()
 
-        threading.stack_size()
-
         self.scheduler = scheduler
         self.api_servers = [
             ApiServer(context.manager_port, context.xmlrpc_pool_size, scheduler,
@@ -518,6 +522,10 @@ class RemDaemon(object):
                                               scheduler,
                                               allow_backup_method=context.allow_backup_rpc_method,
                                               readonly=True))
+
+        for srv in self.api_servers:
+            srv.rpcserver.logRequests = False
+
         self.regWorkers = []
         self.timeWorker = None
 
@@ -556,7 +564,10 @@ class RemDaemon(object):
         self._stop()
 
         logging.debug("rem-server\tstart_final_backup")
-        self.scheduler.RollBackup()
+        try:
+            self.scheduler.RollBackup()
+        except:
+            logging.exception("final backup failed")
 
         logging.debug("rem-server\tstopped")
         self._stopped.set()
@@ -573,15 +584,18 @@ class RemDaemon(object):
         logging.debug("rem-server\ttime_worker_stopped")
 
         self.scheduler.Stop1()
+        logging.debug("rem-server\tafter_stop1")
 
         for worker in self.regWorkers:
             worker.Suspend()
+        logging.debug("rem-server\tafter_suspend_workers")
 
         for worker in self.regWorkers:
             try:
                 worker.Kill()
             except Exception:
                 logging.exception("worker.Kill() failed")
+        logging.debug("rem-server\tafter_kill_workers")
 
         for worker in self.regWorkers:
             worker.join()
@@ -600,6 +614,9 @@ class RemDaemon(object):
         for proc in multiprocessing.active_children():
             proc.terminate()
 
+    # TODO Make it nice
+        self.scheduler.Stop3()
+
     def _start_workers(self):
         self.scheduler.Start()
         self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self.scheduler.poolSize)]
@@ -613,9 +630,6 @@ class RemDaemon(object):
 
         for server in self.api_servers:
             server.start()
-
-    # FIXME New thread pools
-        threading.stack_size(256 << 10) # for rem.job stderr readers
 
         self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")
         self._backups_thread.start()
