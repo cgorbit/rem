@@ -29,7 +29,7 @@ class IMessageHelper(object):
         return (self.subject(), self.message())
 
 class PacketExecutionError(IMessageHelper):
-    def __init__(self, pck, ctx):
+    def __init__(self, ctx, pck):
         self.pck = pck
         self.ctx = ctx
 
@@ -58,7 +58,7 @@ class PacketExecutionError(IMessageHelper):
 
 
 class EmergencyError(IMessageHelper):
-    def __init__(self, pck, ctx):
+    def __init__(self, ctx, pck):
         self.pck = pck
         self.ctx = ctx
 
@@ -85,7 +85,7 @@ class EmergencyError(IMessageHelper):
 
 
 class TooLongWorkingWarning(IMessageHelper):
-    def __init__(self, job, ctx):
+    def __init__(self, ctx, job):
         self.pck = job.packetRef
         self.job = job
         self.ctx = ctx
@@ -116,7 +116,7 @@ class TooLongWorkingWarning(IMessageHelper):
 
 
 class ResetNotification(IMessageHelper):
-    def __init__(self, pck, ctx, message):
+    def __init__(self, ctx, pck, message):
         self.pck = pck
         self.ctx = ctx
         self.reason = message
@@ -137,14 +137,14 @@ class ResetNotification(IMessageHelper):
         return mbuf.getvalue()
 
 
-def FormatPacketErrorStateMessage(pck, ctx):
-    return PacketExecutionError(pck, ctx).make()
+def FormatPacketErrorStateMessage(ctx, pck):
+    return PacketExecutionError(ctx, pck).make()
 
-def FormatPacketEmergencyError(pck, ctx):
-    return EmergencyError(pck, ctx).make()
+def FormatPacketEmergencyError(ctx, pck):
+    return EmergencyError(ctx, pck).make()
 
-def FormatPacketResetNotificationMessage(pck, ctx, comment):
-    return ResetNotification(pck, ctx, comment).make()
+def FormatPacketResetNotificationMessage(ctx, pck, comment):
+    return ResetNotification(ctx, pck, comment).make()
 
-def FormatLongExecutionWarning(job, ctx):
-    return TooLongWorkingWarning(job, ctx).make()
+def FormatLongExecutionWarning(ctx, job):
+    return TooLongWorkingWarning(ctx, job).make()

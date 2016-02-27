@@ -459,7 +459,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def _change_state(self, state):
         with self.lock:
             if state == self.state:
-                logging.debug("packet %s useless state change to current %s" % (self.id, state))
+                logging.warning("packet %s useless state change to current %s" % (self.id, state))
                 return
 
             assert self._can_change_state(state), \
@@ -472,7 +472,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self.FireEvent("change") # queue.relocatePacket
 
             if state == PacketState.ERROR:
-                self._try_send_email_on_error_state_if_need()
+                self._send_email_on_error_state()
 
             if state == PacketState.SUCCESSFULL:
                 if self.done_indicator:
@@ -574,34 +574,49 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self._reinit(ctx)
 
     def _notify_incorrect_action(self):
-        if not self.notify_emails:
-            return
+        def make(ctx):
+            if not(ctx.send_emails and ctx.send_emergency_emails):
+                return
+            return messages.FormatPacketEmergencyError(ctx, self)
 
-        ctx = self._get_scheduler_ctx()
+        self._send_email(make)
 
-        if ctx.send_emails and ctx.send_emergency_emails:
+    def _send_email_on_error_state(self):
+        def make(ctx):
+            if not ctx.send_emails:
+                return
+            if not ctx.send_emergency_emails and self.check_flag(PacketFlag.RCVR_ERROR):
+                return
+            return messages.FormatPacketErrorStateMessage(ctx, self)
+
+        self._send_email(make)
+
+    def _send_reset_notification(self, comment):
+        def make(ctx):
+            return messages.FormatPacketResetNotificationMessage(ctx, self, comment)
+
+        self._send_email(make)
+
+    def SendJobLongExecutionNotification(self, job):
+        def make(ctx):
             with self.lock:
-                msg = messages.FormatPacketEmergencyError(self, ctx)
-            ctx.send_email_async(self.notify_emails, msg)
+                return messages.FormatLongExecutionWarning(ctx, job)
 
-    def _send_email_on_error_state_if_need(self):
+        self._send_email(make)
+
+    def _send_email(self, make):
         if not self.notify_emails:
             return
 
         ctx = self._get_scheduler_ctx()
-        if not ctx.send_emails:
-            return
-        if not ctx.send_emergency_emails and self.check_flag(PacketFlag.RCVR_ERROR):
-            return
 
-        msg = messages.FormatPacketErrorStateMessage(self, ctx)
-        ctx.send_email_async(self.notify_emails, msg)
-
-    def _try_send_email_on_error_state_if_need(self):
         try:
-            self._send_email_on_error_state_if_need()
+            msg = make(ctx)
         except:
-            logging.exception("Failed to send error message for %s" % self.id)
+            logging.exception("Failed to format email for %s" % self.id)
+        else:
+            if msg:
+                ctx.send_email_async(self.notify_emails, msg)
 
     def OnUndone(self, ref):
         pass
@@ -667,9 +682,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
             # Actually, pck_add_job use only tempStorage, so SUSPENDED is not used
             if self.state not in [PacketState.CREATED, PacketState.SUSPENDED]:
                 raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
-
-            if self.state == PacketState.SUSPENDED:
-                logging.warning("JobPacket.rpc_add_job for %s in SUSPENDED" % self.id)
 
             parents = list(set(p.id for p in parents + pipe_parents))
             pipe_parents = list(p.id for p in pipe_parents)
@@ -994,27 +1006,12 @@ class JobPacket(Unpickable(lock=PickableRLock,
         if isinstance(ref, TagBase):
             self._on_tag_reset(ref, comment)
 
-    def _send_reset_notification_if_need(self, comment):
-        if not self.notify_emails:
-            return
-        ctx = self._get_scheduler_ctx()
-        msg = messages.FormatPacketResetNotificationMessage(self, ctx, comment)
-        ctx.send_email_async(self.notify_emails, msg)
-
-    def SendJobLongExecutionNotification(self, job):
-        if not self.notify_emails:
-            return
-        ctx = self._get_scheduler_ctx()
-        with self.lock:
-            msg = messages.FormatLongExecutionWarning(job, ctx)
-        ctx.send_email_async(self.notify_emails, msg)
-
     def _on_tag_reset(self, ref, comment):
         with self.lock:
             self.waitTags.add(ref.GetFullname())
 
             if not self.isResetable:
-                self._send_reset_notification_if_need(comment)
+                self._send_reset_notification(comment)
                 return
 
             self._reset(False, lambda tag: tag.Reset(comment))
