@@ -219,7 +219,7 @@ class JobPacketImpl(object):
         # TODO
         # 1. kill_all_jobs_on_error=False doesn't work correctly:
         #       Another running jobs may change ERROR to PENDING
-        # 2. WAITING doesn't work correctly:
+        # 2. WAITING doesn't work as good as possible:
         #       1. if another jobs are running state must still be WORKABLE/PENDING,
         #          and only later become WAITING (or never WAITING)
         #       2. another running jobs' branches will not be continue to run
@@ -285,14 +285,14 @@ class _ActiveJobs(object):
     def add(self, runner):
         with self._lock:
             job_id = runner.job.id
-            logging.debug('_active[%d] = %s' % (job_id, runner.job))
+            #logging.debug('_active[%d] = %s' % (job_id, runner.job))
             assert job_id not in self._active, "Job %d already in _active" % job_id
             self._active[job_id] = runner
 
     def on_done(self, runner):
         with self._lock:
             job_id = runner.job.id
-            logging.debug('_active.pop(%d)' % job_id)
+            #logging.debug('_active.pop(%d)' % job_id)
             assert job_id in self._active, "No Job %d in _active" % job_id
             self._active.pop(job_id)
             self._results.append(runner)
@@ -332,14 +332,13 @@ class JobPacket(Unpickable(lock=PickableRLock,
                            notify_emails=list,
                            flags=int,
                            kill_all_jobs_on_error=(bool, True),
+                           _clean_state=(bool, False), # False for loading old backups
+                           isResetable=(bool, True),
+                           directory=lambda *args: args[0] if args else None,
 
                            # FIXME equal to _active_jobs.{_active + _results}?
                            # Need to be consistent with Queue.working under JobPacket.lock
                            as_in_queue_working=always(set),
-
-                           _clean_state=(bool, False), # False for loading old backups
-                           isResetable=(bool, True),
-                           directory=lambda *args: args[0] if args else None,
                           ),
                 CallbackHolder,
                 ICallbackAcceptor,
@@ -370,7 +369,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self._set_waiting_tags(wait_tags)
 
     def __getstate__(self):
-# FIXME Use lock for non-fork backup?
         sdict = CallbackHolder.__getstate__(self)
 
         if sdict['done_indicator']:
@@ -416,7 +414,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             job = self.jobs[jid]
             if filename is not None:
                 stream = self.streams[("in", jid)] = open(filename, "r")
-            if len(job.inputs) == 0:
+            elif len(job.inputs) == 0:
                 stream = self.streams[("in", jid)] = osspec.get_null_input()
             elif len(job.inputs) == 1:
                 pid, = job.inputs
@@ -464,10 +462,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 logging.debug("packet %s useless state change to current %s" % (self.id, state))
                 return
 
-            if not self._can_change_state(state):
-                logging.error("packet %s\tincorrect state change request %r => %r" % (self.name, self.state, state))
-                assert False, "Can't change state from %s to %s" % (self.state, state) # FIXME
-                return
+            assert self._can_change_state(state), \
+                "packet %s\tincorrect state change request %r => %r" % (self.name, self.state, state)
 
             self.state = state
             self.history.append((self.state, time.time()))
@@ -508,8 +504,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self._set_flag(PacketFlag.RCVR_ERROR)
             self._change_state(PacketState.ERROR)
 
-            # FIXME What will happend if ERROR (with RCVR_ERROR)
-            # will be changed to SUSPENDED and then WORKABLE?
             self._release_place()
 
     def _try_recover_directory(self, ctx):
@@ -559,8 +553,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self._resume(resume_workable=True, silent_noop=True) # TODO write tests
 
     def try_recover_after_backup_loading(self, ctx):
-        #logging.debug('\nRESTORE\n' + str(self.Status()) + '\n')
-
         descr = '[%s, directory = %s]' % (self, self.directory)
 
         try:
@@ -581,7 +573,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self._release_place()
         self._reinit(ctx)
 
-# This was for INCORRECT Get in Queue
     def _notify_incorrect_action(self):
         if not self.notify_emails:
             return
@@ -611,10 +602,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self._send_email_on_error_state_if_need()
         except:
             logging.exception("Failed to send error message for %s" % self.id)
-
-    def OnStart(self, ref):
-        if isinstance(ref, Job):
-            assert False, "OnStart method is obsolete"
 
     def OnUndone(self, ref):
         pass
@@ -662,17 +649,14 @@ class JobPacket(Unpickable(lock=PickableRLock,
         active.terminate()
         active.wait_empty()
 
-        self._close_streams() # FIXME Why this was first?
+        self._close_streams()
 
     def _kill_jobs_drop_results(self):
         self._kill_jobs()
         self._drop_jobs_results()
 
     def OnDone(self, ref):
-        if isinstance(ref, Job):
-            #self.on_job_done(ref)
-            assert False, "OnDone method is obsolete for Job"
-        elif isinstance(ref, TagBase):
+        if isinstance(ref, TagBase):
             self._process_tag_set_event(ref)
 
     def rpc_add_job(self, shell, parents, pipe_parents, set_tag, tries,
@@ -825,7 +809,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
     # FIXME It's better for debug to allow this call from RPC without lock
     #       * From messages it's called under lock actually
     def Status(self):
-        #with self.lock:
         return self._Status()
 
     def _Status(self):
@@ -887,10 +870,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 pipe_parents = map(str, job.inputs or [])
 
                 output_filename = None
-                # FIXME Todo? ;)
-                #if getattr(job, 'output', None) and os.path.isfile(job.output.name):
-                    #output_filename = os.path.basename(job.output.name)
-
 
                 status["jobs"].append(
                     dict(id=str(job.id),

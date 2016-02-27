@@ -126,6 +126,7 @@ class QueueList(object):
     def __len__(self):
         return len(self.__exists)
 
+
 class Mailer(object):
     _STOP_INDICATOR = object()
 
@@ -154,11 +155,15 @@ class Mailer(object):
             if task is self._STOP_INDICATOR:
                 break
 
-            osspec.send_email(*task)
+            try:
+                osspec.send_email(*task)
+            except Exception:
+                logging.exception("Failed to send email {To: %s, Subject: %s}" % (task[0], task[1]))
 
     def send_async(self, rcpt, subj, body):
-        logging.debug("send_email_async(" + str(rcpt) + ")\n" + subj + "\n" + body)
+        #logging.debug("send_email_async(" + str(rcpt) + ")\n" + subj + "\n" + body)
         self._queue.put((rcpt, subj, body))
+
 
 class Scheduler(Unpickable(lock=PickableRLock,
                            qRef=dict, #queues by name
@@ -279,8 +284,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         if queue:
             # .Get not under lock to prevent deadlock with Notify
             job = queue.Get(self.context)
-            if job:
-                logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.pck))
+            #if job:
+                #logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.pck))
 
             self._add_queue_as_non_empty_if_need(queue)
 
@@ -601,9 +606,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def OnTaskPending(self, ref):
         self.Notify(ref)
-
-    #def OnPacketReinitRequest(self, code):
-        #code(self.context)
 
     def send_email_async(self, rcpt, (subj, body)):
         self._mailer.send_async(rcpt, subj, body)

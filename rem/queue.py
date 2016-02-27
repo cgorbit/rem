@@ -153,16 +153,16 @@ class Queue(Unpickable(pending=PackSet.create,
 
     def _attach_packet(self, pck):
         with self.lock:
-            pck.AddCallbackListener(self) # XXX_LOCK
-            self.working.update(pck._get_working_jobs()) # XXX_LOCK
+            pck.AddCallbackListener(self)
+            self.working.update(pck._get_working_jobs())
         self.relocatePacket(pck)
 
     def _detach_packet(self, pck):
         with self.lock:
             if not self._find_packet_queue(pck):
                 raise RuntimeError("packet %s is not in queue %s" % (pck.id, self.name))
-            pck.DropCallbackListener(self) # XXX_LOCK
-            self.working.difference_update(pck._get_working_jobs()) # XXX_LOCK
+            pck.DropCallbackListener(self)
+            self.working.difference_update(pck._get_working_jobs())
         self.movePacket(pck, None)
 
     def HasStartableJobs(self):
@@ -207,7 +207,7 @@ class Queue(Unpickable(pending=PackSet.create,
                 continue
             if prefix and not pck.name.startswith(prefix):
                 continue
-            if last_modified and (not pck.History() or pck.History()[-1][1] < last_modified): # XXX_LOCK
+            if last_modified and (not pck.History() or pck.History()[-1][1] < last_modified):
                 continue
             packets.append(pck)
         return packets

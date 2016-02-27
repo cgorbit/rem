@@ -15,6 +15,7 @@ import process_proxy
 import pgrpguard
 
 DUMMY_COMMAND_CREATOR = None
+_DEFAULT_STDERR_SUMMAY_LEN = 2000
 
 class IResult(Unpickable(type=str,
                          code=safeint,
@@ -142,7 +143,7 @@ class Job(Unpickable(err=nullobject,
         return self.packetRef.directory
 
     def produce_legacy_stderr_output(self, filename):
-        return self._produce_legacy_stderr_output(filename, self.max_err_len or 2000)
+        return self._produce_legacy_stderr_output(filename, self.max_err_len or _DEFAULT_STDERR_SUMMAY_LEN)
 
     @staticmethod
     def _produce_legacy_stderr_output(filename, max_err_len):
@@ -278,7 +279,7 @@ class JobRunner(object):
             with stdout:
                 with stderr:
                     logging.debug("out: %s, in: %s", stdout, stdin)
-                    logging.debug("job %s\tstarted", job.shell) # FIXME was called in packet.py
+                    logging.debug("job %s\tstarted", job.shell)
 
                     if not self._run_process(argv, stdin, stdout, stderr):
                         return
@@ -351,10 +352,6 @@ class JobRunner(object):
         if not self._finish_time:
             return None
         return self._process.returncode
-
-    #@property
-    #def job_id(self):
-        #return self._job.id
 
     @property
     def job(self):

@@ -292,8 +292,7 @@ class TagReprModifier(object):
 
             self._process_update(update)
 
-            # XXX see tofileOldItems
-            del update
+            del update # XXX see tofileOldItems
 
             if promise:
                 promise.set()
@@ -678,7 +677,6 @@ class TagStorage(object):
             return False
 
         try:
-            #return hash(name) % 3 != 0
             return self._match_cloud_tag(name)
         except Exception as e:
             now = time.time()
