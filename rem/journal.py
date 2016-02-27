@@ -59,13 +59,6 @@ class JournalDB(object):
     def sync(self):
         self._impl.sync()
 
-def log_stack(msg):
-    import traceback
-    from cStringIO import StringIO
-    out = StringIO()
-    traceback.print_stack(file=out)
-    logging.debug(msg + "\n" + out.getvalue())
-
 class TagLogger(object):
     def __init__(self):
         super(TagLogger, self).__init__()

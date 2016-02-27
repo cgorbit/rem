@@ -20,7 +20,6 @@ from Queue import Queue
 import fork_locking
 from future import Promise, WaitFutures
 from profile import ProfiledThread
-import cloud_client
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -433,6 +432,10 @@ class TagStorage(object):
 
     def PreInit(self):
         if self._cloud_tags_server:
+            # Allow to run REM without python-protobuf
+            global cloud_client
+            import cloud_client
+
             try:
                 self._match_cloud_tag = self._load_masks()
             except Exception as e:
@@ -691,8 +694,17 @@ class TagStorage(object):
             return LocalTag(name, self._modify_local_tag_safe)
 
     def vivify_tags(self, tags):
+        has_cloud_setup = bool(self._cloud_tags_server)
+
         for tag in tags:
-            tag._request_modify = self._modify_cloud_tag_safe if tag.IsCloud() else self._modify_local_tag_safe
+            if tag.IsCloud():
+                if not has_cloud_setup:
+                    raise RuntimeError("Cloud tags in backup, but no setup was found in config")
+                modify = self._modify_cloud_tag_safe
+            else:
+                modify = self._modify_local_tag_safe
+
+            tag._request_modify = modify
 
     #def _RawTagAsItMustBe(self, name): # XXX See tofileOldItems and ConnectionManager.register_share
         #if not name:

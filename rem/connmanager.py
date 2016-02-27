@@ -376,11 +376,7 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
             )
 
     def RegisterTagEvent(self, tag, event, message=None):
-        if not self.alive:
-            return
         if not isinstance(tag, TagBase):
-            #logging.error("%s is not Tag class instance", tag.GetName())
-            #return
             raise RuntimeError("%s is not Tag class instance", tag.GetName())
         if tag.IsRemote():
             return

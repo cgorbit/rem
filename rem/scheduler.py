@@ -96,8 +96,6 @@ class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
         return {}
 
 class QueueList(object):
-    __slots__ = ['__list', '__exists']
-
     def __init__(self):
         self.__list = deque()
         self.__exists = set()

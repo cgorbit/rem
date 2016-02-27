@@ -130,6 +130,7 @@ class T08(unittest.TestCase):
             path = os.path.join("packets", pck.id)
             self.assertFalse(os.path.isdir(path))
         self.connector.Tag(tag).Reset()
+        self.assertEqual(WaitForExecution(pckInfo, ("SUSPENDED",)), "SUSPENDED")
         self.connector.Tag(tag).Set()
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
         pckInfo.Delete()

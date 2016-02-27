@@ -50,8 +50,10 @@ def bind1st(f, arg):
 def CreateScheduler(context, canBeClear=False, restorer=None):
     sched = Scheduler(context)
     wasRestoreTry = False
+
     if restorer:
         restorer = bind1st(restorer, sched)
+
     if os.path.isdir(context.backup_directory):
         for name in sorted(os.listdir(context.backup_directory), reverse=True):
             if sched.CheckBackupFilename(name):
@@ -62,9 +64,16 @@ def CreateScheduler(context, canBeClear=False, restorer=None):
                 except Exception, e:
                     logging.exception("can't restore from file \"%s\" : %s", backupFile, e)
                     wasRestoreTry = True
+
+                # May fail on all backups for the same reason, but backup loading
+                # has side-effects on file system, so try only last
+                break
+
     if wasRestoreTry and not canBeClear:
         raise RuntimeError("can't restore from backup")
+
     sched.tagRef.Restore(0)
+
     return sched
 
 
