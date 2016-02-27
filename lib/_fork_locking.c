@@ -31,7 +31,7 @@ typedef unsigned char bool;
 
 #define NO_TIMEOUT -1
 
-#define DEBUG_FORK_LOCKS 1
+#define DEBUG_FORK_LOCKS 0
 
 #if DEBUG_FORK_LOCKS
 extern void fld_write_debug(const char* str, size_t len);
@@ -57,7 +57,7 @@ enum {
     FS_FORKING,
 };
 
-static const char* FORK_STATE_NAME[] = {
+static const char* fork_state_name[] = {
     "NONE",
     "ACQUIRING",
     "LOCKS_PARTIALLY_DISABLED",
@@ -72,7 +72,7 @@ static pthread_mutex_t lock;
 static pthread_cond_t all_locks_released;
 static pthread_cond_t fork_state_changed;
 
-static size_t FORK_FRIENDLY_ACQUIRE_TIMEOUT = NO_TIMEOUT;
+static size_t fork_friendly_acquire_timeout = NO_TIMEOUT;
 
 
 static inline void
@@ -121,7 +121,7 @@ _acquire_fork(void)
 
     fork_state = FS_ACQUIRING;
 
-    _wait_for(&lock, &all_locks_released, &locked_thread_count, 0, FORK_FRIENDLY_ACQUIRE_TIMEOUT);
+    _wait_for(&lock, &all_locks_released, &locked_thread_count, 0, fork_friendly_acquire_timeout);
 
     if (locked_thread_count) {
         fork_state = FS_LOCKS_PARTIALLY_DISABLED;
@@ -263,7 +263,7 @@ set_fork_friendly_acquire_timeout(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    FORK_FRIENDLY_ACQUIRE_TIMEOUT = timeout;
+    fork_friendly_acquire_timeout = timeout;
     /*Py_CLEAR(timeout);*/
 
     Py_RETURN_NONE;
@@ -287,7 +287,7 @@ static PyObject *
 get_fork_state(PyObject *self)
 {
     (void)self;
-    return PyString_FromString(FORK_STATE_NAME[fork_state]);
+    return PyString_FromString(fork_state_name[fork_state]);
 }
 
 #if DEBUG_FORK_LOCKS
