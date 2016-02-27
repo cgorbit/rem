@@ -459,7 +459,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def _change_state(self, state):
         with self.lock:
             if state == self.state:
-                logging.warning("packet %s useless state change to current %s" % (self.id, state))
+                #logging.warning("packet %s useless state change to current %s" % (self.id, state))
                 return
 
             assert self._can_change_state(state), \
