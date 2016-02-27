@@ -72,7 +72,7 @@ static pthread_mutex_t lock;
 static pthread_cond_t all_locks_released;
 static pthread_cond_t fork_state_changed;
 
-static size_t fork_friendly_acquire_timeout = NO_TIMEOUT;
+static int fork_friendly_acquire_timeout = NO_TIMEOUT;
 
 
 static inline void
@@ -250,21 +250,41 @@ static PyObject *
 set_fork_friendly_acquire_timeout(PyObject *self, PyObject *args)
 {
     (void)self;
-    /*PyObject *timeout = NULL;*/
-    int timeout = NO_TIMEOUT;
 
-    if (!PyArg_ParseTuple(args, "i:set_fork_friendly_acquire_timeout", &timeout)) {
-        return NULL;
+    if (PySequence_Size(args) == 0) {
+        if (fork_friendly_acquire_timeout == NO_TIMEOUT) {
+            Py_RETURN_NONE;
+        }
+        else {
+            return PyInt_FromLong(fork_friendly_acquire_timeout);
+        }
     }
 
-    if (timeout < -1) {
-        PyErr_SetString(PyExc_RuntimeError, "Timeout must be None or greater or equal 0");
-        /*Py_CLEAR(timeout);*/
-        return NULL;
+    int timeout = NO_TIMEOUT;
+
+    {
+        if (PySequence_Size(args) != 1) {
+            PyErr_SetString(PyExc_TypeError, "Takes 0 or 1 argument");
+            return NULL;
+        }
+
+        PyObject *arg = PySequence_GetItem(args, 0);
+        const bool is_none = arg == Py_None;
+        Py_XDECREF(arg);
+
+        if (!is_none) {
+            if (!PyArg_ParseTuple(args, "i:set_fork_friendly_acquire_timeout", &timeout)) {
+                return NULL;
+            }
+
+            if (timeout < 0) {
+                PyErr_SetString(PyExc_TypeError, "Non-negative value expected");
+                return NULL;
+            }
+        }
     }
 
     fork_friendly_acquire_timeout = timeout;
-    /*Py_CLEAR(timeout);*/
 
     Py_RETURN_NONE;
 }
@@ -273,14 +293,14 @@ static PyObject *
 get_locked_thread_count(PyObject *self)
 {
     (void)self;
-    return PyInt_FromLong(locked_thread_count);
+    return PyInt_FromSize_t(locked_thread_count);
 }
 
 static PyObject *
 get_thread_lock_count(PyObject *self)
 {
     (void)self;
-    return PyInt_FromLong(thread_lock_count);
+    return PyInt_FromSize_t(thread_lock_count);
 }
 
 static PyObject *
