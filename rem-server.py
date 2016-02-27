@@ -403,27 +403,6 @@ def get_backupable_state():
 def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
 
-@traced_rpc_method("warning")
-def get_acquiring():
-    e = rem.common.JsonEncoder()
-    return e.encode(rem.common._ACQUIRING)
-
-@traced_rpc_method("warning")
-def test_raise(cond, wrap):
-    if not cond:
-        e = DuplicatePackageNameException('packet-name', '_context.network_name')
-        raise as_rpc_user_error(wrap, e)
-
-import rem.fork_locking as fork_locking
-@traced_rpc_method("warning")
-def acquire_fork():
-    t0 = time.time()
-    fork_locking.acquire_fork()
-    return time.time() - t0
-@traced_rpc_method("warning")
-def release_fork():
-    fork_locking.release_fork()
-
 class ApiServer(object):
     def __init__(self, port, poolsize, scheduler, allow_backup_method=False, readonly=False):
         self.scheduler = scheduler
@@ -489,11 +468,6 @@ class ApiServer(object):
             unset_tag,
             update_tags,
         ]
-
-        funcs.append(get_acquiring) # XXX
-        funcs.append(test_raise) # XXX
-        funcs.append(acquire_fork) # XXX
-        funcs.append(release_fork) # XXX
 
         if self.allow_backup_method:
             funcs.append(do_backup)
