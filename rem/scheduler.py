@@ -339,7 +339,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         start_time = time.time()
 
-        self.tagRef.tag_logger.Rotate(start_time)
+        self.tagRef._journal.Rotate(start_time)
 
         if not self.backupable and not force:
             logging.warning("REM is currently not in backupable state; change it back to backupable as soon as possible")
@@ -370,7 +370,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         for filename in backupFiles[self.backupCount:] + unsuccessfulBackupFiles:
             os.unlink(os.path.join(self.backupDirectory, filename))
 
-        self.tagRef.tag_logger.Clear(start_time - self.context.journal_lifetime)
+        self.tagRef._journal.Clear(start_time - self.context.journal_lifetime)
 
     def SuspendBackups(self):
         self.backupable = False

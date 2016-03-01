@@ -39,6 +39,14 @@ class ResetTagEvent(TagEvent, Unpickable(message=str)):
     def DoRedo(self, tag):
         tag.Reset(self.message)
 
+class CloudRequestStart(object):
+    def __init__(self, id, update):
+        self.id = id
+        self.update = update
+
+class CloudRequestFinish(object):
+    def __init__(self, id):
+        self.id = id
 
 class JournalDB(object):
     def __init__(self, filename):
@@ -132,7 +140,13 @@ class TagLogger(object):
             self._queue.append(ev)
             self._queue_not_empty.notify()
 
-    def LogEvent(self, tag, ev, msg=None):
+    def log_cloud_request_start(self, id, update):
+        self._LogEvent(CloudRequestStart(id, update))
+
+    def log_cloud_request_finish(self, id):
+        self._LogEvent(CloudRequestFinish(id))
+
+    def LogLocalTagEvent(self, tag, ev, msg=None):
         args = ()
 
         if ev == ETagEvent.Set:
@@ -148,16 +162,7 @@ class TagLogger(object):
 
         self._LogEvent(cls(tag, *args))
 
-    #def OnDone(self, tag):
-        #self.LogEvent(tag, ETagEvent.Set)
-
-    #def OnUndone(self, tag):
-        #self.LogEvent(tag, ETagEvent.Unset)
-
-    #def OnReset(self, (tag, message)):
-        #self.LogEvent(tag, ETagEvent.Reset, message)
-
-    def Restore(self, timestamp, tagRef):
+    def Restore(self, timestamp, tagRef, cloud_requester_state):
         logging.debug("TagLogger.Restore(%d)", timestamp)
         dirname, db_filename = os.path.split(self.db_filename)
 
@@ -180,7 +185,14 @@ class TagLogger(object):
                 for k, v in f.items():
                     try:
                         obj = cPickle.loads(v)
-                        obj.Redo(tagRef)
+
+                        if isinstance(obj, CloudRequestStart):
+                            cloud_requester_state.start_request(obj.id, obj.update)
+                        elif isinstance(obj, CloudRequestFinish):
+                            cloud_requester_state.finish_request(obj.id)
+                        else:
+                            obj.Redo(tagRef)
+
                     except Exception, e:
                         logging.exception("occurred in TagLogger while restoring from a journal : %s", e)
                 f.close()
@@ -208,13 +220,3 @@ class TagLogger(object):
                 file_time = int(filename.split("-")[-1])
                 if file_time <= final_time:
                     os.remove(os.path.join(dirname, filename))
-
-#class TagLogger(object):
-    #def __init__(self):
-        #self.__impl = TagLoggerImpl()
-
-        #for name in ['Clear', 'Restore', 'Rotate', 'LogEvent', 'UpdateContext', 'Stop']:
-            #setattr(self, name, getattr(self.__impl, name))
-
-    #def __del__(self):
-        #self.__impl.Stop()

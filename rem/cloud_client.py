@@ -17,8 +17,6 @@ from future import Promise
 from profile import ProfiledThread
 import cloud_tags_pb2
 
-logging.getLogger().setLevel(logging.DEBUG)
-
 READY_ACK_FUTURE = Promise().set(None).to_future()
 READY_EMPTY_DICT_FUTURE = Promise().set({}).to_future()
 
@@ -261,7 +259,12 @@ class Client(object):
 
         with self._lock:
             for task in self._running.itervalues():
+
+                # XXX TODO REMOVE
+                logging.debug('cloud_client.promise.set(exc)')
+
                 task.promise.set(exc=exc)
+
             self._running.clear()
             #self._running_empty.notify_all()
 

@@ -78,6 +78,9 @@ class _FutureState(object):
             raise NotReadyError()
         return (self._val, self._exc)
 
+    def get_exception(self, timeout=None):
+        return self.get_raw(timeout)[1]
+
     def get(self, timeout=None):
         if not self.wait(timeout):
             raise NotReadyError()

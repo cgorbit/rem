@@ -191,41 +191,126 @@ class TagWrapper(object):
 
 
 class SafeCloud(object):
-    def __init__(self, cloud, journal):
-        self._next_id = 1
+    class EditableState(object):
+        def __init__(self, updates):
+            by_id = {}
+            for idx, (id, update) in enumerate(updates):
+                by_id[id] = (idx, update)
+
+            self._next_idx = len(updates)
+            self._by_id = by_id
+
+        # ATW Теоретически может возникнуть ситуация, когда нет полного
+        # журнала от момента откладывания бэкапа с которого мы хотим загрузиться:
+        # 1. нам пришлось отбросить свежие бэкапы (по каким-то причинам)
+        # 2. нет в наличии всех частей журнала от момента откладывания
+        #    выбранного нами бэкапа прошло
+
+        def start_request(self, id, update):
+            logging.debug('EditableState.start_request(%s, %s)' % (id, update)) # TODO REMOVE
+            if id not in self._by_id:
+                self._by_id[id] = (self._next_idx, update)
+                self._next_idx += 1
+
+        def finish_request(self, id):
+            logging.debug('EditableState.finish_request(%s)' % id) # TODO REMOVE
+            self._by_id.pop(id, None)
+
+        def get_result(self):
+            return [
+                (id, update)
+                    for id, (idx, update) in \
+                        sorted(self._by_id.iteritems(), key=lambda (id, (idx, update)): idx)
+            ]
+
+
+    def __init__(self, cloud, journal, prev_state):
         self._cloud = cloud
         self._journal = journal
+        self._uid_epoch = time.time() # FIXME (time.time(), os.getpid())
+        self._next_id = 1
+        self._next_idx = 0
         self._lock = fork_locking.Lock()
+        self._running_empty = fork_locking.Condition(self._lock)
         self._running = {}
+        self._failed = []
 
-    # TODO Backup state
-    # TODO Write journal
+        for id, update in prev_state:
+            self._update(update, id=id)
 
     def _alloc_id(self):
-        ret = self._next_id
+        id = self._next_id
         self._next_id += 1
-        return ret
+        return (self._uid_epoch, id)
 
-    def _on_done(self, id, f):
+    def get_state(self):
         with self._lock:
-            if f.is_success():
-                self._running.pop(id)
+            items = [(idx, (id, update)) for id, (idx, update) in self._running.iteritems()]
+            items.extend(self._failed)
+            return [(id, update) for idx, (id, update) in sorted(items, key=lambda (idx, _): idx)]
+
+    def _dump_state(self):
+        with self._lock:
+            logging.debug('SafeCloud DUMP\n' \
+                + repr({
+                    '_running': self._running,
+                    '_failed':  self._failed
+                }))
+
+    def wait_running_empty(self):
+        with self._lock:
+            if not self._running:
                 return
-            else:
-                pass # TODO
+            self._running_empty.wait()
 
-        logging.warning("Task #%d failed %s" % (id, self._running[id]))
-
-    def update(self, update):
+    def _on_done(self, id, result):
         with self._lock:
-            logging.debug("SafeCloud.update(%s)" % str(update))
+            # XXX REMOVE
+            logging.debug('SafeCloud._on_done(id: %s, result: %s)' % (id, result))
 
-            id = self._alloc_id()
+            idx, update = self._running.pop(id)
+
+            if result.is_success():
+                self._journal.log_cloud_request_finish(id)
+            else:
+                if not self._cloud.is_stopped(): # not possible?
+                    logging.error('cloud client not stopped, but update failed: %s' % str(update))
+
+                self._failed.append((idx, (id, update)))
+
+            # XXX REMOVE
+                logging.debug('SafeCloud._failed.append((idx: %s, id: %s, update: %s))' \
+                    % (idx, id, update))
+
+            if not self._running:
+                self._running_empty.notify_all()
+
+    def _update(self, update, id=None):
+        with self._lock:
+            #logging.debug("SafeCloud.update(%s)" % str(update))
+
+            idx = self._next_idx
+            self._next_idx += 1
+
+            id = id or self._alloc_id()
+
+        # XXX REMOVE
+            logging.debug("SafeCloud.update(idx: %s, id: %s, update: %s)" % (idx, id, update))
+
+            self._journal.log_cloud_request_start(id, update)
+
             done = self._cloud.serial_update(update)
-            self._running[id] = update
+
+        # XXX TODO REMOVE
+            assert id not in self._running
+
+            self._running[id] = (idx, update)
 
         # This call may lead to immediate _on_done in current thread
         done.subscribe(lambda f: self._on_done(id, f))
+
+    def update(self, update):
+        self._update(update)
 
 
 class TagReprModifier(object):
@@ -404,6 +489,8 @@ class TagsMasks(object):
         ret.regexps = []
         return ret
 
+import traceback
+
 class TagStorage(object):
     _CLOUD_TAG_REPR_UPDATE_WAITING_TTL = 7200 # Hack for hostA:RemoteTag -> hostB:CloudTag
 
@@ -415,20 +502,26 @@ class TagStorage(object):
         self.db_file_opened = False
         self._local_tag_modify_lock = threading.Lock()
         self._repr_modifier = TagReprModifier() # TODO pool_size from rem.cfg
-        self.tag_logger = TagLogger()
+        self._journal = TagLogger()
         self._cloud = None
         self._safe_cloud = None
+        self._prev_safe_cloud_state = []
         self._match_cloud_tag = TagsMasks.get_empty_matcher()
         self._masks_reload_thread = None
         self._masks_should_stop = threading.Event()
         self._last_tag_mask_error_report_time = 0
         if rhs:
-            if isinstance(rhs, dict):
+            #logging.debug(("TagStorage.__init__(rhs{%s})\n" % type(rhs)) + ''.join(traceback.format_stack()))
+            logging.debug('rhs = %s' % rhs.__dict__)
+
+            if isinstance(rhs, dict): # FIXME __reduce__ works like this?
                 self.inmem_items = rhs
+
             elif isinstance(rhs, TagStorage):
                 self.inmem_items = rhs.inmem_items
-                self.infile_items = rhs.infile_items
-                self.db_file = rhs.db_file
+                self._prev_safe_cloud_state = rhs._prev_safe_cloud_state
+                #self.infile_items = rhs.infile_items
+                #self.db_file = rhs.db_file
 
     def list_cloud_tags_masks(self):
         return self._match_cloud_tag.regexps
@@ -448,7 +541,7 @@ class TagStorage(object):
         return TagsMasks.load(self._cloud_tags_masks)
 
     def Start(self):
-        self.tag_logger.Start()
+        self._journal.Start()
         logging.debug("after_journal_start")
 
         self._repr_modifier.Start()
@@ -461,7 +554,9 @@ class TagStorage(object):
             logging.debug("after_masks_reload_thread_start")
 
             self._cloud = cloud_client.getc(addr=self._cloud_tags_server, on_event=self._on_cloud_journal_event)
-            self._safe_cloud = SafeCloud(self._cloud, self.tag_logger)
+
+            self._safe_cloud = SafeCloud(self._cloud, self._journal, self._prev_safe_cloud_state)
+            self._prev_safe_cloud_state = None
             logging.debug("after_safe_cloud_start")
 
             self._subscribe_all()
@@ -536,20 +631,32 @@ class TagStorage(object):
     def Stop(self):
         # TODO Kosher
         if self._cloud:
-            self._cloud.stop(timeout=10)
+            self._cloud.stop(timeout=10) # TODO Don't wait at all, if we disconnected for a long time
             self._cloud.stop(wait=False)
+
+            # actually this must be guaranted by _cloud.stop
+            self._safe_cloud.wait_running_empty()
 
         if self._masks_reload_thread:
             self._masks_should_stop.set()
             self._masks_reload_thread.join()
 
-        #self._safe_cloud = None
-
         self._repr_modifier.Stop()
-        self.tag_logger.Stop()
+        self._journal.Stop()
 
-    def __reduce__(self):
-        return TagStorage, (self.inmem_items.copy(), )
+    def __getstate__(self):
+        # TODO REMOVE
+        logging.debug("TagStorage.__getstate__._prev_safe_cloud_state = %s" \
+            % self._safe_cloud.get_state())
+
+        return {
+            'inmem_items': self.inmem_items.copy(),
+            '_prev_safe_cloud_state': self._safe_cloud.get_state(),
+        }
+
+    #def __setstate__(self, sdict):
+        #self.inmem_items = sdict['inmem_items']
+        #self._prev_safe_cloud_state = sdict['_prev_safe_cloud_state']
 
     def _lookup_tags(self, tags):
         return self.__lookup_tags(tags, False)
@@ -655,7 +762,7 @@ class TagStorage(object):
 
         with self._local_tag_modify_lock: # FIXME
             for update in updates:
-                self.tag_logger.LogEvent(*update)
+                self._journal.LogLocalTagEvent(*update)
                 done.append(self._repr_modifier.add(update, with_future))
 
         if not with_future:
@@ -669,6 +776,21 @@ class TagStorage(object):
     def IsRemoteTagName(self, tagname):
         return ':' in tagname
 
+    def AcquireTagNEW(self, tagname):
+        raw = self._RawTag(tagname)
+
+        with self.lock:
+            ret = self.inmem_items.get(tagname)
+
+            if not ret:
+                self.inmem_items[tagname] = raw
+                ret = raw
+
+                if ret.IsCloud() and self._cloud: # FIXME "and self._cloud" is bullshit?
+                    self._cloud.subscribe(tagname)
+
+        return TagWrapper(ret)
+
     def AcquireTag(self, tagname):
         raw = self._RawTag(tagname)
 
@@ -676,7 +798,7 @@ class TagStorage(object):
             ret = self.inmem_items.setdefault(tagname, raw)
 
             if ret is raw and ret.IsCloud() and self._cloud:
-                logging.debug('AcquireTag.subscribe(%s)' % tagname)
+                logging.debug('AcquireTag.subscribe(%s)' % tagname) # XXX TODO REMOVE
                 self._cloud.subscribe(tagname)
 
         return TagWrapper(ret)
@@ -768,7 +890,7 @@ class TagStorage(object):
         self.db_file = context.tags_db_file
         self.DBConnect()
         self.conn_manager = context.Scheduler.connManager
-        self.tag_logger.UpdateContext(context)
+        self._journal.UpdateContext(context)
         self._repr_modifier.UpdateContext(context)
 
         if context.cloud_tags_server and not context.cloud_tags_masks:
@@ -782,7 +904,11 @@ class TagStorage(object):
             self._cloud_tags_masks, self._cloud_tags_server))
 
     def Restore(self, timestamp):
-        self.tag_logger.Restore(timestamp, self)
+        state = SafeCloud.EditableState(self._prev_safe_cloud_state)
+        self._journal.Restore(timestamp, self, state)
+        self._prev_safe_cloud_state = state.get_result()
+        # TODO REMOVE
+        logging.debug('self._prev_safe_cloud_state = EditableState.get_result() = %s' % self._prev_safe_cloud_state)
 
     def ListDependentPackets(self, tag_name):
         return self._RawTag(tag_name).GetListenersIds()
@@ -797,6 +923,7 @@ class TagStorage(object):
             if tag.GetListenersNumber() == 0 \
                 and sys.getrefcount(tag) == 4 \
                 and getattr(tag, '_min_release_time', 0) < now:
+                                # XXX FIXME How to prolongate _min_release_time on "can't connect" _cloud?
 
                 if tag.IsCloud():
                     unsub_tags.add(name)
