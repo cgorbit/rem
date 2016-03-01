@@ -189,6 +189,7 @@ class TagWrapper(object):
             return object.__getattribute__(self, attr)
         return self.inner.__getattribute__(attr)
 
+
 class SafeCloud(object):
     def __init__(self, cloud, journal):
         self._next_id = 1
@@ -225,6 +226,7 @@ class SafeCloud(object):
 
         # This call may lead to immediate _on_done in current thread
         done.subscribe(lambda f: self._on_done(id, f))
+
 
 class TagReprModifier(object):
     _STOP_INDICATOR = object()
@@ -296,6 +298,7 @@ class TagReprModifier(object):
 
             if promise:
                 promise.set()
+
 
 class TagsMasks(object):
     @classmethod
@@ -637,8 +640,6 @@ class TagStorage(object):
         cloud_done = self._cloud.update(cloud_updates) if cloud_updates \
             else None
 
-        #futures = filter(None, [local_done, cloud_done])
-        #return WaitFutures(futures) if len(futures) > 1 else futures[0]
         if local_done is None:
             return cloud_done
         elif cloud_done is None:
@@ -674,7 +675,7 @@ class TagStorage(object):
         with self.lock:
             ret = self.inmem_items.setdefault(tagname, raw)
 
-            if ret is raw and ret.IsCloud() and self._cloud: # FIXME "and self._cloud" is bullshit?
+            if ret is raw and ret.IsCloud() and self._cloud:
                 logging.debug('AcquireTag.subscribe(%s)' % tagname)
                 self._cloud.subscribe(tagname)
 
@@ -713,29 +714,6 @@ class TagStorage(object):
                 modify = self._modify_local_tag_safe
 
             tag._request_modify = modify
-
-    #def _RawTagAsItMustBe(self, name): # XXX See tofileOldItems and ConnectionManager.register_share
-        #if not name:
-            #raise ValueError("False tag name")
-
-        #tag = self.inmem_items.get(name)
-        #if tag:
-            #return tag
-
-        #if self.IsCloudTagName(name):
-            #return CloudTag(name, self._modify_cloud_tag_safe)
-
-        #if not self.db_file_opened:
-            #self.DBConnect()
-
-        #serialized = self.infile_items.get(name, None)
-        #if serialized:
-            #tag = cPickle.loads(serialized)
-            #self.vivify_tags([tag])
-            #return tag
-
-        #cls = RemoteTag if self.IsRemoteTagName(name) else LocalTag
-        #return cls(name, self._modify_local_tag_safe)
 
     def _GetTagLocalState(self, name):
         return self._RawTag(name, dont_create=True)
@@ -889,6 +867,7 @@ class PacketNamesStorage(ICallbackAcceptor):
 
     def OnPacketReinitRequest(self, pck):
         pass
+
 
 class MessageStorage(object):
     pass
