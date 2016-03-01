@@ -65,12 +65,11 @@ class JobPacketImpl(object):
         self.waitTags = set(tag.GetFullname() for tag in wait_tags if not tag.IsLocallySet())
 
     def _process_tag_set_event(self, tag):
-        with self.lock:
-            tagname = tag.GetFullname()
-            if tagname in self.waitTags:
-                self.waitTags.remove(tagname)
-                if not self.waitTags and self.state == PacketState.SUSPENDED:
-                    self._resume()
+        tagname = tag.GetFullname()
+        if tagname in self.waitTags:
+            self.waitTags.remove(tagname)
+            if not self.waitTags and self.state == PacketState.SUSPENDED:
+                self._resume()
 
     def VivifyDoneTagsIfNeed(self, tagStorage):
         with self.lock:
@@ -171,7 +170,7 @@ class JobPacketImpl(object):
             self.directory = os.path.join(context.packets_directory, self.id)
             os.makedirs(self.directory)
 
-        while True:
+        while not self.id:
             directory = tempfile.mktemp(dir=context.packets_directory, prefix="pck-")
             id = os.path.split(directory)[-1]
             if not (context.Scheduler.GetPacket(id) or os.path.isdir(directory)): # race
@@ -184,7 +183,6 @@ class JobPacketImpl(object):
                 else:
                     self.directory = directory
                     self.id = id
-                    break
 
         osspec.set_common_readable(self.directory)
         osspec.set_common_executable(self.directory)
@@ -533,21 +531,20 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 or self.state == PacketState.HISTORIED:
             if self.directory:
                 self._release_place()
-            return
 
         # Can exists only in tempStorage or in backups wo locks+backup_in_child
-        if self.state == PacketState.CREATED:
+        elif self.state == PacketState.CREATED:
             raise RuntimeError("Can't restore packets in CREATED state")
 
-        if self.state == PacketState.NONINITIALIZED:
+        elif self.state == PacketState.NONINITIALIZED:
             self._recover_noninitialized(ctx)
 
         if self.directory:
             self._try_recover_directory(ctx)
-
-        elif self.state != PacketState.SUCCESSFULL:
-            # FIXME try: _create_place
-            raise RuntimeError("No .directory set for packet in %s state" % self.state)
+        else:
+            directory = os.path.join(ctx.packets_directory, self.id)
+            if os.path.isdir(directory):
+                shutil.rmtree(directory, onerror=None)
 
         self._init_job_deps_graph()
         self._resume(resume_workable=True, silent_noop=True) # TODO write tests
@@ -672,7 +669,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def OnDone(self, ref):
         if isinstance(ref, TagBase):
-            self._process_tag_set_event(ref)
+            with self.lock:
+                if self.state != PacketState.HISTORIED:
+                    self._process_tag_set_event(ref)
 
     def rpc_add_job(self, shell, parents, pipe_parents, set_tag, tries,
             max_err_len, retry_delay, pipe_fail, description, notify_timeout,
@@ -1008,6 +1007,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def _on_tag_reset(self, ref, comment):
         with self.lock:
+            if self.state == PacketState.HISTORIED:
+                return
+
             self.waitTags.add(ref.GetFullname())
 
             if not self.isResetable:

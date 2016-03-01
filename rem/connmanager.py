@@ -57,11 +57,7 @@ class ClientInfo(Unpickable(events=Deque,
                             active=(bool, True))):
     MAX_TAGS_BULK = 100
     PENALTY_FACTOR = 6
-
-    # TODO Use finite timeout after async events will be implemented here
-    # ETagEvent.Reset may be slow (specially on perun)
-    #SOCKET_TIMEOUT = 60.0
-    SOCKET_TIMEOUT = socket._GLOBAL_DEFAULT_TIMEOUT
+    SOCKET_TIMEOUT = 120.0
 
     def __init__(self, *args, **kws):
         getattr(super(ClientInfo, self), "__init__")(*args, **kws)
@@ -341,14 +337,17 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
             return
 
         self.ReloadConfig()
+        logging.debug("after_reload_config")
 
         for client in self.topologyInfo.servers.values():
             if client.active and client.name != self.network_name:
                 client.TryInitializePeersVersions(self.network_name)
+        logging.debug("after_clients_versions_init")
 
         self.alive = True
         self.InitXMLRPCServer()
         ProfiledThread(target=self.ServerLoop, name_prefix='ConnManager').start()
+        logging.debug("after_connection_manager_loop_start")
 
         for client in self.topologyInfo.servers.values():
             self.scheduler.ScheduleTaskT(0, self.SendData, client, skip_logging=True)

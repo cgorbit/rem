@@ -446,16 +446,23 @@ class TagStorage(object):
 
     def Start(self):
         self.tag_logger.Start()
+        logging.debug("after_journal_start")
+
         self._repr_modifier.Start()
+        logging.debug("after_repr_modifier_start")
 
         if self._cloud_tags_server:
             self._masks_reload_thread = ProfiledThread(
                 target=self._masks_reload_loop, name_prefix='TagsMasksReload')
             self._masks_reload_thread.start()
+            logging.debug("after_masks_reload_thread_start")
 
             self._cloud = cloud_client.getc(addr=self._cloud_tags_server, on_event=self._on_cloud_journal_event)
             self._safe_cloud = SafeCloud(self._cloud, self.tag_logger)
+            logging.debug("after_safe_cloud_start")
+
             self._subscribe_all()
+            logging.debug("after_subscribe_all")
 
     def _subscribe_all(self):
         with self.lock:
@@ -485,10 +492,11 @@ class TagStorage(object):
             logging.error('tag %s is not cloud tag in inmem_items but receives event from cloud' % ev.tag_name)
             return
 
-        # TODO user flag in cloud_client.subscribe() that will passed back _on_cloud_journal_event
         if tag.version >= ev.version:
-            logging.warning('local version (%d) >= journal version (%d) for tag %s' \
-                % (tag.version, ev.version, ev.tag_name))
+            # TODO warn even on equal versions, but not for initial _subscribe_all
+            if tag.version > ev.version:
+                logging.warning('local version (%d) > journal version (%d) for tag %s' \
+                    % (tag.version, ev.version, ev.tag_name))
             return
 
         def add_event(event, version, msg=None):
@@ -673,7 +681,7 @@ class TagStorage(object):
         return TagWrapper(ret)
 
     def IsCloudTagName(self, name):
-        if self.IsRemoteTagName(name): # fuck
+        if self.IsRemoteTagName(name):
             return False
 
         try:

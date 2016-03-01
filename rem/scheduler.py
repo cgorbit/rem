@@ -583,11 +583,17 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Start(self):
         self._mailer = Mailer(self.context.mailer_thread_count)
+        logging.debug("after_mailer_start")
+
         self.tagRef.Start()
+        logging.debug("after_tag_storage_start")
+
         with self.lock:
             self.alive = True
             self.HasScheduledTask.notify_all()
+
         self.connManager.Start()
+        logging.debug("after_connection_manager_start")
 
     def Stop1(self):
         self.connManager.Stop()

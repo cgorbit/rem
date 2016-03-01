@@ -16,36 +16,13 @@ from google.protobuf.internal.encoder import _EncodeVarint as EncodeVarint
 
 #from rem.future import Promise
 from future import Promise
+from profile import ProfiledThread
 import cloud_tags_pb2
 
 logging.getLogger().setLevel(logging.DEBUG)
 
 READY_ACK_FUTURE = Promise().set(None).to_future()
 READY_EMPTY_DICT_FUTURE = Promise().set({}).to_future()
-
-try:
-    import prctl
-    def set_thread_name(name):
-        prctl.set_name(name)
-except ImportError:
-    def set_thread_name(name):
-        pass
-
-class NamedThread(threading.Thread):
-    def __init__(self, *args, **kwargs):
-        name_prefix = kwargs.pop('name_prefix', None)
-        if name_prefix is not None:
-            kwargs['name'] = name_prefix + threading._newname('-%d')
-
-        threading.Thread.__init__(self, *args, **kwargs)
-
-    def _set_thread_name(self):
-        set_thread_name('tags-' + self.name)
-
-    def run(self):
-        self._set_thread_name()
-        threading.Thread.run(self)
-
 
 class ServiceStopped(RuntimeError):
     pass
@@ -221,7 +198,7 @@ class Client(object):
         #self._connection_state_changed = threading.Condition(self._lock)
         #self._should_stop_cond = threading.Condition(self._lock)
 
-        self._connect_thread = NamedThread(target=self._connect_loop, name_prefix='Connect')
+        self._connect_thread = ProfiledThread(target=self._connect_loop, name_prefix='CldTg-Connect')
         self._connect_thread.start()
 
     def __repr__(self):
@@ -267,8 +244,7 @@ class Client(object):
                 self._last_connect_time = time.time()
                 return conn
             except Exception as e:
-                logging.debug("Failed to connect: %s" % e)
-                #logging.exception("Failed to connect")
+                logging.warning("Failed to connect: %s" % e)
 
             timeout = min(timeout * 2, 10.0)
 
@@ -324,8 +300,8 @@ class Client(object):
                 self._io._connected = True
                 #self._connection_state_changed.notify_all()
 
-            read_thread = NamedThread(target=self._read_loop, name_prefix='ReadLoop')
-            write_thread = NamedThread(target=self._write_loop, name_prefix='WriteLoop')
+            read_thread = ProfiledThread(target=self._read_loop, name_prefix='CldTg-ReadLoop')
+            write_thread = ProfiledThread(target=self._write_loop, name_prefix='CldTg-WriteLoop')
 
             read_thread.start()
             write_thread.start()

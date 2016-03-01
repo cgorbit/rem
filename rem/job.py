@@ -10,7 +10,6 @@ from common import FuncRunner, Unpickable, safeint, nullobject, zeroint, get_Non
 import osspec
 import packet
 import constants
-from rem.profile import ProfiledThread
 import process_proxy
 import pgrpguard
 

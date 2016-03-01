@@ -620,17 +620,23 @@ class RemDaemon(object):
 
     def _start_workers(self):
         self.scheduler.Start()
+        logging.debug("rem-server\tafter_scheduler_start")
+
         self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self.scheduler.poolSize)]
+
         self.timeWorker = TimeTicker()
         self.timeWorker.AddCallbackListener(self.scheduler.schedWatcher)
+
         for worker in self.regWorkers + [self.timeWorker]:
             worker.start()
+        logging.debug("rem-server\tafter_workers_start")
 
     def _start(self):
         self._start_workers()
 
         for server in self.api_servers:
             server.start()
+        logging.debug("rem-server\tafter_rpc_workers_start")
 
         self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")
         self._backups_thread.start()

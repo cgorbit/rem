@@ -42,14 +42,22 @@ class CallbackHolder(Unpickable(callbacks=weakref.WeakKeyDictionary,
         if obj in self.nonpersistent_callbacks:
             del self.nonpersistent_callbacks[obj]
 
-    def FireEvent(self, event, reference=None):
+    def FireEvent(self, event, reference=None, safe=False):
         bad_listeners = set()
-        for obj in itertools.chain(self.callbacks.keyrefs(), self.nonpersistent_callbacks.keyrefs()):
-            if isinstance(obj(), ICallbackAcceptor):
-                obj().AcceptCallback(reference or self, event)
+
+        for obj_ref in itertools.chain(self.callbacks.keyrefs(), self.nonpersistent_callbacks.keyrefs()):
+            obj = obj_ref()
+            if isinstance(obj, ICallbackAcceptor):
+                try:
+                    obj.AcceptCallback(reference or self, event)
+                except:
+                    if not safe:
+                        raise
+                    logging.exception("Failed to accept '%s' event for %s" % (event, obj))
             else:
-                logging.warning("callback %r\tincorrect acceptor for %s found: %s", self, event, obj())
-                bad_listeners.add(obj())
+                logging.warning("callback %r\tincorrect acceptor for %s found: %s", self, event, obj)
+                bad_listeners.add(obj)
+
         for obj in bad_listeners:
             self.DropCallbackListener(obj)
 
@@ -69,10 +77,18 @@ class TagBase(CallbackHolder):
         self.done = False
         self._request_modify = modify
 
+    def __repr__(self):
+        return "<%s(name: '%s', state: %s, version: %s) at 0x%x>" % (
+            type(self).__name__,
+            self.GetFullname(),
+            self.done,
+            getattr(self, 'version', None),
+            id(self)
+        )
+
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
         sdict.pop('_request_modify')
-        #sdict.pop('_min_release_time', None) # FIXME not here
         return sdict
 
     def IsLocallySet(self):
@@ -81,17 +97,17 @@ class TagBase(CallbackHolder):
     def _Set(self):
         logging.debug("tag %s\tset", self.GetFullname())
         self.done = True
-        self.FireEvent("done")
+        self.FireEvent("done", safe=True)
 
     def _Unset(self):
         logging.debug("tag %s\tunset", self.GetFullname())
         self.done = False
-        self.FireEvent("undone")
+        self.FireEvent("undone", safe=True)
 
     def _Reset(self, msg):
         logging.debug("tag %s\treset", self.GetFullname())
         self.done = False
-        self.FireEvent("reset", (self, msg))
+        self.FireEvent("reset", (self, msg), safe=True)
 
     def _ModifyLocalState(self, event, msg=None, version=None):
         if version is not None: # TODO Kosher
