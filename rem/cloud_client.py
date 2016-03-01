@@ -632,7 +632,10 @@ class Client(object):
 
         if type == 'Event':
             for ev in self._ServerMessage.Event(msg):
-                self._on_event(ev)
+                try:
+                    self._on_event(ev)
+                except:
+                    logging.exception("Failed to process journal event")
             return
 
         elif type == 'Bye':
