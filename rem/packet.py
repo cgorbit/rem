@@ -957,13 +957,18 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def _reset(self, suspend, tag_op):
         def update_tags():
-            for tag in self._get_all_done_tags():
-                tag_op(tag)
+            for tag, is_done in self._get_all_done_tags():
+                tag_op(tag, is_done)
 
         # XXX force call to _change_state for packets without jobs
         #if self._clean_state and self.jobs:
             #update_tags()
             #return
+
+        # if not(self.jobs) we will first reset, then set (by _reinit)
+
+        # TODO Test that job_done_indicator are reset
+        update_tags()
 
         self._change_state(PacketState.NONINITIALIZED)
 
@@ -977,8 +982,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
             self._init_job_deps_graph()
 
-        update_tags()
-
         self._reinit(self._get_scheduler_ctx(), suspend)
 
     def _reinit(self, ctx, suspend=False):
@@ -991,15 +994,18 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
     def Reset(self, suspend=False):
         with self.lock:
-            self._reset(suspend, lambda tag: tag.Unset())
+            self._reset(suspend, lambda tag, _: tag.Unset())
 
     def _get_scheduler_ctx(self):
         return PacketCustomLogic.SchedCtx
         #return self._get_scheduler().context
 
     def _get_all_done_tags(self):
-        return self.job_done_indicator.values() + \
-            ([self.done_indicator] if self.done_indicator else [])
+        if self.done_indicator:
+            yield self.done_indicator, self.state == PacketState.SUCCESSFULL
+
+        for job_id, tag in self.job_done_indicator.iteritems():
+            yield tag, job_id in self.done
 
     def OnReset(self, (ref, comment)):
         if isinstance(ref, TagBase):
@@ -1019,7 +1025,23 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 self._send_reset_notification(comment)
                 return
 
-            self._reset(False, lambda tag: tag.Reset(comment))
+            # TODO "is_done and tag.Reset(comment)" is not kosher!
+            # We need reset-if-need logic in cloud_tags_server proxy
+            # and "last_set_version" in /map table (not in journal):
+            #
+            # StartTransaction();
+            # tag = ReadTag("/map");
+            # if (tag.LastSetVersion > tag.LastResetVersion) {
+            #   WriteTagReset("/map", "/journal");
+            #   CommitTransaction();
+            # } else {
+            #   DropTransaction();
+            # }
+            #
+            # FIXME This logic also may be added to local tags
+
+            # Reset or Unset emulates legacy behaviour
+            self._reset(False, lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
 
     def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
         with self.lock:
