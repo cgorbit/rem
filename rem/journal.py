@@ -133,6 +133,9 @@ class TagLogger(object):
             self._queue_not_empty.notify()
 
     def LogEvent(self, tag, ev, msg=None):
+        if self._restoring_mode:
+            return
+
         args = ()
 
         if ev == ETagEvent.Set:
@@ -147,15 +150,6 @@ class TagLogger(object):
             tag = tag.GetFullname()
 
         self._LogEvent(cls(tag, *args))
-
-    #def OnDone(self, tag):
-        #self.LogEvent(tag, ETagEvent.Set)
-
-    #def OnUndone(self, tag):
-        #self.LogEvent(tag, ETagEvent.Unset)
-
-    #def OnReset(self, (tag, message)):
-        #self.LogEvent(tag, ETagEvent.Reset, message)
 
     def Restore(self, timestamp, tagRef):
         logging.debug("TagLogger.Restore(%d)", timestamp)
@@ -208,13 +202,3 @@ class TagLogger(object):
                 file_time = int(filename.split("-")[-1])
                 if file_time <= final_time:
                     os.remove(os.path.join(dirname, filename))
-
-#class TagLogger(object):
-    #def __init__(self):
-        #self.__impl = TagLoggerImpl()
-
-        #for name in ['Clear', 'Restore', 'Rotate', 'LogEvent', 'UpdateContext', 'Stop']:
-            #setattr(self, name, getattr(self.__impl, name))
-
-    #def __del__(self):
-        #self.__impl.Stop()
