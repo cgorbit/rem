@@ -178,7 +178,7 @@ class TagLogger(object):
             result = []
             for filename in os.listdir(dirname):
                 if filename.startswith(db_filename) and filename != db_filename:
-                    file_time = float(filename.split("-")[-1]) # TODO XXX REMOVE
+                    file_time = int(filename.split("-")[-1])
                     if file_time > timestamp:
                         result.append(filename)
             result = sorted(result)
@@ -215,8 +215,7 @@ class TagLogger(object):
                 self._db.close()
 
             if os.path.exists(self.db_filename):
-                new_filename = "%s-%s" % (self.db_filename, timestamp)
-                #new_filename = "%s-%d" % (self.db_filename, timestamp) # TODO XXX REVERT
+                new_filename = "%s-%d" % (self.db_filename, timestamp)
                 os.rename(self.db_filename, new_filename)
 
             self._reopen()
@@ -226,6 +225,6 @@ class TagLogger(object):
         dirname, db_filename = os.path.split(self.db_filename)
         for filename in os.listdir(dirname):
             if filename.startswith(db_filename) and filename != db_filename:
-                file_time = float(filename.split("-")[-1]) # TODO XXX REMOVE
+                file_time = int(filename.split("-")[-1])
                 if file_time <= final_time:
                     os.remove(os.path.join(dirname, filename))
