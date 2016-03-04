@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import sys
-from sys import stderr
 import time
 import socket
 import threading
@@ -14,12 +13,9 @@ import logging
 from google.protobuf.internal.decoder import _DecodeVarint32
 from google.protobuf.internal.encoder import _EncodeVarint as EncodeVarint
 
-#from rem.future import Promise
 from future import Promise
 from profile import ProfiledThread
 import cloud_tags_pb2
-
-logging.getLogger().setLevel(logging.DEBUG)
 
 READY_ACK_FUTURE = Promise().set(None).to_future()
 READY_EMPTY_DICT_FUTURE = Promise().set({}).to_future()
@@ -279,7 +275,7 @@ class Client(object):
 
             self._reconstruct_outgoing()
 
-# FIXME What if exception will throw here? self._broken? _push -> raise and fail futures
+            # FIXME What if exception will throw here? self._broken? _push -> raise and fail futures
 
             io = self._io = self.IO()
 
@@ -310,13 +306,6 @@ class Client(object):
             write_thread.join()
 
     def _reconstruct_outgoing(self):
-        #def get_subscription_tags(msg):
-            #if msg.HasField('Subscribe'):
-                #return set(msg.Subscribe.Tags)
-            #elif msg.HasField('Unsubscribe'):
-                #return set(msg.Unsubscribe.Tags)
-            #return set()
-
         with self._lock:
             self._outgoing = deque(
                 self._running[id]
@@ -331,7 +320,7 @@ class Client(object):
             # XXX For now subscribes for already subscribed tags will not be
             # trigger events in journal
 
-# TODO Global split feature in all _push callers?
+            # FIXME Global split feature in all _push callers?
 
             for tags in split_in_groups(self._subscriptions, self.MESSAGE_MAX_ITEM_COUNT):
                 self._do_push(
@@ -355,7 +344,6 @@ class Client(object):
 
     def debug_server(self):
         msg = cloud_tags_pb2.TClientMessage()
-        #msg.Debug.DumpSubscriptions = True;
         msg.Debug.GetMySubscriptions = True;
         return self._push(msg)
 
@@ -576,12 +564,6 @@ class Client(object):
                 return
             self._outgoing_empty.wait()
 
-    #def wait_running_empty(self):
-        #with self._lock:
-            #if not self._running:
-                #return
-            #self._running_empty.wait()
-
     def _read_loop_impl(self):
         conn = self._io._connection
 
@@ -590,8 +572,6 @@ class Client(object):
 
             if msg is None: # EOF
                 break
-
-            #logging.debug("recv message from server %s" % msg)
 
             self._process_server_message(msg)
 
@@ -649,14 +629,14 @@ class Client(object):
             raise NotImplementedError("Unknown server message type for [%s]" % msg)
 
         if type == 'Event':
-            #self._on_event(self._ServerMessage.Event(msg))
-            # FIXME TODO May throw
             for ev in self._ServerMessage.Event(msg):
-                self._on_event(ev)
+                try:
+                    self._on_event(ev)
+                except:
+                    logging.exception("Failed to process journal event")
             return
 
         elif type == 'Bye':
-            print >>sys.stderr, "+ got bye :)"
             #logging.debug("...")
             with self._lock:
                 self._io._bye_received = True
