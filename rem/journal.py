@@ -147,6 +147,9 @@ class TagLogger(object):
         self._LogEvent(CloudRequestFinish(id))
 
     def LogLocalTagEvent(self, tag, ev, msg=None):
+        if self._restoring_mode:
+            return
+
         args = ()
 
         if ev == ETagEvent.Set:

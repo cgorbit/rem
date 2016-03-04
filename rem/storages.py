@@ -808,6 +808,8 @@ class TagStorage(object):
             return False
 
         try:
+            if self._tags_random_cloudiness:
+                return hash(name) % 3 == 0
             return self._match_cloud_tag(name)
         except Exception as e:
             now = time.time()
@@ -899,6 +901,7 @@ class TagStorage(object):
         self._cloud_tags_server = context.cloud_tags_server
         self._cloud_tags_masks = context.cloud_tags_masks
         self._cloud_tags_masks_reload_interval = context.cloud_tags_masks_reload_interval
+        self._tags_random_cloudiness = context.tags_random_cloudiness
 
         logging.debug("TagStorage.UpdateContext, masks = %s, server = %s" % (
             self._cloud_tags_masks, self._cloud_tags_server))
