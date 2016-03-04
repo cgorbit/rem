@@ -26,7 +26,7 @@ class PacketState(object):
     NONINITIALIZED = "NONINITIALIZED"
     # src -> dst
     allowed = {
-        CREATED: (WORKABLE, SUSPENDED, NONINITIALIZED),
+        CREATED: (WORKABLE, SUSPENDED),
         WORKABLE: (SUSPENDED, ERROR, SUCCESSFULL, PENDING, WAITING, NONINITIALIZED),
         PENDING: (SUSPENDED, WORKABLE, ERROR, WAITING, NONINITIALIZED),
         SUSPENDED: (WORKABLE, HISTORIED, WAITING, ERROR, NONINITIALIZED),
@@ -1011,6 +1011,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 return
 
             self.waitTags.add(ref.GetFullname())
+
+            if self.state == PacketState.CREATED:
+                return
 
             if not self.isResetable:
                 self._send_reset_notification(comment)
