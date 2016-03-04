@@ -97,6 +97,7 @@ class Context(object):
         self.cloud_tags_server = config.safe_get("store", "cloud_tags_server", None)
         self.cloud_tags_masks = config.safe_get("store", "cloud_tags_masks", None)
         self.cloud_tags_masks_reload_interval = config.safe_getint("store", "cloud_tags_masks_reload_interval", 300)
+        self.tags_random_cloudiness = config.safe_getboolean("store", "tags_random_cloudiness", False)
         self.manager_port = config.getint("server", "port")
         self.manager_readonly_port = config.safe_getint("server", "readonly_port")
         self.system_port = config.safe_getint("server", "system_port")
