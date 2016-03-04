@@ -1,33 +1,23 @@
 import sys
-import threading
-import random
+#import threading
+#import random
 import time
-import logging
+#import logging
 import os
 
-sys.path.append('.')
+#sys.path.append('.')
 import rem_server
-import rem.connmanager
-import rem.scheduler
-import rem.job
-import rem.osspec
-from rem.packet import PacketState
 
-sys.path.append(
-    os.path.abspath(os.path.dirname(rem_server.__file__)) + '/client')
+#import rem.connmanager
+#import rem.scheduler
+#import rem.job
+#import rem.osspec
+#from rem.packet import PacketState
 
-rem.osspec.reg_signal_handler = lambda *args: None
+#sys.path.append(
+    #os.path.abspath(os.path.dirname(rem_server.__file__)) + '/client')
 
-#def create_daemon(work_dir):
-    #ctx = rem_server.DefaultContext('start')
-    ##rem_server._context = ctx
-
-    #rem_server._init_fork_locking(ctx)
-
-    #sched = rem_server.CreateScheduler(ctx)
-    #rem_server._scheduler = sched
-
-    #return rem_server.RemDaemon(sched, ctx)
+#rem.osspec.reg_signal_handler = lambda *args: None
 
 import tempfile
 import shutil
@@ -156,10 +146,14 @@ if __name__ == '__main__':
                 do_remove_journal=False,
                 do_remove_backups=False):
 
-        print do_intermediate_backup, do_final_backup, do_remove_journal, do_remove_backups
+        #print do_intermediate_backup, do_final_backup, do_remove_journal, do_remove_backups
 
         def get_updates():
             return sched.tagRef._safe_cloud.get_state_updates()
+
+        def backup():
+            sched.RollBackup()
+            time.sleep(1.5) # hack for same-timestamp-in-journal-filename problem
 
         with NamedTemporaryDir(prefix='remd-') as work_dir:
             with Scheduler(work_dir) as sched:
@@ -171,8 +165,8 @@ if __name__ == '__main__':
                 assert len(get_updates()) == 1
 
                 if do_intermediate_backup:
-                    sched.RollBackup()
-                    print os.listdir(work_dir + '/backups')
+                    backup()
+                    #print os.listdir(work_dir + '/backups')
 
                 tags.AcquireTag('_cloud_tag_02').Reset('message02')
 
@@ -180,8 +174,8 @@ if __name__ == '__main__':
                 assert len(all_updates) == 2
 
                 if do_final_backup:
-                    sched.RollBackup()
-                    print os.listdir(work_dir + '/backups')
+                    backup()
+                    #print os.listdir(work_dir + '/backups')
 
             if do_remove_journal:
                 remove_journal(work_dir)
@@ -189,9 +183,9 @@ if __name__ == '__main__':
             if do_remove_backups:
                 remove_backups(work_dir)
 
-            print "-----------------------------------------------"
+            #print "-----------------------------------------------"
             with Scheduler(work_dir) as sched:
-                print os.listdir(work_dir + '/backups')
+                #print os.listdir(work_dir + '/backups')
                 updates = get_updates()
 
                 if do_remove_journal and do_remove_backups:
@@ -207,9 +201,6 @@ if __name__ == '__main__':
                         assert updates == all_updates[0:1]
                     else:
                         assert updates == []
-
-    #test_01(True, False, True, False)
-    #sys.exit()
 
     for do_intermediate_backup in [True, False]:
         for do_final_backup in [True, False]:
