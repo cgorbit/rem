@@ -11,8 +11,6 @@ from common import Unpickable, PickableRLock
 from profile import ProfiledThread
 from callbacks import ICallbackAcceptor, RemoteTag, LocalTag, ETagEvent
 
-# FIXME TODO ConnectionManager willn't receive events anymore
-
 class TagEvent(object):
     def __init__(self, tagname):
         self.tagname = tagname
@@ -48,6 +46,7 @@ class CloudRequestFinish(object):
     def __init__(self, id):
         self.id = id
 
+
 class JournalDB(object):
     def __init__(self, filename):
         self._impl = bsddb3.rnopen(filename, "c")
@@ -66,6 +65,7 @@ class JournalDB(object):
 
     def sync(self):
         self._impl.sync()
+
 
 class TagLogger(object):
     def __init__(self):
@@ -91,8 +91,12 @@ class TagLogger(object):
         self._write_thread.join()
 
     def _reopen(self):
+        if self._db:
+            self._db.close()
+
         if self.db_filename is None:
             raise RuntimeError("db_filename is not yet set")
+
         self._db = JournalDB(self.db_filename)
 
     def UpdateContext(self, context):
@@ -111,6 +115,7 @@ class TagLogger(object):
                         self._reopen()
                     self._db.write(data)
                     self._db.sync()
+
                 except Exception as err:
                     self._db = None
                     logging.error("Can't write to journal (%d items left): %s" \
@@ -133,7 +138,7 @@ class TagLogger(object):
             while self._queue:
                 self._write(cPickle.dumps(self._queue.pop()))
 
-    def _LogEvent(self, ev):
+    def _log_event(self, ev):
         with self._queue_lock:
             if self._should_stop:
                 raise RuntimeError("Can't register events after should_stop")
@@ -141,12 +146,12 @@ class TagLogger(object):
             self._queue_not_empty.notify()
 
     def log_cloud_request_start(self, id, update):
-        self._LogEvent(CloudRequestStart(id, update))
+        self._log_event(CloudRequestStart(id, update))
 
     def log_cloud_request_finish(self, id):
-        self._LogEvent(CloudRequestFinish(id))
+        self._log_event(CloudRequestFinish(id))
 
-    def LogLocalTagEvent(self, tag, ev, msg=None):
+    def log_local_tag_event(self, tag, ev, msg=None):
         if self._restoring_mode:
             return
 
@@ -163,7 +168,7 @@ class TagLogger(object):
         if not isinstance(tag, str):
             tag = tag.GetFullname()
 
-        self._LogEvent(cls(tag, *args))
+        self._log_event(cls(tag, *args))
 
     def Restore(self, timestamp, tagRef, cloud_requester_state):
         logging.debug("TagLogger.Restore(%d)", timestamp)
@@ -173,7 +178,7 @@ class TagLogger(object):
             result = []
             for filename in os.listdir(dirname):
                 if filename.startswith(db_filename) and filename != db_filename:
-                    file_time = int(filename.split("-")[-1])
+                    file_time = float(filename.split("-")[-1]) # TODO XXX REMOVE
                     if file_time > timestamp:
                         result.append(filename)
             result = sorted(result)
@@ -210,7 +215,8 @@ class TagLogger(object):
                 self._db.close()
 
             if os.path.exists(self.db_filename):
-                new_filename = "%s-%d" % (self.db_filename, timestamp)
+                new_filename = "%s-%s" % (self.db_filename, timestamp)
+                #new_filename = "%s-%d" % (self.db_filename, timestamp) # TODO XXX REVERT
                 os.rename(self.db_filename, new_filename)
 
             self._reopen()
@@ -220,6 +226,6 @@ class TagLogger(object):
         dirname, db_filename = os.path.split(self.db_filename)
         for filename in os.listdir(dirname):
             if filename.startswith(db_filename) and filename != db_filename:
-                file_time = int(filename.split("-")[-1])
+                file_time = float(filename.split("-")[-1]) # TODO XXX REMOVE
                 if file_time <= final_time:
                     os.remove(os.path.join(dirname, filename))

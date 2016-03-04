@@ -6,6 +6,7 @@ from sys import stderr
 import signal
 import errno
 from collections import namedtuple
+import traceback
 
 __all__ = ["Lock", "RLock", "Condition", "LockWrapper", "RunningChildInfo", "TerminatedChildInfo", "run_in_child"]
 
@@ -117,8 +118,6 @@ def _dup_dev_null(file, flags):
 
 RunningChildInfo = namedtuple('RunningChildInfo', ['pid', 'stderr', 'timings'])
 
-import traceback
-
 def start_in_child(func, child_max_working_time=None):
     assert(child_max_working_time is None or int(child_max_working_time))
 
@@ -155,7 +154,6 @@ def start_in_child(func, child_max_working_time=None):
             func()
         except Exception as e:
             try:
-                #print >>stderr, "Failed to execute child function: %s" % e
                 traceback.print_exc()
             except:
                 pass

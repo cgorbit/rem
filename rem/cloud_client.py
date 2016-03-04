@@ -259,12 +259,7 @@ class Client(object):
 
         with self._lock:
             for task in self._running.itervalues():
-
-                # XXX TODO REMOVE
-                logging.debug('cloud_client.promise.set(exc)')
-
                 task.promise.set(exc=exc)
-
             self._running.clear()
             #self._running_empty.notify_all()
 

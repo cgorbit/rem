@@ -606,6 +606,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Stop3(self):
         self._mailer.stop()
+        PacketCustomLogic.UpdateContext(None)
+
+    def Stop(self):
+        self.Stop1()
+        self.Stop2()
+        self.Stop3()
 
     def GetConnectionManager(self):
         return self.connManager

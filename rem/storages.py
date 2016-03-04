@@ -190,43 +190,50 @@ class TagWrapper(object):
         return self.inner.__getattribute__(attr)
 
 
+class EditableState(object):
+    def __init__(self, updates):
+        by_id = {}
+        for idx, (id, update) in enumerate(updates):
+            by_id[id] = (idx, update)
+
+        self._next_idx = len(updates)
+        self._by_id = by_id
+
+    # ATW Теоретически может возникнуть ситуация, когда нет полного
+    # журнала от момента откладывания бэкапа с которого мы хотим загрузиться:
+    # 1. нам пришлось отбросить свежие бэкапы (по каким-то причинам)
+    # 2. нет в наличии всех частей журнала от момента откладывания
+    #    выбранного нами бэкапа прошло
+
+    def start_request(self, id, update):
+        logging.debug('EditableState.start_request(%s, %s)' % (id, update)) # TODO REMOVE
+        if id not in self._by_id:
+            self._by_id[id] = (self._next_idx, update)
+            self._next_idx += 1
+
+    def finish_request(self, id):
+        logging.debug('EditableState.finish_request(%s)' % id) # TODO REMOVE
+        self._by_id.pop(id, None)
+
+    def get_result(self):
+        return [
+            (id, update)
+                for id, (idx, update) in \
+                    sorted(self._by_id.iteritems(), key=lambda (id, (idx, update)): idx)
+        ]
+
+
 class SafeCloud(object):
-    class EditableState(object):
-        def __init__(self, updates):
-            by_id = {}
-            for idx, (id, update) in enumerate(updates):
-                by_id[id] = (idx, update)
 
-            self._next_idx = len(updates)
-            self._by_id = by_id
+    class NoopJournal(object):
+        def log_cloud_request_start(*args):
+            pass
 
-        # ATW Теоретически может возникнуть ситуация, когда нет полного
-        # журнала от момента откладывания бэкапа с которого мы хотим загрузиться:
-        # 1. нам пришлось отбросить свежие бэкапы (по каким-то причинам)
-        # 2. нет в наличии всех частей журнала от момента откладывания
-        #    выбранного нами бэкапа прошло
-
-        def start_request(self, id, update):
-            logging.debug('EditableState.start_request(%s, %s)' % (id, update)) # TODO REMOVE
-            if id not in self._by_id:
-                self._by_id[id] = (self._next_idx, update)
-                self._next_idx += 1
-
-        def finish_request(self, id):
-            logging.debug('EditableState.finish_request(%s)' % id) # TODO REMOVE
-            self._by_id.pop(id, None)
-
-        def get_result(self):
-            return [
-                (id, update)
-                    for id, (idx, update) in \
-                        sorted(self._by_id.iteritems(), key=lambda (id, (idx, update)): idx)
-            ]
-
+        def log_cloud_request_finish(*args):
+            pass
 
     def __init__(self, cloud, journal, prev_state):
         self._cloud = cloud
-        self._journal = journal
         self._uid_epoch = time.time() # FIXME (time.time(), os.getpid())
         self._next_id = 1
         self._next_idx = 0
@@ -235,19 +242,33 @@ class SafeCloud(object):
         self._running = {}
         self._failed = []
 
-        for id, update in prev_state:
+        self._journal = self.NoopJournal()
+
+        for id, update in prev_state.get_result():
             self._update(update, id=id)
+
+        self._journal = journal
+
+    def __getstate__(self):
+        raise NotImplementedError()
 
     def _alloc_id(self):
         id = self._next_id
         self._next_id += 1
         return (self._uid_epoch, id)
 
-    def get_state(self):
+    @classmethod
+    def get_empty_state(cls):
+        return EditableState([])
+
+    def get_state_updates(self):
         with self._lock:
             items = [(idx, (id, update)) for id, (idx, update) in self._running.iteritems()]
             items.extend(self._failed)
-            return [(id, update) for idx, (id, update) in sorted(items, key=lambda (idx, _): idx)]
+        return [(id, update) for idx, (id, update) in sorted(items, key=lambda (idx, _): idx)]
+
+    def get_state(self):
+        return EditableState(self.get_state_updates())
 
     def _dump_state(self):
         with self._lock:
@@ -273,7 +294,7 @@ class SafeCloud(object):
             if result.is_success():
                 self._journal.log_cloud_request_finish(id)
             else:
-                if not self._cloud.is_stopped(): # not possible?
+                if not self._cloud.is_stopped(): # FIXME not possible?
                     logging.error('cloud client not stopped, but update failed: %s' % str(update))
 
                 self._failed.append((idx, (id, update)))
@@ -475,12 +496,21 @@ class TagsMasks(object):
 
     @classmethod
     def load(cls, location):
+        if location.startswith('file://'):
+            return cls._load_from_file(location[7:])
+        return cls._load_from_svn(location)
+
+    @classmethod
+    def _load_from_file(cls, path):
+        with open(path) as input:
+            return cls.parse(input)
+
+    @classmethod
+    def _load_from_svn(cls, path):
         with tempfile.NamedTemporaryFile(prefix='cloud_tags_list') as file:
             subprocess.check_call(
-                ["svn", "export", "--force", "-q", "--non-interactive", location, file.name])
-
-            with open(file.name) as input:
-                return cls.parse(input)
+                ["svn", "export", "--force", "-q", "--non-interactive", path, file.name])
+            return cls._load_from_file(file.name)
 
     @staticmethod
     def get_empty_matcher():
@@ -489,7 +519,6 @@ class TagsMasks(object):
         ret.regexps = []
         return ret
 
-import traceback
 
 class TagStorage(object):
     _CLOUD_TAG_REPR_UPDATE_WAITING_TTL = 7200 # Hack for hostA:RemoteTag -> hostB:CloudTag
@@ -505,12 +534,13 @@ class TagStorage(object):
         self._journal = TagLogger()
         self._cloud = None
         self._safe_cloud = None
-        self._prev_safe_cloud_state = []
+        self._prev_safe_cloud_state = SafeCloud.get_empty_state()
         self._match_cloud_tag = TagsMasks.get_empty_matcher()
         self._masks_reload_thread = None
         self._masks_should_stop = threading.Event()
         self._last_tag_mask_error_report_time = 0
         if rhs:
+            #import traceback # TODO REMOVE
             #logging.debug(("TagStorage.__init__(rhs{%s})\n" % type(rhs)) + ''.join(traceback.format_stack()))
             logging.debug('rhs = %s' % rhs.__dict__)
 
@@ -519,9 +549,10 @@ class TagStorage(object):
 
             elif isinstance(rhs, TagStorage):
                 self.inmem_items = rhs.inmem_items
-                self._prev_safe_cloud_state = rhs._prev_safe_cloud_state
-                #self.infile_items = rhs.infile_items
-                #self.db_file = rhs.db_file
+                if hasattr(rhs, '_prev_safe_cloud_state'):
+                    self._prev_safe_cloud_state = rhs._prev_safe_cloud_state
+                #self.infile_items = rhs.infile_items # FIXME
+                #self.db_file = rhs.db_file # FIXME
 
     def list_cloud_tags_masks(self):
         return self._match_cloud_tag.regexps
@@ -631,7 +662,7 @@ class TagStorage(object):
     def Stop(self):
         # TODO Kosher
         if self._cloud:
-            self._cloud.stop(timeout=10) # TODO Don't wait at all, if we disconnected for a long time
+            self._cloud.stop(timeout=0) # XXX REMOVE TODO Don't wait at all, if we disconnected for a long time
             self._cloud.stop(wait=False)
 
             # actually this must be guaranted by _cloud.stop
@@ -651,12 +682,9 @@ class TagStorage(object):
 
         return {
             'inmem_items': self.inmem_items.copy(),
-            '_prev_safe_cloud_state': self._safe_cloud.get_state(),
+            '_prev_safe_cloud_state': self._safe_cloud.get_state() if self._cloud \
+                                        else SafeCloud.get_empty_state()
         }
-
-    #def __setstate__(self, sdict):
-        #self.inmem_items = sdict['inmem_items']
-        #self._prev_safe_cloud_state = sdict['_prev_safe_cloud_state']
 
     def _lookup_tags(self, tags):
         return self.__lookup_tags(tags, False)
@@ -762,7 +790,7 @@ class TagStorage(object):
 
         with self._local_tag_modify_lock: # FIXME
             for update in updates:
-                self._journal.LogLocalTagEvent(*update)
+                self._journal.log_local_tag_event(*update)
                 done.append(self._repr_modifier.add(update, with_future))
 
         if not with_future:
@@ -775,21 +803,6 @@ class TagStorage(object):
 
     def IsRemoteTagName(self, tagname):
         return ':' in tagname
-
-    def AcquireTagNEW(self, tagname):
-        raw = self._RawTag(tagname)
-
-        with self.lock:
-            ret = self.inmem_items.get(tagname)
-
-            if not ret:
-                self.inmem_items[tagname] = raw
-                ret = raw
-
-                if ret.IsCloud() and self._cloud: # FIXME "and self._cloud" is bullshit?
-                    self._cloud.subscribe(tagname)
-
-        return TagWrapper(ret)
 
     def AcquireTag(self, tagname):
         raw = self._RawTag(tagname)
@@ -907,9 +920,8 @@ class TagStorage(object):
             self._cloud_tags_masks, self._cloud_tags_server))
 
     def Restore(self, timestamp):
-        state = SafeCloud.EditableState(self._prev_safe_cloud_state)
-        self._journal.Restore(timestamp, self, state)
-        self._prev_safe_cloud_state = state.get_result()
+        self._journal.Restore(timestamp, self, self._prev_safe_cloud_state)
+
         # TODO REMOVE
         logging.debug('self._prev_safe_cloud_state = EditableState.get_result() = %s' % self._prev_safe_cloud_state)
 

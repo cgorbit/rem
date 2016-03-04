@@ -174,19 +174,6 @@ def unset_tag(tagname):
 def reset_tag(tagname, msg=""):
     return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get() # TODO timeout
 
-@traced_rpc_method("info")
-def set_tag_safe(tagname):
-    return _scheduler.tagRef.AcquireTag(tagname).Set()
-@traced_rpc_method("info")
-def unset_tag_safe(tagname):
-    return _scheduler.tagRef.AcquireTag(tagname).Unset()
-@traced_rpc_method("info")
-def reset_tag_safe(tagname):
-    return _scheduler.tagRef.AcquireTag(tagname).Reset()
-@traced_rpc_method("info")
-def dump_safe_cloud_state():
-    return _scheduler.tagRef._safe_cloud._dump_state()
-
 @readonly_method
 @traced_rpc_method()
 def check_tags(tags):
@@ -486,13 +473,6 @@ class ApiServer(object):
             unset_tag,
             update_tags,
         ]
-
-        funcs.extend([
-            set_tag_safe,
-            unset_tag_safe,
-            reset_tag_safe,
-            dump_safe_cloud_state,
-        ]) # XXX TODO REMOVE
 
         if self.allow_backup_method:
             funcs.append(do_backup)
