@@ -43,6 +43,7 @@ def _create_logger(ctx, log_to_file):
 
     logger = logging.getLogger('rem_server')
     logger.handlers = [] # oops
+    logger.propagate = False
 
     if log_to_file:
         logHandler = StableRotateFileHandler(
