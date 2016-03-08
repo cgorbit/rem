@@ -281,8 +281,8 @@ class SafeCloud(object):
             if result.is_success():
                 self._journal.log_cloud_request_finish(id)
             else:
-                if not self._cloud.is_stopped(): # FIXME not possible?
-                    logging.error('cloud client not stopped, but update failed: %s' % str(update))
+                #if not self._cloud.is_stopped():
+                    #logging.error('cloud client not stopped, but update failed: %s' % str(update))
 
                 self._failed.append((idx, (id, update)))
 
