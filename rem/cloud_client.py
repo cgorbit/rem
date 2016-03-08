@@ -8,7 +8,6 @@ import threading
 from collections import deque
 import json
 import errno
-import logging
 
 from google.protobuf.internal.decoder import _DecodeVarint32
 from google.protobuf.internal.encoder import _EncodeVarint as EncodeVarint
@@ -16,6 +15,7 @@ from google.protobuf.internal.encoder import _EncodeVarint as EncodeVarint
 from future import Promise
 from profile import ProfiledThread
 import cloud_tags_pb2
+from rem_logging import logger as logging
 
 READY_ACK_FUTURE = Promise().set(None).to_future()
 READY_EMPTY_DICT_FUTURE = Promise().set({}).to_future()
