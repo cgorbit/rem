@@ -136,7 +136,7 @@ class TagLogger(object):
                     return
 
             while self._queue:
-                self._write(cPickle.dumps(self._queue.pop()))
+                self._write(cPickle.dumps(self._queue.popleft()))
 
     def _log_event(self, ev):
         with self._queue_lock:
