@@ -12,6 +12,8 @@ import rem_server
 import rem.context
 from rem.callbacks import ETagEvent
 
+LEAVE_WORK_DIR = bool(os.getenv('LEAVE_WORK_DIR', False))
+
 class NamedTemporaryDir(object):
     def __init__(self, *args, **kwargs):
         self._args = args
@@ -19,11 +21,13 @@ class NamedTemporaryDir(object):
 
     def __enter__(self):
         self.name = tempfile.mkdtemp(*self._args, **self._kwargs)
-        #print >>sys.stderr, self.name
+        if LEAVE_WORK_DIR:
+            print >>sys.stderr, 'working directory:', self.name
         return self.name
 
     def __exit__(self, e, t, bt):
-        shutil.rmtree(self.name)
+        if not LEAVE_WORK_DIR:
+            shutil.rmtree(self.name)
         self.name = None
 
 def produce_config(out, work_dir, hostname):
@@ -120,7 +124,8 @@ def remove_backups(work_dir):
 def remove_journal(work_dir):
     remove_if(work_dir + '/backups', lambda file : file.startswith('recent_tags.db'))
 
-def testVrs(do_intermediate_backup=False,
+def testVrs(self,
+            do_intermediate_backup=False,
             do_final_backup=False,
             do_remove_journal=False,
             do_remove_backups=False):
@@ -143,25 +148,43 @@ def testVrs(do_intermediate_backup=False,
         sched.RollBackup()
         time.sleep(1.5) # hack for same-timestamp-in-journal-filename problem
 
+    first_part = [
+        ('_cloud_tag_01', ETagEvent.Reset, 'message01'),
+        ('_cloud_tag_02', ETagEvent.Reset, ''),
+        ('_cloud_tag_01', ETagEvent.Set, None),
+        ('_cloud_tag_01', ETagEvent.Unset, None),
+    ]
+
+    second_part = [
+        ('_cloud_tag_02', ETagEvent.Set, None),
+        ('_cloud_tag_02', ETagEvent.Set, None),
+        ('_cloud_tag_01', ETagEvent.Reset, 'message02'),
+        ('_cloud_tag_02', ETagEvent.Unset, None),
+        ('_cloud_tag_01', ETagEvent.Set, None),
+    ]
+
+    all_updates = first_part + second_part
+
+    def apply_updates(updates):
+        for tag, ev, msg in updates:
+            tags.AcquireTag(tag).Modify(ev, msg)
+
     with NamedTemporaryDir(prefix='remd-') as work_dir:
         with Scheduler(work_dir) as sched:
             tags = sched.tagRef
 
-            assert get_updates() == []
+            self.assertEqual(get_updates(), [])
 
-            first_update = ('_cloud_tag_01', ETagEvent.Reset, 'message01')
-            tags.AcquireTag('_cloud_tag_01').Reset('message01')
+            apply_updates(first_part)
 
-            assert get_updates() == [first_update]
+            self.assertEqual(get_updates(), first_part)
 
             if do_intermediate_backup:
                 backup()
 
-            second_update = ('_cloud_tag_02', ETagEvent.Set, None)
-            tags.AcquireTag('_cloud_tag_02').Set()
+            apply_updates(second_part)
 
-            all_updates = [first_update, second_update]
-            assert get_updates() == all_updates
+            self.assertEqual(get_updates(), all_updates)
 
             if do_final_backup:
                 backup()
@@ -176,18 +199,19 @@ def testVrs(do_intermediate_backup=False,
             updates = get_updates()
 
             if do_remove_journal and do_remove_backups:
-                assert updates == []
+                self.assertEqual(updates, [])
 
             elif do_remove_backups:
-                assert updates == all_updates
+                self.assertEqual(updates, all_updates)
 
             elif do_remove_journal:
                 if do_final_backup:
-                    assert updates == all_updates
+                    self.assertEqual(updates, all_updates)
                 elif do_intermediate_backup:
-                    assert updates == [first_update]
+                    self.assertEqual(updates, first_part)
                 else:
-                    assert updates == []
+                    self.assertEqual(updates, [])
+
 
 class T18(unittest.TestCase):
     """Test rem.storages.SafeCloud backup and journal"""
@@ -207,5 +231,5 @@ class T18(unittest.TestCase):
                             ]
                         }
                         logging.debug(setup)
-                        testVrs(**setup)
+                        testVrs(self, **setup)
 
