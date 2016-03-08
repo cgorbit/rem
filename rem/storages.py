@@ -206,13 +206,11 @@ class EditableState(object):
     #    выбранного нами бэкапа прошло
 
     def start_request(self, id, update):
-        logging.debug('EditableState.start_request(%s, %s)' % (id, update)) # TODO REMOVE
         if id not in self._by_id:
             self._by_id[id] = (self._next_idx, update)
             self._next_idx += 1
 
     def finish_request(self, id):
-        logging.debug('EditableState.finish_request(%s)' % id) # TODO REMOVE
         self._by_id.pop(id, None)
 
     def get_result(self):
@@ -270,14 +268,6 @@ class SafeCloud(object):
     def get_state(self):
         return EditableState(self.get_state_updates())
 
-    def _dump_state(self):
-        with self._lock:
-            logging.debug('SafeCloud DUMP\n' \
-                + repr({
-                    '_running': self._running,
-                    '_failed':  self._failed
-                }))
-
     def wait_running_empty(self):
         with self._lock:
             if not self._running:
@@ -286,9 +276,6 @@ class SafeCloud(object):
 
     def _on_done(self, id, result):
         with self._lock:
-            # XXX REMOVE
-            logging.debug('SafeCloud._on_done(id: %s, result: %s)' % (id, result))
-
             idx, update = self._running.pop(id)
 
             if result.is_success():
@@ -298,10 +285,6 @@ class SafeCloud(object):
                     logging.error('cloud client not stopped, but update failed: %s' % str(update))
 
                 self._failed.append((idx, (id, update)))
-
-            # XXX REMOVE
-                logging.debug('SafeCloud._failed.append((idx: %s, id: %s, update: %s))' \
-                    % (idx, id, update))
 
             if not self._running:
                 self._running_empty.notify_all()
@@ -315,14 +298,11 @@ class SafeCloud(object):
 
             id = id or self._alloc_id()
 
-        # XXX REMOVE
-            logging.debug("SafeCloud.update(idx: %s, id: %s, update: %s)" % (idx, id, update))
-
             self._journal.log_cloud_request_start(id, update)
 
             done = self._cloud.serial_update(update)
 
-        # XXX TODO REMOVE
+            # FIXME
             assert id not in self._running
 
             self._running[id] = (idx, update)
@@ -540,10 +520,6 @@ class TagStorage(object):
         self._masks_should_stop = threading.Event()
         self._last_tag_mask_error_report_time = 0
         if rhs:
-            #import traceback # TODO REMOVE
-            #logging.debug(("TagStorage.__init__(rhs{%s})\n" % type(rhs)) + ''.join(traceback.format_stack()))
-            #logging.debug('rhs = %s' % rhs.__dict__)
-
             if isinstance(rhs, dict): # FIXME __reduce__ works like this?
                 self.inmem_items = rhs
 
@@ -551,8 +527,6 @@ class TagStorage(object):
                 self.inmem_items = rhs.inmem_items
                 if hasattr(rhs, '_prev_safe_cloud_state'):
                     self._prev_safe_cloud_state = rhs._prev_safe_cloud_state
-                #self.infile_items = rhs.infile_items # FIXME
-                #self.db_file = rhs.db_file # FIXME
 
     def list_cloud_tags_masks(self):
         return self._match_cloud_tag.regexps
@@ -610,7 +584,7 @@ class TagStorage(object):
     def _on_cloud_journal_event(self, ev):
         logging.debug('before journal event %s' % ev)
 
-        with self.lock: # FIXME
+        with self.lock:
             tag = self.inmem_items.get(ev.tag_name)
 
         if not tag:
@@ -660,9 +634,8 @@ class TagStorage(object):
             self._match_cloud_tag = match
 
     def Stop(self):
-        # TODO Kosher
         if self._cloud:
-            self._cloud.stop(timeout=0) # XXX REMOVE TODO Don't wait at all, if we disconnected for a long time
+            self._cloud.stop(timeout=0) # REMOVE TODO Don't wait at all, if we disconnected for a long time
             self._cloud.stop(wait=False)
 
             # actually this must be guaranted by _cloud.stop
@@ -676,10 +649,6 @@ class TagStorage(object):
         self._journal.Stop()
 
     def __getstate__(self):
-        # TODO REMOVE
-        logging.debug("TagStorage.__getstate__._prev_safe_cloud_state = %s" \
-            % self._safe_cloud.get_state())
-
         return {
             'inmem_items': self.inmem_items.copy(),
             '_prev_safe_cloud_state': self._safe_cloud.get_state() if self._cloud \
@@ -735,7 +704,7 @@ class TagStorage(object):
                     ret[tag] = _ret_value(cloud_result.get(tag, None))
                 promise.set(ret)
             else:
-                promise.set(None, f.get_raw()[1]) # FIXME backtrace
+                promise.set(None, f.get_exception())
 
         cloud_done.subscribe(on_cloud_done)
 
@@ -811,7 +780,6 @@ class TagStorage(object):
             ret = self.inmem_items.setdefault(tagname, raw)
 
             if ret is raw and ret.IsCloud() and self._cloud:
-                logging.debug('AcquireTag.subscribe(%s)' % tagname) # XXX TODO REMOVE
                 self._cloud.subscribe(tagname)
 
         return TagWrapper(ret)
@@ -876,7 +844,6 @@ class TagStorage(object):
         return tag
 
     def ListTags(self, name_regex=None, prefix=None, memory_only=True):
-        #raise NotImplementedError() # XXX
 # TODO Only local tags
         for name, tag in self.inmem_items.items():
             if name and (not prefix or name.startswith(prefix)) \
@@ -922,9 +889,6 @@ class TagStorage(object):
     def Restore(self, timestamp):
         self._journal.Restore(timestamp, self, self._prev_safe_cloud_state)
 
-        # TODO REMOVE
-        logging.debug('self._prev_safe_cloud_state = EditableState.get_result() = %s' % self._prev_safe_cloud_state)
-
     def ListDependentPackets(self, tag_name):
         return self._RawTag(tag_name).GetListenersIds()
 
@@ -938,7 +902,7 @@ class TagStorage(object):
             if tag.GetListenersNumber() == 0 \
                 and sys.getrefcount(tag) == 4 \
                 and getattr(tag, '_min_release_time', 0) < now:
-                                # XXX FIXME How to prolongate _min_release_time on "can't connect" _cloud?
+                                # FIXME How to prolongate _min_release_time on "can't connect" _cloud?
 
                 if tag.IsCloud():
                     unsub_tags.add(name)
@@ -952,7 +916,7 @@ class TagStorage(object):
             with self.lock:
                 self.DBConnect()
 
-# XXX TODO At this point GetListenersNumber and getrefcount may change
+        # TODO At this point GetListenersNumber and getrefcount may change
 
         with self.lock:
             if unsub_tags:
