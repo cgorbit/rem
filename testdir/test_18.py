@@ -10,6 +10,7 @@ import unittest
 
 import rem_server
 import rem.context
+from rem.callbacks import ETagEvent
 
 class NamedTemporaryDir(object):
     def __init__(self, *args, **kwargs):
@@ -44,7 +45,7 @@ binary_dir = %(project_dir)s/bin
 binary_lifetime = 86400
 error_packet_lifetime = 604800
 success_packet_lifetime = 259200
-cloud_tags_server = localhost:17773
+cloud_tags_server = no-such-domain-ldfkgjsghkjgfdkjgfdkj:1023
 cloud_tags_masks = file://%(project_dir)s/cloud_tags.masks
 
 [log]
@@ -126,8 +127,17 @@ def testVrs(do_intermediate_backup=False,
 
     #print do_intermediate_backup, do_final_backup, do_remove_journal, do_remove_backups
 
+    def check_uniq(iterable):
+        seen = set()
+        for v in iterable:
+            if v in seen:
+                raise ValueError("%s duplicated" % v)
+            seen.add(v)
+
     def get_updates():
-        return sched.tagRef._safe_cloud.get_state_updates()
+        ret = sched.tagRef._safe_cloud.get_state_updates()
+        check_uniq(id for id, _ in ret)
+        return [update for _, update in ret]
 
     def backup():
         sched.RollBackup()
@@ -139,16 +149,19 @@ def testVrs(do_intermediate_backup=False,
 
             assert get_updates() == []
 
+            first_update = ('_cloud_tag_01', ETagEvent.Reset, 'message01')
             tags.AcquireTag('_cloud_tag_01').Reset('message01')
-            assert len(get_updates()) == 1
+
+            assert get_updates() == [first_update]
 
             if do_intermediate_backup:
                 backup()
 
-            tags.AcquireTag('_cloud_tag_02').Reset('message02')
+            second_update = ('_cloud_tag_02', ETagEvent.Set, None)
+            tags.AcquireTag('_cloud_tag_02').Set()
 
-            all_updates = get_updates()
-            assert len(all_updates) == 2
+            all_updates = [first_update, second_update]
+            assert get_updates() == all_updates
 
             if do_final_backup:
                 backup()
@@ -172,7 +185,7 @@ def testVrs(do_intermediate_backup=False,
                 if do_final_backup:
                     assert updates == all_updates
                 elif do_intermediate_backup:
-                    assert updates == all_updates[0:1]
+                    assert updates == [first_update]
                 else:
                     assert updates == []
 
