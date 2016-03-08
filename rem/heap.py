@@ -1,5 +1,4 @@
-import logging
-
+from rem_logging import logger as logging
 
 class PriorityQueue(object):
     def __init__(self):

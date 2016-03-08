@@ -1,7 +1,7 @@
 import weakref
-import logging
 import itertools
 from common import *
+from rem_logging import logger as logging
 
 class ETagEvent(object):
     Unset = 0

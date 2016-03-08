@@ -2,7 +2,6 @@ from __future__ import with_statement
 import bisect
 import copy
 import hashlib
-import logging
 import os
 import shutil
 import tempfile
@@ -14,10 +13,12 @@ import xmlrpclib
 from Queue import Queue as StdQueue
 from Queue import PriorityQueue as StdPriorityQueue
 import heapq
+import subprocess
 
 import fork_locking
 from heap import PriorityQueue
 import osspec
+from rem_logging import logger as logging
 
 class RpcUserError(Exception):
     def __init__(self, exc):
@@ -547,3 +548,38 @@ def get_None(*args):
 
 def get_False(*args):
     return False
+
+def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
+    exception_list = exception_list or []
+
+    def should_execute(f):
+        tries = max_tries
+
+        def func(*args, **kwargs):
+            penalty = 0.01
+            _tries = tries
+            while _tries:
+                try:
+                    return f(*args, **kwargs)
+                    break
+                except tuple(exception_list), e:
+                    time.sleep(penalty)
+                    penalty = min(penalty * penalty_factor, 5)
+                    _tries -= 1
+                    logging.error('Exception in %s, exception message: %s, attempts left:  %s', f.func_name, e.message, _tries)
+
+        return func
+    return should_execute
+
+@should_execute_maker(20, 5, Exception)
+def send_email(emails, subject, message):
+    sender = subprocess.Popen(["sendmail"] + map(str, emails), stdin=subprocess.PIPE)
+    print >> sender.stdin, \
+        """Subject: %(subject)s
+To: %(email-list)s
+
+%(message)s
+.""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
+    sender.stdin.close()
+    sender.communicate()
+    return sender.poll()
