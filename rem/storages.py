@@ -542,7 +542,7 @@ class TagStorage(object):
         if rhs:
             #import traceback # TODO REMOVE
             #logging.debug(("TagStorage.__init__(rhs{%s})\n" % type(rhs)) + ''.join(traceback.format_stack()))
-            logging.debug('rhs = %s' % rhs.__dict__)
+            #logging.debug('rhs = %s' % rhs.__dict__)
 
             if isinstance(rhs, dict): # FIXME __reduce__ works like this?
                 self.inmem_items = rhs
