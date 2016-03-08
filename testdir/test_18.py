@@ -1,6 +1,4 @@
 import sys
-#import threading
-#import random
 import time
 import logging
 import os
@@ -11,6 +9,7 @@ import shutil
 import unittest
 
 import rem_server
+import rem.context
 
 class NamedTemporaryDir(object):
     def __init__(self, *args, **kwargs):
@@ -19,7 +18,7 @@ class NamedTemporaryDir(object):
 
     def __enter__(self):
         self.name = tempfile.mkdtemp(*self._args, **self._kwargs)
-        print >>sys.stderr, self.name
+        #print >>sys.stderr, self.name
         return self.name
 
     def __exit__(self, e, t, bt):
@@ -80,13 +79,9 @@ def create_scheduler(work_dir):
     with open(config_filename, "w") as conf:
         produce_config(conf, work_dir, hostname='foobar')
 
-    import rem.context
     ctx = rem.context.Context(config_filename, "start")
 
     rem_server._init_fork_locking(ctx)
-
-    #import json
-    #print json.dumps(ctx.__dict__, indent=3)
 
     with open(work_dir + '/cloud_tags.masks', 'w') as out:
         print >>out, '_cloud_.*'
@@ -149,7 +144,6 @@ def testVrs(do_intermediate_backup=False,
 
             if do_intermediate_backup:
                 backup()
-                #print os.listdir(work_dir + '/backups')
 
             tags.AcquireTag('_cloud_tag_02').Reset('message02')
 
@@ -158,7 +152,6 @@ def testVrs(do_intermediate_backup=False,
 
             if do_final_backup:
                 backup()
-                #print os.listdir(work_dir + '/backups')
 
         if do_remove_journal:
             remove_journal(work_dir)
@@ -166,9 +159,7 @@ def testVrs(do_intermediate_backup=False,
         if do_remove_backups:
             remove_backups(work_dir)
 
-        #print "-----------------------------------------------"
         with Scheduler(work_dir) as sched:
-            #print os.listdir(work_dir + '/backups')
             updates = get_updates()
 
             if do_remove_journal and do_remove_backups:
@@ -188,15 +179,20 @@ def testVrs(do_intermediate_backup=False,
 class T18(unittest.TestCase):
     """Test rem.storages.SafeCloud backup and journal"""
 
-    def testFoo(self):
+    def testSafeCloudBackupAndJournalling(self):
         for do_intermediate_backup in [True, False]:
             for do_final_backup in [True, False]:
                 for do_remove_journal in [True, False]:
                     for do_remove_backups in [True, False]:
-                        testVrs(
-                            do_intermediate_backup=do_intermediate_backup,
-                            do_final_backup=do_final_backup,
-                            do_remove_journal=do_remove_journal,
-                            do_remove_backups=do_remove_backups,
-                        )
+                        l = locals()
+                        setup = {
+                            name: l[name] for name in [
+                                'do_intermediate_backup',
+                                'do_final_backup',
+                                'do_remove_journal',
+                                'do_remove_backups',
+                            ]
+                        }
+                        logging.debug(setup)
+                        testVrs(**setup)
 
