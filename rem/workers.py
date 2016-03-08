@@ -1,12 +1,11 @@
 import copy
-import logging
 import time
 import Queue as StdQueue
 
 import osspec
 from callbacks import CallbackHolder
 from rem.profile import ProfiledThread
-
+from rem_logging import logger as logging
 
 class KillableWorker(ProfiledThread):
     def __init__(self, name_prefix='Worker'):

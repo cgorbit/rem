@@ -1,6 +1,5 @@
 #coding: utf-8
 from __future__ import with_statement
-import logging
 import os
 import sys
 import time
@@ -20,6 +19,7 @@ from Queue import Queue
 import fork_locking
 from future import Promise, WaitFutures
 from profile import ProfiledThread
+from rem_logging import logger as logging
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 

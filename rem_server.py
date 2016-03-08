@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 from __future__ import with_statement
-import logging
 import os
 import re
 import select
@@ -23,6 +22,7 @@ from rem.callbacks import ETagEvent
 from rem.common import as_rpc_user_error, RpcUserError
 import rem.common
 import rem.fork_locking
+from rem.rem_logging import logger as logging
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -759,10 +759,10 @@ def main():
     _scheduler = CreateScheduler(_context)
     logging.debug("rem-server\tafter_create_scheduler")
 
-    if _context.execMode == "test":
+    if _context.exec_mode == "test":
         scheduler_test()
 
-    elif _context.execMode == "start":
+    elif _context.exec_mode == "start":
         start_daemon(_context, _scheduler)[1]()
 
     logging.debug("rem-server\texit_main")

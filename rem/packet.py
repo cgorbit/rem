@@ -1,5 +1,4 @@
 from __future__ import with_statement
-import logging
 import tempfile
 import os
 import time
@@ -13,6 +12,7 @@ from job import Job, JobRunner
 import osspec
 import fork_locking
 import messages
+from rem_logging import logger as logging
 
 class PacketState(object):
     CREATED = "CREATED"

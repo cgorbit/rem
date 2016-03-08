@@ -1,7 +1,6 @@
 from __future__ import with_statement
 import bsddb3
 import cPickle
-import logging
 import time
 import os
 import threading
@@ -10,6 +9,7 @@ from collections import deque
 from common import Unpickable, PickableRLock
 from profile import ProfiledThread
 from callbacks import ICallbackAcceptor, RemoteTag, LocalTag, ETagEvent
+from rem_logging import logger as logging
 
 # FIXME TODO ConnectionManager willn't receive events anymore
 
