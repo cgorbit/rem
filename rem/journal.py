@@ -37,10 +37,12 @@ class ResetTagEvent(TagEvent, Unpickable(message=str)):
     def DoRedo(self, tag):
         tag.Reset(self.message)
 
+
 class CloudRequestStart(object):
     def __init__(self, id, update):
         self.id = id
         self.update = update
+
 
 class CloudRequestFinish(object):
     def __init__(self, id):

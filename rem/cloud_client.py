@@ -417,7 +417,7 @@ class Client(object):
         self._form_update_item(msg.SyncedUpdate.Data, update)
         return self._push(msg)
 
-    def _stop(self, value):
+    def _do_stop(self, value):
         self._should_stop = value
         #self._should_stop_cond.notify_all()
         if self._should_and_can_stop():
@@ -427,7 +427,7 @@ class Client(object):
     def is_stopped(self):
         return self._stopped
 
-    def stop(self, wait=True, timeout=None):
+    def _stop(self, wait=True, timeout=None):
         if self._stopped:
             return
 
@@ -436,14 +436,18 @@ class Client(object):
         with self._lock:
             if self._should_stop < new_value:
                 logging.info("Stopping YtTags.Client (%s)" % '_ST_WAIT' if wait == self._ST_WAIT else '_ST_NOWAIT')
-                self._stop(new_value)
+                self._do_stop(new_value)
 
             elif self._should_stop > new_value:
                 logging.warning("stop() called with lower stop-level")
 
         self._connect_thread.join(timeout) # TODO sleeps
 
-    # TODO Kosher
+    def stop(self, timeout=None):
+        self._stop(timeout=timeout) # TODO Don't wait at all, if we disconnected for a long time
+        self._stop(wait=False)
+
+        # TODO Kosher
         if not self._connect_thread.is_alive():
             self._stopped = True
 

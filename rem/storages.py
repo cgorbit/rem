@@ -291,7 +291,7 @@ class SafeCloud(object):
 
     def _update(self, update, id=None):
         with self._lock:
-            #logging.debug("SafeCloud.update(%s)" % str(update))
+            logging.debug("SafeCloud.update(%s)" % str(update)) # until i will trust the code
 
             idx = self._next_idx
             self._next_idx += 1
@@ -635,8 +635,7 @@ class TagStorage(object):
 
     def Stop(self):
         if self._cloud:
-            self._cloud.stop(timeout=0) # REMOVE TODO Don't wait at all, if we disconnected for a long time
-            self._cloud.stop(wait=False)
+            self._cloud.stop(timeout=10)
 
             # actually this must be guaranted by _cloud.stop
             self._safe_cloud.wait_running_empty()
