@@ -1,5 +1,4 @@
 from __future__ import with_statement
-import logging
 import os
 import time
 import datetime
@@ -12,6 +11,7 @@ import packet
 import constants
 import process_proxy
 import pgrpguard
+from rem_logging import logger as logging
 
 DUMMY_COMMAND_CREATOR = None
 _DEFAULT_STDERR_SUMMAY_LEN = 2000

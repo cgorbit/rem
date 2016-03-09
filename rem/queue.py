@@ -1,11 +1,11 @@
 from __future__ import with_statement
 import itertools
 import time
-import logging
 
 from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
 from callbacks import CallbackHolder, ICallbackAcceptor
 from packet import JobPacket, PacketCustomLogic, PacketState
+from rem_logging import logger as logging
 
 
 class Queue(Unpickable(pending=PackSet.create,

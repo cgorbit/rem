@@ -1,10 +1,10 @@
 import threading
 import cProfile
 import os
-import logging
 import time
 
 import rem.osspec
+from rem_logging import logger as logging
 
 PROFILING_DIR = None
 try:

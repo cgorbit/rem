@@ -11,6 +11,7 @@ from xmlrpc import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported, S
 from common import *
 from callbacks import TagBase, ICallbackAcceptor, ETagEvent, TagEventName
 from rem.profile import ProfiledThread
+from rem_logging import logger as logging
 
 PROTOCOL_VERSION = 2
 

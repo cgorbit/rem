@@ -1,12 +1,11 @@
 from __future__ import with_statement
 import shutil
 import time
-import logging
 import os
 import re
 from collections import deque
 import gc
-from common import PickableStdQueue, PickableStdPriorityQueue, as_rpc_user_error, RpcUserError
+from common import PickableStdQueue, PickableStdPriorityQueue, as_rpc_user_error, RpcUserError, send_email
 import common
 from Queue import Empty, Queue as ThreadSafeQueue
 import cStringIO
@@ -24,6 +23,7 @@ from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
 from rem.profile import ProfiledThread
+from rem_logging import logger as logging
 
 class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
                               lock=PickableLock,
@@ -156,7 +156,7 @@ class Mailer(object):
                 break
 
             try:
-                osspec.send_email(*task)
+                send_email(*task)
             except Exception:
                 logging.exception("Failed to send email {To: %s, Subject: %s}" % (task[0], task[1]))
 
@@ -189,7 +189,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         getattr(super(Scheduler, self), "__init__")()
         self.UpdateContext(context)
         self.tagRef.PreInit()
-        self.ObjectRegistratorClass = FakeObjectRegistrator if context.execMode == "start" else ObjectRegistrator
+        self.ObjectRegistratorClass = FakeObjectRegistrator if context.exec_mode == "start" else ObjectRegistrator
         if context.useMemProfiler:
             self.initProfiler()
 

@@ -1,4 +1,3 @@
-import logging
 import re
 import socket
 import xmlrpclib
@@ -6,6 +5,7 @@ import httplib
 from SimpleXMLRPCServer import SimpleXMLRPCServer as SimpleXMLRPCServerOrig
 from SocketServer import ThreadingMixIn
 import Queue as StdQueue
+from rem_logging import logger as logging
 
 class SimpleXMLRPCServer(SimpleXMLRPCServerOrig):
     def __init__(self, *args, **kws):

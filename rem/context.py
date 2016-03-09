@@ -1,39 +1,6 @@
-import logging
-import logging.handlers
 import os
-import time
 from ConfigParser import ConfigParser, NoOptionError
-import codecs
-import rem.osspec
-import thread
-
-if rem.osspec.gettid():
-    gettid = rem.osspec.gettid
-else:
-    gettid = thread.get_ident
-
-class LogFormatter(logging.Formatter):
-    def format(self, record):
-        record.thread_id = gettid()
-        return logging.Formatter.format(self, record)
-
-class StableRotateFileHandler(logging.handlers.TimedRotatingFileHandler):
-    REOPEN_TM = 60
-
-    def __init__(self, filename, **kws):
-        logging.handlers.TimedRotatingFileHandler.__init__(self, filename, **kws)
-        self.lastReopen = time.time()
-
-    def shouldRollover(self, record):
-        if time.time() - self.lastReopen > self.REOPEN_TM:
-            self.stream.close()
-            if self.encoding:
-                self.stream = codecs.open(self.baseFilename, "a", self.encoding)
-            else:
-                self.stream = open(self.baseFilename, "a")
-            lastReopen = time.time()
-        return logging.handlers.TimedRotatingFileHandler.shouldRollover(self, record)
-
+import rem_logging
 
 class ConfigReader(ConfigParser):
     def safe_get(self, section, option, default=""):
@@ -61,6 +28,7 @@ class ConfigReader(ConfigParser):
         except NoOptionError:
             return default or []
 
+
 class Context(object):
     @classmethod
     def prep_dir(cls, dir_name):
@@ -71,10 +39,26 @@ class Context(object):
             raise RuntimeError("can't create directory: \"%s\"" % dir_name)
         return dir_name
 
-    def __init__(self, cfgFile, execMode):
+    def __init__(self, cfgFile, exec_mode):
         config = ConfigReader()
         assert cfgFile in config.read(cfgFile), "error in configuration file \"%s\"" % cfgFile
-        self.logs_directory = self.prep_dir(config.get("log", "dir"))
+
+        self._init_config_options(config)
+
+        self.exec_mode = exec_mode
+
+        is_test_mode = self.exec_mode != "start"
+
+        if is_test_mode:
+            self.log_warn_level = 'debug'
+
+        rem_logging.reinit_logger(self, log_to_file=not is_test_mode)
+
+    def _init_config_options(self, config):
+        self.log_directory = self.prep_dir(config.get("log", "dir"))
+        self.log_filename = config.get("log", "filename")
+        self.log_backup_count = config.getint("log", "rollcount")
+        self.log_warn_level = config.get("log", "warnlevel")
         self.packets_directory = self.prep_dir(config.get("store", "pck_dir"))
         self.backup_directory = self.prep_dir(config.get("store", "backup_dir"))
         self.backup_period = config.getint("store", "backup_period")
@@ -106,26 +90,12 @@ class Context(object):
         self.send_emails = config.getboolean("server", "send_emails")
         self.send_emergency_emails = config.safe_getboolean("server", "send_emergency_emails")
         self.mailer_thread_count = config.safe_getint("server", "mailer_thread_count", 1)
-        self.execMode = execMode
         self.useMemProfiler = config.getboolean("server", "use_memory_profiler")
         self.max_remotetags_resend_delay = config.safe_getint("server", "max_remotetags_resend_delay", 300)
         self.allow_backup_rpc_method = config.safe_getboolean("server", "allow_backup_rpc_method", False)
-        self.initLogger(config, self.execMode != "start")
 
     def send_email_async(self, rcpt, msg):
         self.Scheduler.send_email_async(rcpt, msg)
-
-    def initLogger(self, config, isTestMode):
-        logLevel = logging.DEBUG if isTestMode \
-            else getattr(logging, config.get("log", "warnlevel").upper())
-        logger = logging.getLogger()
-        if not isTestMode:
-            logHandler = StableRotateFileHandler(
-                os.path.join(self.logs_directory, config.get("log", "filename")),
-                when="midnight", backupCount=config.getint("log", "rollcount"))
-            logHandler.setFormatter(LogFormatter("%(asctime)s %(thread_id)s %(levelname)-8s %(module)s:\t%(message)s"))
-            logger.addHandler(logHandler)
-        logger.setLevel(logLevel)
 
     def registerScheduler(self, scheduler):
         if getattr(self, "Scheduler", None):
