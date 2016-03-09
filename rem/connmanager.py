@@ -347,7 +347,8 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
         self.alive = True
         self.InitXMLRPCServer()
-        ProfiledThread(target=self.ServerLoop, name_prefix='ConnManager').start()
+        self._accept_loop_thread = ProfiledThread(target=self.ServerLoop, name_prefix='ConnManager')
+        self._accept_loop_thread.start()
         logging.debug("after_connection_manager_loop_start")
 
         for client in self.topologyInfo.servers.values():
@@ -355,6 +356,8 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     def Stop(self):
         self.alive = False
+        self._accept_loop_thread.join()
+        self.rpcserver = None # shutdown listening socket
 
     def ServerLoop(self):
         rpc_fd = self.rpcserver.fileno()
@@ -539,5 +542,6 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
         sdict.pop("scheduler", None)
         sdict.pop("rpcserver", None)
         sdict.pop("acceptors", None)
+        sdict.pop("_accept_loop_thread", None)
         sdict["alive"] = False
         return getattr(super(ConnectionManager, self), "__getstate__", lambda: sdict)()

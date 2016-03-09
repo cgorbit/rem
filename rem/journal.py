@@ -11,8 +11,6 @@ from profile import ProfiledThread
 from callbacks import ICallbackAcceptor, RemoteTag, LocalTag, ETagEvent
 from rem_logging import logger as logging
 
-# FIXME TODO ConnectionManager willn't receive events anymore
-
 class TagEvent(object):
     def __init__(self, tagname):
         self.tagname = tagname
@@ -40,6 +38,17 @@ class ResetTagEvent(TagEvent, Unpickable(message=str)):
         tag.Reset(self.message)
 
 
+class CloudRequestStart(object):
+    def __init__(self, id, update):
+        self.id = id
+        self.update = update
+
+
+class CloudRequestFinish(object):
+    def __init__(self, id):
+        self.id = id
+
+
 class JournalDB(object):
     def __init__(self, filename):
         self._impl = bsddb3.rnopen(filename, "c")
@@ -58,6 +67,7 @@ class JournalDB(object):
 
     def sync(self):
         self._impl.sync()
+
 
 class TagLogger(object):
     def __init__(self):
@@ -83,8 +93,12 @@ class TagLogger(object):
         self._write_thread.join()
 
     def _reopen(self):
+        if self._db:
+            self._db.close()
+
         if self.db_filename is None:
             raise RuntimeError("db_filename is not yet set")
+
         self._db = JournalDB(self.db_filename)
 
     def UpdateContext(self, context):
@@ -103,6 +117,7 @@ class TagLogger(object):
                         self._reopen()
                     self._db.write(data)
                     self._db.sync()
+
                 except Exception as err:
                     self._db = None
                     logging.error("Can't write to journal (%d items left): %s" \
@@ -125,14 +140,20 @@ class TagLogger(object):
             while self._queue:
                 self._write(cPickle.dumps(self._queue.popleft()))
 
-    def _LogEvent(self, ev):
+    def _log_event(self, ev):
         with self._queue_lock:
             if self._should_stop:
                 raise RuntimeError("Can't register events after should_stop")
             self._queue.append(ev)
             self._queue_not_empty.notify()
 
-    def LogEvent(self, tag, ev, msg=None):
+    def log_cloud_request_start(self, id, update):
+        self._log_event(CloudRequestStart(id, update))
+
+    def log_cloud_request_finish(self, id):
+        self._log_event(CloudRequestFinish(id))
+
+    def log_local_tag_event(self, tag, ev, msg=None):
         if self._restoring_mode:
             return
 
@@ -149,9 +170,9 @@ class TagLogger(object):
         if not isinstance(tag, str):
             tag = tag.GetFullname()
 
-        self._LogEvent(cls(tag, *args))
+        self._log_event(cls(tag, *args))
 
-    def Restore(self, timestamp, tagRef):
+    def Restore(self, timestamp, tagRef, cloud_requester_state):
         logging.debug("TagLogger.Restore(%d)", timestamp)
         dirname, db_filename = os.path.split(self.db_filename)
 
@@ -174,7 +195,14 @@ class TagLogger(object):
                 for k, v in f.items():
                     try:
                         obj = cPickle.loads(v)
-                        obj.Redo(tagRef)
+
+                        if isinstance(obj, CloudRequestStart):
+                            cloud_requester_state.start_request(obj.id, obj.update)
+                        elif isinstance(obj, CloudRequestFinish):
+                            cloud_requester_state.finish_request(obj.id)
+                        else:
+                            obj.Redo(tagRef)
+
                     except Exception, e:
                         logging.exception("occurred in TagLogger while restoring from a journal : %s", e)
                 f.close()
