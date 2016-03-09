@@ -203,7 +203,7 @@ class EditableState(object):
     # журнала от момента откладывания бэкапа с которого мы хотим загрузиться:
     # 1. нам пришлось отбросить свежие бэкапы (по каким-то причинам)
     # 2. нет в наличии всех частей журнала от момента откладывания
-    #    выбранного нами бэкапа прошло
+    #    выбранного нами бэкапа
 
     def start_request(self, id, update):
         if id not in self._by_id:
@@ -520,7 +520,7 @@ class TagStorage(object):
         self._masks_should_stop = threading.Event()
         self._last_tag_mask_error_report_time = 0
         if rhs:
-            if isinstance(rhs, dict): # FIXME __reduce__ works like this?
+            if isinstance(rhs, dict):
                 self.inmem_items = rhs
 
             elif isinstance(rhs, TagStorage):
