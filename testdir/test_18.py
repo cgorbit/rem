@@ -12,7 +12,9 @@ import rem_server
 import rem.context
 from rem.callbacks import ETagEvent
 
+
 LEAVE_WORK_DIR = bool(os.getenv('LEAVE_WORK_DIR', False))
+
 
 class NamedTemporaryDir(object):
     def __init__(self, *args, **kwargs):
@@ -29,6 +31,7 @@ class NamedTemporaryDir(object):
         if not LEAVE_WORK_DIR:
             shutil.rmtree(self.name)
         self.name = None
+
 
 def produce_config(out, work_dir, hostname):
     print >>out, """
@@ -78,6 +81,7 @@ use_memory_profiler = no
         network_hostname=hostname,
     )
 
+
 def create_scheduler(work_dir):
     config_filename = work_dir + "/rem.cfg"
 
@@ -97,6 +101,7 @@ def create_scheduler(work_dir):
 
     return rem_server.CreateScheduler(ctx)
 
+
 class Scheduler(object):
     def __init__(self, *args, **kwargs):
         self._args = args
@@ -113,16 +118,20 @@ class Scheduler(object):
         self._sched = None
         sched.Stop()
 
+
 def remove_if(dir, cond):
     for item in os.listdir(dir):
         if cond(item):
             os.unlink(dir + '/' + item)
 
+
 def remove_backups(work_dir):
     remove_if(work_dir + '/backups', lambda file : file.startswith('sched-'))
 
+
 def remove_journal(work_dir):
     remove_if(work_dir + '/backups', lambda file : file.startswith('recent_tags.db'))
+
 
 def testVrs(self,
             do_intermediate_backup=False,
