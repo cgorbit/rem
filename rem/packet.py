@@ -332,6 +332,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
                            kill_all_jobs_on_error=(bool, True),
                            _clean_state=(bool, False), # False for loading old backups
                            isResetable=(bool, True),
+                           notify_on_reset=(bool, False),
+                           notify_on_skipped_reset=(bool, True),
                            directory=lambda *args: args[0] if args else None,
 
                            # FIXME equal to _active_jobs.{_active + _results}?
@@ -348,7 +350,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
     # Actually WAITING and ERROR sometimes applicable too run jobs (see _apply_job_result)
     _ALLOWED_TO_RUN_NEW_JOBS_STATES = [PacketState.WORKABLE, PacketState.PENDING]
 
-    def __init__(self, name, priority, context, notify_emails, wait_tags=(), set_tag=None, kill_all_jobs_on_error=True, isResetable=True):
+    def __init__(self, name, priority, context, notify_emails, wait_tags=(),
+                 set_tag=None, kill_all_jobs_on_error=True, isResetable=True,
+                 notify_on_reset=False, notify_on_skipped_reset=True):
         super(JobPacket, self).__init__()
         self.name = name
         self.state = PacketState.NONINITIALIZED
@@ -588,9 +592,11 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
         self._send_email(make)
 
-    def _send_reset_notification(self, comment):
+    def _send_reset_notification(self, tag_name, comment, will_reset):
         def make(ctx):
-            return messages.FormatPacketResetNotificationMessage(ctx, self, comment)
+            return messages.FormatPacketResetNotificationMessage(
+                ctx=ctx, pck=self, comment=comment, tag_name=tag_name,
+                will_reset=will_reset)
 
         self._send_email(make)
 
@@ -1017,14 +1023,22 @@ class JobPacket(Unpickable(lock=PickableRLock,
             if self.state == PacketState.HISTORIED:
                 return
 
-            self.waitTags.add(ref.GetFullname())
+            tag_name = ref.GetFullname()
+            self.waitTags.add(tag_name)
 
             if self.state == PacketState.CREATED:
                 return
 
+            def notify(will_reset):
+                self._send_reset_notification(tag_name, comment, will_reset)
+
             if not self.isResetable:
-                self._send_reset_notification(comment)
+                if self.notify_on_skipped_reset:
+                    notify(False)
                 return
+
+            if self.notify_on_reset:
+                notify(True)
 
             # TODO "is_done and tag.Reset(comment)" is not kosher!
             # We need reset-if-need logic in cloud_tags_server proxy
