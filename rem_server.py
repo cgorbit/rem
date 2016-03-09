@@ -90,8 +90,13 @@ def rpc_assert(cond, msg):
 def MakeDuplicatePackageNameException(pck_name):
     return RpcUserError(DuplicatePackageNameException(pck_name, _context.network_name))
 
+
 @traced_rpc_method("info")
-def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag, kill_all_jobs_on_error=True, packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY, resetable=True):
+def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
+                  kill_all_jobs_on_error=True,
+                  packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY,
+                  resetable=True, notify_on_reset=False, notify_on_skipped_reset=True):
+
     if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
     if notify_emails is not None:
@@ -101,10 +106,13 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag, 
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck = JobPacket(packet_name, priority, _context, notify_emails,
                     wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
-                    kill_all_jobs_on_error=kill_all_jobs_on_error, isResetable=resetable)
+                    kill_all_jobs_on_error=kill_all_jobs_on_error, isResetable=resetable,
+                    notify_on_reset=notify_on_reset,
+                    notify_on_skipped_reset=notify_on_skipped_reset)
     _scheduler.RegisterNewPacket(pck, wait_tags)
     logging.info('packet %s registered as %s', packet_name, pck.id)
     return pck.id
+
 
 def MakeNonExistedPacketException(pck_id):
     return RpcUserError(AttributeError("nonexisted packet id: %s" % pck_id))

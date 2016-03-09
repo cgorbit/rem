@@ -116,22 +116,33 @@ class TooLongWorkingWarning(IMessageHelper):
 
 
 class ResetNotification(IMessageHelper):
-    def __init__(self, ctx, pck, message):
+
+    def __init__(self, ctx, pck, tag_name, comment, will_reset):
         self.pck = pck
         self.ctx = ctx
-        self.reason = message
+        self.reason = comment
+        self.tag_name = tag_name
+        self.will_reset = will_reset
 
     def subject(self):
-        return "[REM@%(sname)s] packet '%(pname)s' need to be reset" \
-            % {"pname": self.pck.name, "sname": self.ctx.network_name}
+        return "[REM@{host}] packet '{pck_name}' {inter} reset by {tag_name}".format(
+            inter='will be' if self.will_reset else 'will not be',
+            host=self.ctx.network_name,
+            pck_name=self.pck.name,
+            tag_name=self.tag_name
+        )
 
     def message(self):
         mbuf = cStringIO.StringIO()
-        print >>mbuf, "some tags were reset"
-        print >>mbuf, "may be your packet '%(pname)s' had to reset, but haven't" % {"pname": self.pck.name}
-        if not self.pck.isResetable:
-            print >>mbuf, "... because your packet doesn't allow automatical resets"
-        print >>mbuf, "reset reason:", utf8ifunicode(self.reason)
+        print >>mbuf, "Tag '%s' was reset." % self.tag_name
+        print >>mbuf, "Reset reason:", utf8ifunicode(self.reason)
+        print >>mbuf
+        print >>mbuf, "You packet {name} ({id}) {action}".format(
+            id=self.pck.id,
+            name=self.pck.name,
+            action='will be reset' if self.will_reset \
+                else "will not be reset, because it's not resetable"
+        )
         print >>mbuf
         self._outputExtendedPacketStatus(mbuf, self.pck.id, self.pck.Status())
         return mbuf.getvalue()
@@ -143,8 +154,8 @@ def FormatPacketErrorStateMessage(ctx, pck):
 def FormatPacketEmergencyError(ctx, pck):
     return EmergencyError(ctx, pck).make()
 
-def FormatPacketResetNotificationMessage(ctx, pck, comment):
-    return ResetNotification(ctx, pck, comment).make()
+def FormatPacketResetNotificationMessage(*args, **kwargs):
+    return ResetNotification(*args, **kwargs).make()
 
 def FormatLongExecutionWarning(ctx, job):
     return TooLongWorkingWarning(ctx, job).make()

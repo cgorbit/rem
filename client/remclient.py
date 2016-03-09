@@ -229,12 +229,22 @@ class JobPacket(object):
     DEFAULT_TRIES_COUNT = 5
 
     def __init__(self, connector, name, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
-                 kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY):
+                 kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
+                 notify_on_reset=False, notify_on_skipped_reset=True):
         self.conn = connector
         self.proxy = connector.proxy
         if check_tag_uniqueness and self.proxy.check_tag(set_tag):
             raise RuntimeError("result tag %s already set for packet %s" % (set_tag, name))
-        self.id = self.proxy.create_packet(name, priority, notify_emails, wait_tags, set_tag, kill_all_jobs_on_error, packet_name_policy, resetable)
+
+        args = [
+            name, priority, notify_emails, wait_tags, set_tag,
+            kill_all_jobs_on_error, packet_name_policy, resetable,
+        ]
+
+        if notify_on_reset or not notify_on_skipped_reset:
+            args.extend([notify_on_reset, notify_on_skipped_reset])
+
+        self.id = self.proxy.create_packet(*args)
 
     def AddJob(self, shell, parents=None, pipe_parents=None, set_tag=None, tries=DEFAULT_TRIES_COUNT, files=None, \
                max_err_len=None, retry_delay=None, pipe_fail=False, description="", notify_timeout=NOTIFICATION_TIMEOUT, max_working_time=KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
@@ -659,7 +669,8 @@ class Connector(object):
         return Queue(self, qname)
 
     def Packet(self, pckname, priority=MAX_PRIORITY, notify_emails=[], wait_tags=(), set_tag=None,
-               check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True):
+               check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True,
+               notify_on_reset=False, notify_on_skipped_reset=True):
         """создает новый пакет с именем pckname
             priority - приоритет выполнения пакета
             notify_emails - список почтовых адресов, для уведомления об ошибках
@@ -671,8 +682,14 @@ class Connector(object):
         try:
             if isinstance(wait_tags, str):
                 raise AttributeError("wrong wait_tags attribute type")
-            return JobPacket(self, pckname, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
-                             kill_all_jobs_on_error=kill_all_jobs_on_error, packet_name_policy=self.packet_name_policy)
+            return JobPacket(
+                self, pckname, priority, notify_emails, wait_tags, set_tag,
+                check_tag_uniqueness, resetable,
+                kill_all_jobs_on_error=kill_all_jobs_on_error,
+                packet_name_policy=self.packet_name_policy,
+                notify_on_reset=notify_on_reset,
+                notify_on_skipped_reset=notify_on_skipped_reset
+            )
         except xmlrpclib.Fault, e:
             if 'DuplicatePackageNameException' in e.faultString:
                 self.logger.error(DuplicatePackageNameException(e.faultString).message)
