@@ -88,7 +88,8 @@ def rpc_assert(cond, msg):
         raise RpcUserError(AssertionError(msg))
 
 def MakeDuplicatePackageNameException(pck_name):
-    return RpcUserError(DuplicatePackageNameException(pck_name, _context.network_name))
+    e = DuplicatePackageNameException(pck_name, _context.network_name)
+    return RpcUserError(xmlrpclib.Fault(1, e.message))
 
 
 @traced_rpc_method("info")
@@ -138,13 +139,14 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
 @traced_rpc_method("info")
 def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPLICATE_NAMES_POLICY):
     pck = _scheduler.tempStorage.PickPacket(pck_id)
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+
     packet_name = pck.name
     if packet_name_policy & (constants.DENY_DUPLICATE_NAMES_POLICY | constants.WARN_DUPLICATE_NAMES_POLICY) and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
-    if pck is not None:
-        _scheduler.AddPacketToQueue(queue_name, pck)
-        return
-    raise MakeNonExistedPacketException(pck_id)
+
+    _scheduler.AddPacketToQueue(queue_name, pck)
 
 
 @traced_rpc_method("info")
