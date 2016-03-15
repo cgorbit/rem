@@ -82,7 +82,9 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
 
     def PickPacket(self, id):
         with self.lock:
-            return self.packets.pop(id)[1][1]
+            pck = self.packets.pop(id)
+            if pck:
+                return pck[1][1]
 
 
 class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=str)):
