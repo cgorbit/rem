@@ -313,28 +313,10 @@ class SkybitOps(object):
 class NannyOps(object):
     @classmethod
     def _do_connect(cls, (host, port)):
-        logging.debug('before ProtobufConnection(%s, %s)' % (host, port))
+        logging.debug('before NannyOps.ProtobufConnection(%s, %s)' % (host, port))
         ret = ProtobufConnection(host, port)
-        logging.debug('after ProtobufConnection(%s, %s)' % (host, port))
+        logging.debug('after NannyOps.ProtobufConnection(%s, %s)' % (host, port))
         return ret
-
-    #@classmethod
-    #def local_and_remote(cls, host):
-        #def list_instances():
-            #return (
-                #cls._list_expr(local_expr),
-                #cls._list_expr(remote_expr)
-            #)
-
-        #def list_instances():
-            #return (
-                #[('sas1-6818.search.yandex.net', 8360)],
-                #[('ws29-033.yandex.ru', 8600)],
-            #)
-
-        #instances = _LocalAndRemoteInstances(list_instances)
-
-        #return _ConnectionFromInstances(instances, cls._do_connect)
 
     @classmethod
     def _make_instances_lister(nanny, service):
@@ -343,8 +325,8 @@ class NannyOps(object):
     @classmethod
     def plain(cls, nanny, service):
         list = cls._make_instances_lister(nanny)
-        #get = _PlainInstancesList(list,
-        get = _LocalAndRemoteInstances(lambda : (list(), []))
+        get = _PlainInstancesList(list)
+        #get = _LocalAndRemoteInstances(lambda : (list(), []))
         return _ConnectionFromInstances(get, cls._do_connect)
 
 
