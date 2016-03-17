@@ -20,6 +20,7 @@ import fork_locking
 from future import Promise, WaitFutures
 from profile import ProfiledThread
 from rem_logging import logger as logging
+import cloud_connection
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -544,6 +545,9 @@ class TagStorage(object):
             except Exception as e:
                 raise RuntimeError("Can't load cloud_tags_masks from %s: %s" % (self._cloud_tags_masks, e))
 
+            self._cloud_tags_server_connection_factory \
+                = cloud_connection.from_description(self._cloud_tags_server)
+
     def _load_masks(self):
         return TagsMasks.load(self._cloud_tags_masks)
 
@@ -560,7 +564,10 @@ class TagStorage(object):
             self._masks_reload_thread.start()
             logging.debug("after_masks_reload_thread_start")
 
-            self._cloud = cloud_client.getc(addr=self._cloud_tags_server, on_event=self._on_cloud_journal_event)
+            self._cloud = cloud_client.Client(
+                self._cloud_tags_server_connection_factory,
+                on_event=self._on_cloud_journal_event
+            )
 
             self._safe_cloud = SafeCloud(self._cloud, self._journal, self._prev_safe_cloud_state)
             self._prev_safe_cloud_state = None
