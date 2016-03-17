@@ -504,6 +504,7 @@ class TagsMasks(object):
 
 class TagStorage(object):
     _CLOUD_TAG_REPR_UPDATE_WAITING_TTL = 7200 # Hack for hostA:RemoteTag -> hostB:CloudTag
+    CLOUD_CLIENT_STOP_TIMEOUT = 10.0
 
     def __init__(self, rhs=None):
         self.lock = PickableLock()
@@ -646,7 +647,7 @@ class TagStorage(object):
 
     def Stop(self):
         if self._cloud:
-            self._cloud.stop(timeout=10)
+            self._cloud.stop(timeout=self.CLOUD_CLIENT_STOP_TIMEOUT)
 
             # actually this must be guaranted by _cloud.stop
             self._safe_cloud.wait_running_empty()
