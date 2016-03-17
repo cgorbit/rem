@@ -20,7 +20,6 @@ import fork_locking
 from future import Promise, WaitFutures
 from profile import ProfiledThread
 from rem_logging import logger as logging
-import cloud_connection
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -539,6 +538,9 @@ class TagStorage(object):
             # Allow to run REM without python-protobuf
             global cloud_client
             import cloud_client
+
+            global cloud_client
+            import cloud_connection
 
             try:
                 self._match_cloud_tag = self._load_masks()
