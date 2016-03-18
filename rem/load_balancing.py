@@ -6,21 +6,25 @@ from rem_logging import logger as logging
 
 class _InstanceGroup(object):
     class _Instance(object):
-        FAILS_LEN = 3
+        FAILS_HISTORY_LENGTH = 3
 
         def __init__(self, addr):
             self.addr = addr
             self._fails = deque()
             self._last_cant_connect = 0
 
+        def __repr__(self):
+            return '<_Instance %s; fails=%s; lcc=%s>' % (self.addr, self._fails, self._last_cant_connect)
+
+        def register_connect(self):
+            self._last_cant_connect = 0
+
         def register_disconnect(self):
             logging.debug("++ register_disconnect(%s)" % (self.addr,))
 
-            self._last_cant_connect = 0 # FIXME More kosher
-
             self._fails.append(time.time())
 
-            if len(self._fails) > self.FAILS_LEN:
+            if len(self._fails) > self.FAILS_HISTORY_LENGTH:
                 self._fails.popleft()
 
         def register_cant_connect(self, error):
@@ -30,30 +34,28 @@ class _InstanceGroup(object):
 
     # XXX TODO XXX TODO XXX
         def is_good(self):
-            if time.time() - self._last_cant_connect < 1:
+            if time.time() - self._last_cant_connect < 1.0:
                 return False
 
-            #FAILS_LEN = 3
-            #fails = deque(iterable)
-
             fails = self._fails
-            need_fails_len = self.FAILS_LEN
-
-            #time.time = lambda : 100
 
             def pairs():
                 cont = fails
                 return [(cont[idx - 1], cont[idx]) for idx, _ in enumerate(cont) if idx]
 
-            if len(fails) == need_fails_len:
+            if len(fails) == self.FAILS_HISTORY_LENGTH:
                 always_fail = all(v1 - v0 < 10 for v0, v1 in pairs())
-                if always_fail and time.time() - fails[-1] < 30: # TODO
+                if always_fail and time.time() - fails[-1] < 15:
                     return False
 
             return True
 
     def __init__(self, addrs):
         self._instances = deque(self._Instance(addr) for addr in addrs)
+
+    def __repr__(self):
+        sep = '\n    '
+        return '<_InstanceGroup [' + sep + sep.join(repr(i) for i in self._instances) + '] >'
 
     def update_instances(self, new_addrs):
         new_addrs = set(new_addrs)
@@ -83,7 +85,10 @@ class PlainInstancesList(object):
         self._list_instances = list_instances
         self._last_list_update_time = 0
         self._list_update_interval = list_update_interval
-        self._list_update_interval = 10 # TODO REMOVE
+
+# XXX TODO XXX TODO XXX TODO REMOVE
+        self._list_update_interval = 10
+
         self._instances_group = None
 
     def _try_update_addrs(self):
@@ -106,13 +111,12 @@ class PlainInstancesList(object):
         else:
             self._instances_group.update_instances(new_instances)
 
-        self._last_list_update_time = time.time() # TODO
+        self._last_list_update_time = time.time()
 
         return True
 
     def __call__(self):
         if not self._instances_group:
-            logging.debug("++ if not self._instances_group")
             if not self._try_update_addrs():
                 return
 
@@ -120,7 +124,7 @@ class PlainInstancesList(object):
             self._try_update_addrs()
 
         instance = self._instances_group.get()
-        #logging.debug('instance_group give no instance')
+        logging.debug('PlainInstancesList() -> %s' % instance)
         return instance
 
 
@@ -163,13 +167,12 @@ class LocalAndRemoteInstances(object):
             self._local_group.update_instances(local)
             self._remote_group.update_instances(remote)
 
-        self._last_list_update_time = time.time() # TODO
+        self._last_list_update_time = time.time()
 
         return True
 
     def __call__(self):
         if not self._local_group:
-            logging.debug("++ if not self._local_group")
             if not self._try_update_addrs():
                 return
 
@@ -196,9 +199,9 @@ class LocalAndRemoteInstances(object):
 
 
 class ConnectionFromInstances(object):
-    def __init__(self, get_instance, create_connection):
+    def __init__(self, get_instance, connect):
         self._get_instance = get_instance
-        self._create_connection = create_connection
+        self._connect = connect
         self._current_instance = None
 
     def __call__(self):
@@ -207,17 +210,18 @@ class ConnectionFromInstances(object):
             self._current_instance = None
 
         while True:
-            logging.debug('ConnectionFromInstances.while.True')
-
             instance = self._get_instance()
+            logging.debug('ConnectionFromInstances instance = %s' % instance) # TODO REMOVE
+
             if not instance:
                 return
 
             try:
-                connection = self._create_connection(instance.addr)
+                connection = self._connect(instance.addr)
             except Exception as e:
                 instance.register_cant_connect(e)
             else:
+                instance.register_connect()
                 break
 
         self._current_instance = instance

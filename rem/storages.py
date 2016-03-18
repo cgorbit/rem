@@ -548,7 +548,7 @@ class TagStorage(object):
             except Exception as e:
                 raise RuntimeError("Can't load cloud_tags_masks from %s: %s" % (self._cloud_tags_masks, e))
 
-            self._cloud_tags_server_connection_factory \
+            self._cloud_tags_server_instances \
                 = cloud_connection.from_description(self._cloud_tags_server)
 
     def _load_masks(self):
@@ -568,7 +568,7 @@ class TagStorage(object):
             logging.debug("after_masks_reload_thread_start")
 
             self._cloud = cloud_client.Client(
-                self._cloud_tags_server_connection_factory,
+                self._cloud_tags_server_instances,
                 on_event=self._on_cloud_journal_event
             )
 
