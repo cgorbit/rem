@@ -20,7 +20,7 @@ class _InstanceGroup(object):
             self._last_cant_connect = 0
 
         def register_disconnect(self):
-            logging.debug("++ register_disconnect(%s)" % (self.addr,))
+            #logging.debug("++ register_disconnect(%s)" % (self.addr,))
 
             self._fails.append(time.time())
 
@@ -28,11 +28,9 @@ class _InstanceGroup(object):
                 self._fails.popleft()
 
         def register_cant_connect(self, error):
-            logging.debug("++ register_cant_connect(%s, %s)" % (self.addr, error))
-            #(void)error
+            #logging.debug("++ register_cant_connect(%s, %s)" % (self.addr, error))
             self._last_cant_connect = time.time()
 
-    # XXX TODO XXX TODO XXX
         def is_good(self):
             if time.time() - self._last_cant_connect < 1.0:
                 return False
@@ -63,14 +61,19 @@ class _InstanceGroup(object):
         old_addrs = set(i.addr for i in self._instances)
 
         if old_addrs == new_addrs:
-            return
+            return False
 
         to_add = new_addrs - old_addrs
+
+        logging.debug('_InstanceGroup.update_instances(+ %s; - %s)' \
+            % (to_add, old_addrs - new_addrs))
 
         self._instances = deque(
             [self._Instance(addr) for addr in to_add] + \
             [i for i in self._instances if i.addr in new_addrs]
         )
+
+        return True
 
     def get(self):
         for idx, instance in enumerate(self._instances):
@@ -85,49 +88,47 @@ class PlainInstancesList(object):
         self._list_instances = list_instances
         self._last_list_update_time = 0
         self._list_update_interval = list_update_interval
-
-# XXX TODO XXX TODO XXX TODO REMOVE
-        self._list_update_interval = 10
-
         self._instances_group = None
 
     def _try_update_addrs(self):
         try:
             new_instances = self._list_instances()
         except Exception as e:
-            logging.exception("Failed to get addrs")
+            logging.exception("Failed to get instances list")
+            return
+
+        if not new_instances:
+            logging.error("Got empty instances list, will not apply update")
             return
 
         random.shuffle(new_instances)
 
-        logging.debug('_list_instances => %s;' % new_instances)
-
-        if not new_instances:
-            logging.error("Empty addrs list")
-            return
+        modified = False
 
         if not self._instances_group:
             self._instances_group = _InstanceGroup(new_instances)
+            modified = True
         else:
-            self._instances_group.update_instances(new_instances)
+            modified = self._instances_group.update_instances(new_instances)
+
+        if modified:
+            logging.debug('New instances list: %s' % new_instances)
 
         self._last_list_update_time = time.time()
 
         return True
 
     def __call__(self):
-        if not self._instances_group:
-            if not self._try_update_addrs():
-                return
-
         if time.time() - self._last_list_update_time > self._list_update_interval:
             self._try_update_addrs()
 
-        instance = self._instances_group.get()
-        logging.debug('PlainInstancesList() -> %s' % instance)
-        return instance
+        if not self._instances_group:
+            return
+
+        return self._instances_group.get()
 
 
+# XXX Not tested at all
 class LocalAndRemoteInstances(object):
     _LOCAL_GROUP_MAX_WAIT_TIME = 60.0
 
@@ -135,7 +136,6 @@ class LocalAndRemoteInstances(object):
         self._list_addrs = list_addrs
         self._last_list_update_time = 0
         self._list_update_interval = list_update_interval
-        self._list_update_interval = 10 # TODO REMOVE
         self._local_group = None
         self._local_group_first_fail_time = None
         self._remote_group = None
@@ -211,7 +211,6 @@ class ConnectionFromInstances(object):
 
         while True:
             instance = self._get_instance()
-            logging.debug('ConnectionFromInstances instance = %s' % instance) # TODO REMOVE
 
             if not instance:
                 return

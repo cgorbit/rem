@@ -209,9 +209,9 @@ class _FakePromise(object):
 
 
 def _make_protobuf_connection((host, port)):
-    logging.debug('before ProtobufConnection(%s, %s)' % (host, port))
+    #logging.debug('before ProtobufConnection(%s, %s)' % (host, port))
     ret = ProtobufConnection(host, port)
-    logging.debug('after ProtobufConnection(%s, %s)' % (host, port))
+    #logging.debug('after ProtobufConnection(%s, %s)' % (host, port))
     return ret
 
 
@@ -351,18 +351,18 @@ class Client(object):
 
             io = self._io = self.IO()
 
-            logging.info("Connecting to server...")
+            logging.info("Connecting to servers...")
 
         # TODO pool of hosts
             connection = self._create_connection()
+            addr = (connection._host, connection._port)
 
             if not connection:
                 break
 
-            logging.info("Connected to %s" % connection)
+            logging.info("Connected to %s" % (addr,))
 
             io._connection = connection
-            del connection
 
             with self._lock:
                 self._io._connected = True
@@ -376,6 +376,8 @@ class Client(object):
 
             read_thread.join()
             write_thread.join()
+
+            logging.info("Disconnected from %s" % (addr,))
 
     def _reconstruct_outgoing(self):
         with self._lock:
@@ -578,10 +580,9 @@ class Client(object):
             loop()
             failed = False
         except Exception as e:
-            #logging.error("%s error: %s" % (type_str, e))
             logging.exception("%s error" % type_str)
 
-        logging.debug("%s io thread stopped" % type_str)
+        #logging.debug("%s io thread stopped" % type_str)
 
         try:
             self._io._connection.shutdown(how)
