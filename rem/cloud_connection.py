@@ -5,16 +5,20 @@ import rem.load_balancing as load_balancing
 from rem.common import parse_network_address
 from rem_logging import logger as logging
 
+def _connection_from_instances(get_instance):
+    return lambda connect: load_balancing.ConnectionFromInstances(get_instance, connect)
+
 
 def fixed_plain_addr_list(addrs):
     list = lambda : addrs
-    return load_balancing.PlainInstancesList(list)
+    get = load_balancing.PlainInstancesList(list)
+    return _connection_from_instances(get)
 
 
 def nanny_service(nanny, service):
     list = lambda : nanny.list_instances(service)
-    return load_balancing.PlainInstancesList(list)
-    #return load_balancing.LocalAndRemoteInstances(lambda : (list(), []))
+    get = load_balancing.PlainInstancesList(list)
+    return _connection_from_instances(get)
 
 
 def single_host_port(host, port):

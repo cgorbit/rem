@@ -15,7 +15,6 @@ from google.protobuf.internal.encoder import _EncodeVarint as EncodeVarint
 
 from future import Promise
 from profile import ProfiledThread
-import load_balancing
 import cloud_tags_pb2
 from rem_logging import logger as logging
 
@@ -223,10 +222,8 @@ class Client(object):
     _ST_WAIT   = 1
     _ST_NOWAIT = 2
 
-    def __init__(self, instances, on_event):
-        self._connection_constructor \
-            = load_balancing.ConnectionFromInstances(instances, _make_protobuf_connection)
-
+    def __init__(self, connection_ctor_ctor, on_event):
+        self._connection_constructor = connection_ctor_ctor(_make_protobuf_connection)
         self._on_event = on_event
 
         self._stopped = False
