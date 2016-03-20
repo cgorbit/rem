@@ -350,12 +350,12 @@ class Client(object):
 
             logging.info("Connecting to servers...")
 
-        # TODO pool of hosts
             connection = self._create_connection()
-            addr = (connection._host, connection._port)
 
             if not connection:
                 break
+
+            addr = (connection._host, connection._port)
 
             logging.info("Connected to %s" % (addr,))
 
