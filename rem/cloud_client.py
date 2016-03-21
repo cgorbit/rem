@@ -1,6 +1,7 @@
 #! /usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import os
 import sys
 import time
 import socket
@@ -19,6 +20,8 @@ from rem_logging import logger as logging
 
 READY_ACK_FUTURE = Promise().set(None).to_future()
 READY_EMPTY_DICT_FUTURE = Promise().set({}).to_future()
+
+COUNT_IO = bool(os.getenv('COUNT_CLOUD_TAGS_IO'))
 
 class ServiceStopped(RuntimeError):
     pass
@@ -68,6 +71,29 @@ def asjsonstring(data):
     #return json.dumps(data, indent=3)
     return json.dumps(data)
 
+
+class _CountedIO(object):
+    def __init__(self, backend):
+        self._backend = backend
+        self.read_counter = 0
+        self.write_counter = 0
+
+    def read(self, size):
+        ret = self._backend.read(size)
+        self.read_counter += len(ret)
+        return ret
+
+    def write(self, str):
+        self.write_counter += len(str)
+        return self._backend.write(str)
+
+    def close(self):
+        self._backend.close()
+
+    def flush(self):
+        self._backend.flush()
+
+
 class ProtobufConnection(object):
     def __init__(self, host, port):
         self._host = host
@@ -77,10 +103,24 @@ class ProtobufConnection(object):
         self._out = self._sock.makefile('w')
         self._closed = False
 
+        if COUNT_IO:
+            self._in  = _CountedIO(self._in)
+            self._out = _CountedIO(self._out)
+
+        self._red_msg_count = 0
+        self._written_msg_count = 0
+
+    def get_stats(self):
+        if hasattr(self._in, 'read_counter'):
+            return self._in.read_counter, self._out.write_counter
+        else:
+            return None, None
+
     def __repr__(self):
-        return '<%s ProtobufConnection to %s:%s at 0x%x>' % (
+        return '<%s ProtobufConnection to %s:%s %s at 0x%x>' % (
             'closed' if self._closed else 'open',
             self._host, self._port,
+            self.get_stats(),
             id(self)
         )
 
@@ -100,6 +140,8 @@ class ProtobufConnection(object):
         out.write(serialized)
 
         out.flush()
+
+        self._written_msg_count += 1
 
     def recv(self):
         in_ = self._in
@@ -121,6 +163,8 @@ class ProtobufConnection(object):
 
         if not msg.IsInitialized():
             raise RuntimeError("Message from server not IsInitialized")
+
+        self._red_msg_count += 1
 
         return msg
 
@@ -162,6 +206,14 @@ class _FakePromise(object):
     def set(self, val=None, exc=None):
         pass
 
+
+def _make_protobuf_connection((host, port)):
+    #logging.debug('before ProtobufConnection(%s, %s)' % (host, port))
+    ret = ProtobufConnection(host, port)
+    #logging.debug('after ProtobufConnection(%s, %s)' % (host, port))
+    return ret
+
+
 class Client(object):
     MESSAGE_MAX_ITEM_COUNT = 1000
     __FAKE_PROMISE = _FakePromise()
@@ -170,8 +222,8 @@ class Client(object):
     _ST_WAIT   = 1
     _ST_NOWAIT = 2
 
-    def __init__(self, create_connection, on_event):
-        self._connection_constructor = create_connection
+    def __init__(self, connection_ctor_ctor, on_event):
+        self._connection_constructor = connection_ctor_ctor(_make_protobuf_connection)
         self._on_event = on_event
 
         self._stopped = False
@@ -184,7 +236,7 @@ class Client(object):
         self._should_stop = self._ST_NONE
 
         self._io = None
-        self._last_connect_time = 0
+        self._io_stats = [0, 0]
 
         self._lock = threading.Lock()
         self._outgoing_not_empty = threading.Condition(self._lock)
@@ -197,15 +249,32 @@ class Client(object):
         self._connect_thread = ProfiledThread(target=self._connect_loop, name_prefix='CldTg-Connect')
         self._connect_thread.start()
 
+    def get_io_stats(self):
+        conn = self._io._connection if self._io and self._io._connection else None
+
+        msg_stat = (
+            conn._red_msg_count if conn else None,
+            conn._written_msg_count if conn else None)
+
+        if not COUNT_IO:
+            return (None, None) + msg_stat
+
+        prev_stats = self._io_stats
+        cur_stats = conn.get_stats() if conn else (0, 0)
+
+        return (prev_stats[0] + cur_stats[0],
+                prev_stats[1] + cur_stats[1]) + msg_stat
+
     def __repr__(self):
         with self._lock:
-            conn = self._io._connection if self._io and self._io._connection else None
+            io = self._io
+            conn = io._connection if io and io._connection else None
 
             return '<%s.%s %s%s %s at 0x%x>' % (
                 self.__module__,
                 type(self).__name__,
                 'stopped ' if self._stopped else '',
-                '%s:%s' % (conn._host, conn._port) if conn else None,
+                '%s:%s %s' % (conn._host, conn._port, self.get_io_stats()) if conn else None,
                 'running=%d, outgoing=%d, subs=%d' % (
                     len(self._running),
                     len(self._outgoing),
@@ -222,8 +291,7 @@ class Client(object):
 
     def _create_connection(self):
         now = time.time()
-        next_allowed_connect = self._last_connect_time + 1.0
-        timeout = next_allowed_connect - now if next_allowed_connect > now else 0.0
+        timeout = 0.0
 
         while True:
             with self._lock:
@@ -237,15 +305,13 @@ class Client(object):
 
             try:
                 conn = self._connection_constructor()
-                self._last_connect_time = time.time()
-                return conn
             except Exception as e:
                 logging.warning("Failed to connect: %s" % e)
 
-            timeout = min(timeout * 2, 10.0)
+            if conn:
+                return conn
 
-            if not timeout:
-                timeout = 1.0
+            timeout = 1.0
 
     def _connect_loop(self):
         self._connect_loop_inner()
@@ -271,6 +337,10 @@ class Client(object):
 
             if self._io:
                 self._io._connection.close()
+                if COUNT_IO:
+                    rd, wr = self._io._connection.get_stats()
+                    self._io_stats[0] += rd
+                    self._io_stats[1] += wr
                 self._io = None
 
             self._reconstruct_outgoing()
@@ -279,18 +349,18 @@ class Client(object):
 
             io = self._io = self.IO()
 
-            logging.info("Connecting to server...")
+            logging.info("Connecting to servers...")
 
-        # TODO pool of hosts
             connection = self._create_connection()
 
             if not connection:
                 break
 
-            logging.info("Connected to %s" % connection)
+            addr = (connection._host, connection._port)
+
+            logging.info("Connected to %s" % (addr,))
 
             io._connection = connection
-            del connection
 
             with self._lock:
                 self._io._connected = True
@@ -304,6 +374,8 @@ class Client(object):
 
             read_thread.join()
             write_thread.join()
+
+            logging.info("Disconnected from %s" % (addr,))
 
     def _reconstruct_outgoing(self):
         with self._lock:
@@ -506,10 +578,9 @@ class Client(object):
             loop()
             failed = False
         except Exception as e:
-            #logging.error("%s error: %s" % (type_str, e))
             logging.exception("%s error" % type_str)
 
-        logging.debug("%s io thread stopped" % type_str)
+        #logging.debug("%s io thread stopped" % type_str)
 
         try:
             self._io._connection.shutdown(how)
@@ -697,35 +768,6 @@ class Client(object):
 
 # если сервер просто закроет на чтение, я могу словить SIGPIPE
 
-def _parse_addr(addr):
-    try:
-        host, port = addr.rsplit(':', 1)
-    except ValueError:
-        raise ValueError("No port in addr")
+#def SingleAddressConnection(host, port):
+    #return lambda : ProtobufConnection(host, port)
 
-    try:
-        port = int(port)
-    except ValueError as e:
-        raise ValueError("Bad port number '%s'" % port)
-
-    if host.startswith('['):
-        if not host.endswith(']'):
-            raise ValueError("No matching right brace in host '%s'" % host)
-        host = host[1:-1]
-
-    if not host:
-        raise ValueError("Empty host")
-
-    return host, port
-
-def getc(addr='localhost:17777', on_event=None):
-    from pprint import pprint
-
-    host, port = _parse_addr(addr)
-
-    def conn_ctor():
-        return ProtobufConnection(host, port)
-
-    on_event = on_event or pprint
-
-    return Client(conn_ctor, on_event=on_event)

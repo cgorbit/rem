@@ -51,6 +51,8 @@ def _create_logger(ctx, log_to_file):
             when="midnight", backupCount=ctx.log_backup_count)
         logHandler.setFormatter(LogFormatter("%(asctime)s %(thread_id)s %(levelname)-8s %(module)s:\t%(message)s"))
         logger.addHandler(logHandler)
+    else:
+        logger.addHandler(logging.StreamHandler())
 
     logger.setLevel(log_level)
 

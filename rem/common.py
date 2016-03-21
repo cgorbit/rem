@@ -583,3 +583,26 @@ To: %(email-list)s
     sender.stdin.close()
     sender.communicate()
     return sender.poll()
+
+
+def parse_network_address(addr):
+    try:
+        host, port = addr.rsplit(':', 1)
+    except ValueError:
+        raise ValueError("No port in addr")
+
+    try:
+        port = int(port)
+    except ValueError as e:
+        raise ValueError("Bad port number '%s'" % port)
+
+    if host.startswith('['):
+        if not host.endswith(']'):
+            raise ValueError("No matching right brace in host '%s'" % host)
+        host = host[1:-1]
+
+    if not host:
+        raise ValueError("Empty host")
+
+    return host, port
+

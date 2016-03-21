@@ -504,6 +504,7 @@ class TagsMasks(object):
 
 class TagStorage(object):
     _CLOUD_TAG_REPR_UPDATE_WAITING_TTL = 7200 # Hack for hostA:RemoteTag -> hostB:CloudTag
+    CLOUD_CLIENT_STOP_TIMEOUT = 10.0
 
     def __init__(self, rhs=None):
         self.lock = PickableLock()
@@ -539,10 +540,16 @@ class TagStorage(object):
             global cloud_client
             import cloud_client
 
+            global cloud_client
+            import cloud_connection
+
             try:
                 self._match_cloud_tag = self._load_masks()
             except Exception as e:
                 raise RuntimeError("Can't load cloud_tags_masks from %s: %s" % (self._cloud_tags_masks, e))
+
+            self._cloud_tags_server_instances \
+                = cloud_connection.from_description(self._cloud_tags_server)
 
     def _load_masks(self):
         return TagsMasks.load(self._cloud_tags_masks)
@@ -560,7 +567,10 @@ class TagStorage(object):
             self._masks_reload_thread.start()
             logging.debug("after_masks_reload_thread_start")
 
-            self._cloud = cloud_client.getc(addr=self._cloud_tags_server, on_event=self._on_cloud_journal_event)
+            self._cloud = cloud_client.Client(
+                self._cloud_tags_server_instances,
+                on_event=self._on_cloud_journal_event
+            )
 
             self._safe_cloud = SafeCloud(self._cloud, self._journal, self._prev_safe_cloud_state)
             self._prev_safe_cloud_state = None
@@ -637,7 +647,7 @@ class TagStorage(object):
 
     def Stop(self):
         if self._cloud:
-            self._cloud.stop(timeout=10)
+            self._cloud.stop(timeout=self.CLOUD_CLIENT_STOP_TIMEOUT)
 
             # actually this must be guaranted by _cloud.stop
             self._safe_cloud.wait_running_empty()

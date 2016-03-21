@@ -10,6 +10,7 @@ import unittest
 
 import rem_server
 import rem.context
+import rem.storages
 from rem.callbacks import ETagEvent
 
 
@@ -226,19 +227,25 @@ class T18(unittest.TestCase):
     """Test rem.storages.SafeCloud backup and journal"""
 
     def testSafeCloudBackupAndJournalling(self):
-        for do_intermediate_backup in [True, False]:
-            for do_final_backup in [True, False]:
-                for do_remove_journal in [True, False]:
-                    for do_remove_backups in [True, False]:
-                        l = locals()
-                        setup = {
-                            name: l[name] for name in [
-                                'do_intermediate_backup',
-                                'do_final_backup',
-                                'do_remove_journal',
-                                'do_remove_backups',
-                            ]
-                        }
-                        logging.debug(setup)
-                        testVrs(self, **setup)
+        original_timeout = rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT
+        rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT = 1.0
+
+        try:
+            for do_intermediate_backup in [True, False]:
+                for do_final_backup in [True, False]:
+                    for do_remove_journal in [True, False]:
+                        for do_remove_backups in [True, False]:
+                            l = locals()
+                            setup = {
+                                name: l[name] for name in [
+                                    'do_intermediate_backup',
+                                    'do_final_backup',
+                                    'do_remove_journal',
+                                    'do_remove_backups',
+                                ]
+                            }
+                            logging.debug(setup)
+                            testVrs(self, **setup)
+        finally:
+            rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT = original_timeout
 
