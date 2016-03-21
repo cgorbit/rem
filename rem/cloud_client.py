@@ -267,7 +267,8 @@ class Client(object):
 
     def __repr__(self):
         with self._lock:
-            conn = self._io._connection if self._io and self._io._connection else None
+            io = self._io
+            conn = io._connection if io and io._connection else None
 
             return '<%s.%s %s%s %s at 0x%x>' % (
                 self.__module__,
