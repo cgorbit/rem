@@ -854,14 +854,13 @@ class TagStorage(object):
 
         return tag
 
-    def ListTags(self, name_regex=None, prefix=None, memory_only=True):
-# TODO Only local tags
+    def _match_in_memory_tags(self, name_regex, prefix, memory_only):
         for name, tag in self.inmem_items.items():
             if name and (not prefix or name.startswith(prefix)) \
                 and (not name_regex or name_regex.match(name)):
                 yield name, tag.IsLocallySet()
-        if memory_only:
-            return
+
+    def _match_in_file_tags(self, name_regex, prefix, memory_only):
         inner_db = bsddb3.btopen(self.db_file, "r")
         try:
             name, tagDescr = inner_db.set_location(prefix) if prefix else inner_db.first()
@@ -874,6 +873,27 @@ class TagStorage(object):
         except bsddb3._pybsddb.DBNotFoundError:
             pass
         inner_db.close()
+
+    def ListTags(self, regexp=None, prefix=None, memory_only=True):
+        for name, is_set in self._match_in_memory_tags(regexp, prefix, memory_only):
+            yield name, is_set
+
+        if memory_only:
+            return
+
+        cloud_result = None
+        if self._cloud:
+            cloud_result = self._cloud.match(
+                prefix=prefix,
+                regexp='^' + regexp.pattern if regexp else None
+            )
+
+        for name, is_set in self._match_in_file_tags(regexp, prefix, memory_only):
+            yield name, is_set
+
+        if cloud_result:
+            for tag in cloud_result.get():
+                yield tag.tag_name, tag.is_set
 
     def DBConnect(self):
         self.infile_items = bsddb3.btopen(self.db_file, "c")

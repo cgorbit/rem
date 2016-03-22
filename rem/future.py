@@ -111,9 +111,6 @@ class Future(object):
     def is_set(self):
         return self._state.is_set()
 
-    def __nonzero__(self):
-        return self.is_set()
-
     def wait(self, timeout=None):
         return self._state.wait(timeout)
 

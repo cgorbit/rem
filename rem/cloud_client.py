@@ -463,6 +463,21 @@ class Client(object):
         msg.Lookup.Tags.extend(tags)
         return self._push(msg)
 
+    def match(self, prefix=None, regexp=None, limit=None):
+        msg = cloud_tags_pb2.TClientMessage()
+
+        match = msg.Match
+        match.SetInParent()
+
+        if prefix is not None:
+            match.Prefix = prefix
+        if regexp is not None:
+            match.Regexp = regexp
+        if limit is not None:
+            match.Limit = limit
+
+        return self._push(msg)
+
     @staticmethod
     def _form_update_item(item, update):
         item.TagName = update[0]
@@ -681,11 +696,17 @@ class Client(object):
 
         @classmethod
         def Lookup(cls, msg):
-            return {item.TagName: cls.Lookup_(item) for item in msg.Lookup.Items}
+            return {item.TagName: cls.Lookup_(item) for item in msg.Items}
+
+        @classmethod
+        def Match(cls, msg):
+            if msg.Error:
+                return (None, RuntimeError(msg.Error))
+            return ([cls.Lookup_(item) for item in msg.Items], None)
 
         @classmethod
         def Subscriptions(cls, msg):
-            return msg.Subscriptions.Tags
+            return msg.Tags
 
     def _process_server_message(self, msg):
         # WhichOneof doesn't work
@@ -697,7 +718,7 @@ class Client(object):
                 if pred(item):
                     return item
 
-        type = first(msg.HasField, ['Event', 'Bye', 'Ack', 'Lookup', 'Subscriptions'])
+        type = first(msg.HasField, ['Event', 'Bye', 'Ack', 'Lookup', 'Subscriptions', 'Match'])
 
         if type is None:
     # XXX Client will looped in this error
@@ -734,9 +755,11 @@ class Client(object):
         if type == 'Ack':
             promise.set(None)
         elif type == 'Lookup':
-            promise.set(self._ServerMessage.Lookup(msg))
+            promise.set(self._ServerMessage.Lookup(msg.Lookup))
+        elif type == 'Match':
+            promise.set(*self._ServerMessage.Match(msg.Match))
         elif type == 'Subscriptions':
-            promise.set(self._ServerMessage.Subscriptions(msg))
+            promise.set(self._ServerMessage.Subscriptions(msg.Subscriptions))
         else:
             assert False
 
