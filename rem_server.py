@@ -276,7 +276,7 @@ def queue_delete(queue_name):
 @traced_rpc_method()
 def list_tags(name_regex=None, prefix=None, memory_only=True):
     name_regex = name_regex and re.compile(name_regex)
-    return list(set(_scheduler.tagRef.ListTags(name_regex, prefix, memory_only)))
+    return _scheduler.tagRef.ListTags(name_regex, prefix, memory_only)
 
 
 @readonly_method
