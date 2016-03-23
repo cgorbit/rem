@@ -877,8 +877,10 @@ class TagStorage(object):
     def ListTags(self, regexp=None, prefix=None, memory_only=True):
         lists = []
 
+        cloud_tags_server_released = False # XXX
+
         cloud_result = None
-        if not memory_only and self._cloud:
+        if not memory_only and self._cloud and cloud_tags_server_released:
             cloud_result = self._cloud.match(
                 prefix=prefix,
                 regexp='^' + regexp.pattern if regexp else None
