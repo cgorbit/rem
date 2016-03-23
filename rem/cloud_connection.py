@@ -38,7 +38,6 @@ def from_description(descr):
             raise ValueError("Malformed nanny description '%s'" % descr)
         token, host, service = m.groups()
         nanny = rem.nanny.Nanny(host, token)
-        print nanny.__dict__
         return nanny_service(nanny, service)
 
     # host0:port0,host1:port1
