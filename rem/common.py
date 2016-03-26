@@ -605,3 +605,4 @@ def parse_network_address(addr):
         raise ValueError("Empty host")
 
     return host, port
+
