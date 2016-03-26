@@ -39,20 +39,10 @@ class Context(object):
             raise RuntimeError("can't create directory: \"%s\"" % dir_name)
         return dir_name
 
-    def __init__(self, cfgFile, exec_mode):
+    def __init__(self, config_file):
         config = ConfigReader()
-        assert cfgFile in config.read(cfgFile), "error in configuration file \"%s\"" % cfgFile
-
+        assert config_file in config.read(config_file), 'error in configuration file "%s"' % config_file
         self._init_config_options(config)
-
-        self.exec_mode = exec_mode
-
-        is_test_mode = self.exec_mode != "start"
-
-        if is_test_mode:
-            self.log_warn_level = 'debug'
-
-        rem_logging.reinit_logger(self, log_to_file=not is_test_mode)
 
     def _init_config_options(self, config):
         self.log_directory = self.prep_dir(config.get("log", "dir"))
@@ -82,6 +72,8 @@ class Context(object):
         self.cloud_tags_masks = config.safe_get("store", "cloud_tags_masks", None)
         self.cloud_tags_masks_reload_interval = config.safe_getint("store", "cloud_tags_masks_reload_interval", 300)
         self.tags_random_cloudiness = config.safe_getboolean("store", "tags_random_cloudiness", False)
+        self.all_tags_in_cloud = config.safe_getboolean("store", "all_tags_in_cloud", False)
+        self.allow_startup_tags_conversion = config.safe_getboolean("store", "allow_startup_tags_conversion", True)
         self.manager_port = config.getint("server", "port")
         self.manager_readonly_port = config.safe_getint("server", "readonly_port")
         self.system_port = config.safe_getint("server", "system_port")
@@ -93,6 +85,7 @@ class Context(object):
         self.useMemProfiler = config.getboolean("server", "use_memory_profiler")
         self.max_remotetags_resend_delay = config.safe_getint("server", "max_remotetags_resend_delay", 300)
         self.allow_backup_rpc_method = config.safe_getboolean("server", "allow_backup_rpc_method", False)
+        self.register_objects_creation = False
 
     def send_email_async(self, rcpt, msg):
         self.Scheduler.send_email_async(rcpt, msg)

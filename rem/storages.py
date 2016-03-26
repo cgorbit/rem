@@ -17,7 +17,7 @@ from journal import TagLogger
 from packet import PacketState, JobPacket
 from Queue import Queue
 import fork_locking
-from future import Promise, WaitFutures
+from future import Promise, WaitFutures, READY_FUTURE
 from profile import ProfiledThread
 from rem_logging import logger as logging
 
@@ -223,8 +223,46 @@ class EditableState(object):
         ]
 
 
-class SafeCloud(object):
+class SerialUpdateOnlyDummyCloudClient(object):
+    """This class allows SafeCloud to work correctly"""
 
+    def __init__(self, wrong_setup_exc):
+        self._wrong_setup_future = Promise().set(None, wrong_setup_exc).to_future()
+        self._serial_update_promise = Promise()
+        self._serial_update_future = self._serial_update_promise.to_future()
+
+    def stop(self, timeout=None):
+        self._serial_update_promise.set(None, RuntimeError("cloud client stopped"))
+
+    def is_stopped(self):
+        return self._serial_update_future.is_set()
+
+    def wait_outgoing_empty(self):
+        raise NotImplementedError()
+
+    def serial_update(self, update):
+        return self._serial_update_future
+
+    def debug_server(self):
+        return self._wrong_setup_future
+
+    def subscribe(self, tags):
+        return READY_FUTURE
+
+    def unsubscribe(self, tags):
+        return READY_FUTURE
+
+    def lookup(self, tags):
+        return self._wrong_setup_future
+
+    def match(self, prefix=None, regexp=None, limit=None):
+        return self._wrong_setup_future
+
+    def update(self, updates):
+        return self._wrong_setup_future
+
+
+class SafeCloud(object):
     class NoopJournal(object):
         def log_cloud_request_start(*args):
             pass
@@ -234,7 +272,7 @@ class SafeCloud(object):
 
     def __init__(self, cloud, journal, prev_state):
         self._cloud = cloud
-        self._uid_epoch = time.time() # FIXME (time.time(), os.getpid())
+        self._uid_epoch = time.time() # FIXME Suppose that this is unique
         self._next_id = 1
         self._next_idx = 0
         self._lock = fork_locking.Lock()
@@ -522,6 +560,7 @@ class TagStorage(object):
         self._masks_reload_thread = None
         self._masks_should_stop = threading.Event()
         self._last_tag_mask_error_report_time = 0
+        self._all_tags_in_cloud = None
         if rhs:
             if isinstance(rhs, dict):
                 self.inmem_items = rhs
@@ -536,20 +575,37 @@ class TagStorage(object):
 
     def PreInit(self):
         if self._cloud_tags_server:
-            # Allow to run REM without python-protobuf
-            global cloud_client
-            import cloud_client
+            self._pre_init_cloud_tags_setup()
 
-            global cloud_client
-            import cloud_connection
+    def _pre_init_cloud_tags_setup(self):
+        # Allow to run REM without python-protobuf
+        global cloud_client
+        import cloud_client
 
+        global cloud_connection
+        import cloud_connection
+
+        if self._cloud_tags_masks:
+            self._do_initial_cloud_tags_masks_load()
+
+        self._cloud_tags_server_instances \
+            = cloud_connection.from_description(self._cloud_tags_server)
+
+    def _do_initial_cloud_tags_masks_load(self):
+        try_count = 3
+        for idx in range(try_count):
             try:
                 self._match_cloud_tag = self._load_masks()
             except Exception as e:
-                raise RuntimeError("Can't load cloud_tags_masks from %s: %s" % (self._cloud_tags_masks, e))
+                logging.warning("Iter #%d of cloud tags masks (%s) loading failed: %s" % (
+                    idx + 1, self._cloud_tags_masks, e))
+            else:
+                break
 
-            self._cloud_tags_server_instances \
-                = cloud_connection.from_description(self._cloud_tags_server)
+            if idx != try_count - 1:
+                time.sleep(5)
+        else:
+            raise RuntimeError("Failed to load cloud tags masks for %d attempts" % try_count)
 
     def _load_masks(self):
         return TagsMasks.load(self._cloud_tags_masks)
@@ -562,26 +618,36 @@ class TagStorage(object):
         logging.debug("after_repr_modifier_start")
 
         if self._cloud_tags_server:
-            self._masks_reload_thread = ProfiledThread(
-                target=self._masks_reload_loop, name_prefix='TagsMasksReload')
-            self._masks_reload_thread.start()
-            logging.debug("after_masks_reload_thread_start")
+            if self._cloud_tags_masks:
+                self._masks_reload_thread = ProfiledThread(
+                    target=self._masks_reload_loop, name_prefix='TagsMasksReload')
+                self._masks_reload_thread.start()
+                logging.debug("after_masks_reload_thread_start")
 
-            self._cloud = cloud_client.Client(
-                self._cloud_tags_server_instances,
-                on_event=self._on_cloud_journal_event
-            )
+            self._cloud = self._create_cloud_client(self._on_cloud_journal_event)
+        else:
+            # For CloudTag's in tags.db
+            self._cloud = SerialUpdateOnlyDummyCloudClient(
+                RuntimeError("Wrong setup for cloud tags in rem-server"))
 
-            self._safe_cloud = SafeCloud(self._cloud, self._journal, self._prev_safe_cloud_state)
-            self._prev_safe_cloud_state = None
-            logging.debug("after_safe_cloud_start")
+        self._create_safe_cloud()
+        logging.debug("after_safe_cloud_start")
 
-            self._subscribe_all()
-            logging.debug("after_subscribe_all")
+        self._subscribe_all()
+        logging.debug("after_subscribe_all")
+
+    def _create_cloud_client(self, on_event):
+        if not self._has_cloud_setup():
+            raise RuntimeError()
+
+        return cloud_client.Client(self._cloud_tags_server_instances, on_event=on_event)
+
+    def _create_safe_cloud(self):
+        self._safe_cloud = SafeCloud(self._cloud, self._journal, self._prev_safe_cloud_state)
+        self._prev_safe_cloud_state = None
 
     def _subscribe_all(self):
         with self.lock:
-            # FIXME могут ли они быть ещё где-то?
             cloud_tags = set(
                 tag.GetFullname()
                     for tag in self.inmem_items.itervalues()
@@ -646,11 +712,8 @@ class TagStorage(object):
             self._match_cloud_tag = match
 
     def Stop(self):
-        if self._cloud:
-            self._cloud.stop(timeout=self.CLOUD_CLIENT_STOP_TIMEOUT)
-
-            # actually this must be guaranted by _cloud.stop
-            self._safe_cloud.wait_running_empty()
+        self._cloud.stop(timeout=self.CLOUD_CLIENT_STOP_TIMEOUT)
+        self._safe_cloud.wait_running_empty()
 
         if self._masks_reload_thread:
             self._masks_should_stop.set()
@@ -662,7 +725,7 @@ class TagStorage(object):
     def __getstate__(self):
         return {
             'inmem_items': self.inmem_items.copy(),
-            '_prev_safe_cloud_state': self._safe_cloud.get_state() if self._cloud \
+            '_prev_safe_cloud_state': self._safe_cloud.get_state() if self._safe_cloud \
                                         else SafeCloud.get_empty_state()
         }
 
@@ -695,9 +758,11 @@ class TagStorage(object):
                     return state.__dict__
 
         for tag in tags:
-            if self.IsCloudTagName(tag):
+            # FIXME Consider that tag may exists as LocalTag in infile_items or inmem_items?
+            if self._is_cloud_tag_name(tag):
                 cloud_tags.add(tag)
             else:
+                # dont_create=True to distinguish unset tags from non-existed
                 ret[tag] = _ret_value(self._RawTag(tag, dont_create=True))
 
         promise = Promise()
@@ -741,12 +806,14 @@ class TagStorage(object):
         for update in updates:
             tag_name = update[0]
 
-            if self.IsCloudTagName(tag_name):
-                self._set_min_release_time(self.AcquireTag(tag_name).inner)
+            tag = self.AcquireTag(tag_name)
+
+            if tag.IsCloud():
+                self._set_min_release_time(tag.inner)
                 cloud_updates.append(update)
             else:
                 update = list(update)
-                update[0] = self.AcquireTag(tag_name)
+                update[0] = tag
                 local_updates.append(update)
 
         local_done = self._modify_local_tags(local_updates, with_future=True) if local_updates \
@@ -795,14 +862,19 @@ class TagStorage(object):
 
         return TagWrapper(ret)
 
-    def IsCloudTagName(self, name):
+    def _is_cloud_tag_name(self, name):
         if self.IsRemoteTagName(name):
             return False
 
         try:
             if self._tags_random_cloudiness:
                 return hash(name) % 3 == 0
+
+            if self._all_tags_in_cloud:
+                return True
+
             return self._match_cloud_tag(name)
+
         except Exception as e:
             now = time.time()
             if now - self._last_tag_mask_error_report_time > 5:
@@ -813,13 +885,16 @@ class TagStorage(object):
     def _create_tag(self, name):
         if self.IsRemoteTagName(name):
             return RemoteTag(name, self._modify_local_tag_safe)
-        elif self.IsCloudTagName(name):
+        elif self._is_cloud_tag_name(name):
             return CloudTag(name, self._modify_cloud_tag_safe)
         else:
             return LocalTag(name, self._modify_local_tag_safe)
 
-    def vivify_tags(self, tags):
-        has_cloud_setup = bool(self._cloud_tags_server)
+    def _has_cloud_setup(self):
+        return bool(self._cloud_tags_server)
+
+    def vivify_tags_from_backup(self, tags):
+        has_cloud_setup = self._has_cloud_setup()
 
         for tag in tags:
             if tag.IsCloud():
@@ -831,26 +906,107 @@ class TagStorage(object):
 
             tag._request_modify = modify
 
+    def _make_tag_cloud(self, tag):
+        new = CloudTag(tag_name, None)
+        tag.__dict__.clear()
+        tag.__dict__.update(new.__dict__)
+        tag.__class__ = new.__class__
+
+        self._set_modify_func(tag)
+
+    def convert_in_memory_tags_to_cloud_if_need(self):
+        if not self._has_cloud_setup():
+            return
+
+        updates = []
+
+        for tag in self.inmem_items.iteritems():
+            tag_name = tag.GetFullname()
+            must_be_cloud = self._is_cloud_tag_name(tag_name)
+
+            if must_be_cloud == tag.IsCloud():
+                continue
+
+            elif must_be_cloud:
+                # FIXME Do we need to write to YT the Unset?
+                if tag.IsLocallySet():
+                    updates.append((tag_name, ETagEvent.Set))
+
+                self._make_tag_cloud(tag)
+            else:
+                logging.error("Tag %s is cloud, but must not be" % tag_name)
+
+        if not updates:
+            return False
+
+        logging.info("before conversion %d tags to CloudTag's" % len(updates))
+
+        cloud = self._create_cloud_client(lambda ev: None)
+
+        try:
+            cloud.update(updates).get()
+        finally:
+            try:
+                cloud.stop()
+            except:
+                logging.exception("Failed to stop temporary cloud client")
+
+        return True
+
+    def get_on_disk_tags_to_cloud_converter(self):
+        if not self._has_cloud_setup():
+            raise RuntimeError()
+
+        import tags_conversion
+
+        db_filename = self.db_file
+        in_memory_tags = set(self.inmem_items.iterkeys())
+
+        return lambda : tags_conversion.convert_on_disk_tags_to_cloud(
+            db_filename,
+            in_memory_tags,
+            self._cloud_tags_server
+        )
+
+    def _set_modify_func(self, tag):
+        tag._request_modify = self._modify_cloud_tag_safe if tag.IsCloud() \
+                              else self._modify_local_tag_safe
+
     def _GetTagLocalState(self, name):
         return self._RawTag(name, dont_create=True)
 
     def _RawTag(self, tagname, dont_create=False):
         if not tagname:
-            raise ValueError("Bad tag name")
+            raise ValueError("Empty tag name")
 
         tag = self.inmem_items.get(tagname, None)
+        if tag:
+            return tag
 
-        if tag is None:
-            if not self.db_file_opened:
-                self.DBConnect()
-            tagDescr = self.infile_items.get(tagname, None)
-            if tagDescr:
-                tag = cPickle.loads(tagDescr)
-                self.vivify_tags([tag])
-            elif dont_create:
-                return None
+        if not self.db_file_opened:
+            self.DBConnect()
+
+        tagDescr = self.infile_items.get(tagname, None)
+
+        if tagDescr:
+            tag = cPickle.loads(tagDescr)
+
+            if tag.IsCloud():
+                if not self._has_cloud_setup():
+                    logging.error("Tag %s is cloud on disk storage, but no setup for" \
+                        " cloud in config. Restart server with proper setup!" % tagname)
             else:
-                tag = self._create_tag(tagname)
+                if self._is_cloud_tag_name(tag.GetFullname()):
+                    logging.error("Tag %s is not cloud on disk storage, but must be." \
+                        " Convert tags in disk storage!" % tagname)
+
+            self._set_modify_func(tag)
+
+        elif dont_create:
+            return None
+
+        else:
+            tag = self._create_tag(tagname)
 
         return tag
 
@@ -914,17 +1070,14 @@ class TagStorage(object):
         self.conn_manager = context.Scheduler.connManager
         self._journal.UpdateContext(context)
         self._repr_modifier.UpdateContext(context)
-
-        if context.cloud_tags_server and not context.cloud_tags_masks:
-            raise RuntimeError("No 'cloud_tags_masks' option in config")
-
         self._cloud_tags_server = context.cloud_tags_server
         self._cloud_tags_masks = context.cloud_tags_masks
         self._cloud_tags_masks_reload_interval = context.cloud_tags_masks_reload_interval
         self._tags_random_cloudiness = context.tags_random_cloudiness
+        self._all_tags_in_cloud = context.all_tags_in_cloud
 
-        logging.debug("TagStorage.UpdateContext, masks = %s, server = %s" % (
-            self._cloud_tags_masks, self._cloud_tags_server))
+        logging.debug("TagStorage.UpdateContext, masks = %s, share = %s, server = %s" % (
+            self._cloud_tags_masks, self._all_tags_in_cloud, self._cloud_tags_server))
 
     def Restore(self, timestamp):
         self._journal.Restore(timestamp, self, self._prev_safe_cloud_state)
@@ -966,6 +1119,7 @@ class TagStorage(object):
                 tag = self.inmem_items.pop(name)
                 tag.callbacks.clear()
                 tag.__dict__.pop('_min_release_time', None) # FIXME
+
                 try:
                     self.infile_items[name] = cPickle.dumps(tag)
                 except bsddb3.error as e:

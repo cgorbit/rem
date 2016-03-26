@@ -189,7 +189,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         getattr(super(Scheduler, self), "__init__")()
         self.UpdateContext(context)
         self.tagRef.PreInit()
-        self.ObjectRegistratorClass = FakeObjectRegistrator if context.exec_mode == "start" else ObjectRegistrator
+        self.ObjectRegistratorClass = ObjectRegistrator if context.register_objects_creation \
+                                                      else FakeObjectRegistrator
         if context.useMemProfiler:
             self.initProfiler()
 
@@ -459,7 +460,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         return sdict, packets_registrator
 
-    def LoadBackup(self, filename, restorer=None):
+    def LoadBackup(self, filename, restorer=None, restore_tags_only=False):
         with self.lock:
             with open(filename, "r") as stream:
                 sdict, registrator = self.Deserialize(stream, self.ObjectRegistratorClass())
@@ -477,12 +478,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             tagStorage = self.tagRef
 
-            tagStorage.vivify_tags(registrator.tags)
+            tagStorage.vivify_tags_from_backup(registrator.tags)
 
             for pck in registrator.packets:
                 pck.VivifyDoneTagsIfNeed(tagStorage)
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
+
+            if restore_tags_only:
+                return
 
             self._vivify_queues(qRef)
 
@@ -490,6 +494,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             self.schedWatcher.Clear() # remove tasks from Queue.relocatePacket
             self.FillSchedWatcher(prevWatcher)
+
+    def convert_in_memory_tags_to_cloud_if_need(self):
+        return self.tagRef.convert_in_memory_tags_to_cloud_if_need()
+
+    def get_on_disk_tags_to_cloud_converter(self):
+        return self.tagRef.get_on_disk_tags_to_cloud_converter()
 
     def FillSchedWatcher(self, prev_watcher=None):
         def list_packets_in_queues(state):
@@ -535,6 +545,35 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         for pck in produce_packets_to_wait():
             self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
+
+    def Restore(self, restorer=None, restore_tags_only=False):
+        ctx = self.context
+
+        if not os.path.isdir(ctx.backup_directory):
+            return
+
+        backup_filename = None
+
+        for name in sorted(os.listdir(ctx.backup_directory), reverse=True):
+            if self.CheckBackupFilename(name):
+                backup_filename = os.path.join(ctx.backup_directory, name)
+                break
+
+        if backup_filename:
+            def bind1st(f, arg):
+                return lambda *args, **kwargs: f(arg, *args, **kwargs)
+
+            if restorer:
+                restorer = bind1st(restorer, self)
+
+            try:
+                self.LoadBackup(backup_filename, restorer=restorer, restore_tags_only=restore_tags_only)
+            except Exception:
+                t, v, tb = sys.exc_info()
+                logging.exception("can't restore from '%s'", backup_filename)
+                raise t, v, tb
+        else:
+            self.tagRef.Restore(0)
 
     def _vivify_queues(self, qRef):
         for name, q in qRef.iteritems():

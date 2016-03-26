@@ -10,12 +10,12 @@ import threading
 from SimpleXMLRPCServer import SimpleXMLRPCRequestHandler
 import xmlrpclib
 import datetime
-import multiprocessing
 import signal
+import argparse
 
 from rem import constants, osspec
 from rem import traced_rpc_method
-from rem import CheckEmailAddress, DefaultContext, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
+from rem import CheckEmailAddress, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
 from rem import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
@@ -23,6 +23,8 @@ from rem.common import as_rpc_user_error, RpcUserError
 import rem.common
 import rem.fork_locking
 from rem.rem_logging import logger as logging
+import rem.rem_logging as rem_logging
+from rem.context import Context
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -45,38 +47,6 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
 
 _scheduler = None
 _context = None
-
-def bind1st(f, arg):
-    return lambda *args, **kwargs: f(arg, *args, **kwargs)
-
-def CreateScheduler(context, canBeClear=False, restorer=None):
-    sched = Scheduler(context)
-    wasRestoreTry = False
-
-    if restorer:
-        restorer = bind1st(restorer, sched)
-
-    if os.path.isdir(context.backup_directory):
-        for name in sorted(os.listdir(context.backup_directory), reverse=True):
-            if sched.CheckBackupFilename(name):
-                backupFile = os.path.join(context.backup_directory, name)
-                try:
-                    sched.LoadBackup(backupFile, restorer)
-                    return sched
-                except Exception, e:
-                    logging.exception("can't restore from file \"%s\" : %s", backupFile, e)
-                    wasRestoreTry = True
-
-                # May fail on all backups for the same reason, but backup loading
-                # has side-effects on file system, so try only last
-                break
-
-    if wasRestoreTry and not canBeClear:
-        raise RuntimeError("can't restore from backup")
-
-    sched.tagRef.Restore(0)
-
-    return sched
 
 
 def readonly_method(func):
@@ -659,7 +629,7 @@ class RemDaemon(object):
         self._started.set()
 
 
-def scheduler_test():
+def scheduler_test(opts):
     def tag_listeners_stats(tagRef):
         tag_listeners = {}
         for tag in tagRef.inmem_items.itervalues():
@@ -700,7 +670,7 @@ def scheduler_test():
         logging.exception("guppy error")
     #deserialize backward attempt
     stTime = time.time()
-    tmpContext = DefaultContext("copy")
+    tmpContext = Context(opts.config)
     sc = Scheduler(tmpContext)
     sc.LoadBackup("data.bin")
     if qname in sc.qRef:
@@ -714,6 +684,7 @@ def scheduler_test():
         runner, runtm = sc.schedWatcher.tasks.get()
         print runtm, runner
 
+
 def _init_fork_locking(ctx):
     set_timeout = getattr(rem.fork_locking, 'set_fork_friendly_acquire_timeout', None)
 
@@ -721,6 +692,7 @@ def _init_fork_locking(ctx):
         return
 
     set_timeout(ctx.backup_fork_lock_friendly_timeout)
+
 
 def start_daemon(ctx, sched, wait=True):
     _init_fork_locking(ctx)
@@ -757,25 +729,62 @@ def start_daemon(ctx, sched, wait=True):
 
     return daemon, join
 
+
+def parse_arguments():
+    p = argparse.ArgumentParser()
+
+    p.add_argument('-c', '--config', dest='config', default='rem.cfg')
+    p.add_argument('mode', nargs='?', default='start')
+
+    return p.parse_args()
+
+
 def main():
     global _context
     global _scheduler
 
-    _context = DefaultContext()
+    opts = parse_arguments()
+
+    _context = Context(opts.config)
+
+    if opts.mode == 'test':
+        _context.log_warn_level = 'debug'
+        _context.register_objects_creation = True
 
     osspec.set_process_title("[remd]%s" % ((" at " + _context.network_name) if _context.network_name else ""))
 
+    rem_logging.reinit_logger(_context, log_to_file=opts.mode != 'test')
+
+    is_convert_on_disk_tags_mode = opts.mode == "convert-on-disk-tags"
+
     logging.debug("rem-server\tbefore_create_scheduler")
-    _scheduler = CreateScheduler(_context)
+    _scheduler = Scheduler(_context)
+    _scheduler.Restore(restore_tags_only=is_convert_on_disk_tags_mode)
     logging.debug("rem-server\tafter_create_scheduler")
 
-    if _context.exec_mode == "test":
-        scheduler_test()
+    if opts.mode == "start":
+        if _context.allow_startup_tags_conversion:
+            if _scheduler.convert_in_memory_tags_to_cloud_if_need():
+                self.RollBackup()
 
-    elif _context.exec_mode == "start":
         start_daemon(_context, _scheduler)[1]()
 
+    elif is_convert_on_disk_tags_mode:
+        convert = _scheduler.get_on_disk_tags_to_cloud_converter()
+        _scheduler = None
+        import gc
+        gc.collect(2) # XXX TODO TEST THAT THIS WORKS FOR veles02
+        gc.collect(2)
+        convert()
+
+    elif opts.mode == "test":
+        scheduler_test(opts)
+
+    else:
+        raise RuntimeError("Unknown exec mode '%s'" % opts.mode)
+
     logging.debug("rem-server\texit_main")
+
 
 if __name__ == "__main__":
     main()
