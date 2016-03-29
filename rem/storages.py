@@ -916,7 +916,7 @@ class TagStorage(object):
 
     def convert_in_memory_tags_to_cloud_if_need(self):
         if not self._has_cloud_setup():
-            return
+            return False
 
         updates = []
 

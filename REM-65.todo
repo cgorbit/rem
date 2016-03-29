@@ -1,3 +1,7 @@
+0.
+        import gc
+        gc.collect(2) # XXX TODO TEST THAT THIS WORKS FOR veles02
+        gc.collect(2)
 
 1. Ограничение на максимальный размер protobuf
 

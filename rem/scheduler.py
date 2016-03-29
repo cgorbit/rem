@@ -25,6 +25,11 @@ import osspec
 from rem.profile import ProfiledThread
 from rem_logging import logger as logging
 
+
+def _bind1st(f, arg):
+    return lambda *args, **kwargs: f(arg, *args, **kwargs)
+
+
 class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
                               lock=PickableLock,
                               workingQueue=PickableStdQueue.create
@@ -559,21 +564,19 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 backup_filename = os.path.join(ctx.backup_directory, name)
                 break
 
-        if backup_filename:
-            def bind1st(f, arg):
-                return lambda *args, **kwargs: f(arg, *args, **kwargs)
-
-            if restorer:
-                restorer = bind1st(restorer, self)
-
-            try:
-                self.LoadBackup(backup_filename, restorer=restorer, restore_tags_only=restore_tags_only)
-            except Exception:
-                t, v, tb = sys.exc_info()
-                logging.exception("can't restore from '%s'", backup_filename)
-                raise t, v, tb
-        else:
+        if not backup_filename:
             self.tagRef.Restore(0)
+            return
+
+        if restorer:
+            restorer = _bind1st(restorer, self)
+
+        try:
+            self.LoadBackup(backup_filename, restorer=restorer, restore_tags_only=restore_tags_only)
+        except Exception:
+            t, v, tb = sys.exc_info()
+            logging.exception("can't restore from '%s'", backup_filename)
+            raise t, v, tb
 
     def _vivify_queues(self, qRef):
         for name, q in qRef.iteritems():

@@ -30,7 +30,7 @@ def _read_db(db_filename, bucket_size, output_queue, read_count):
 
     inner_output_queue = InterThreadQueue()
 
-# TODO Remove. This thread is useless. InterProcessQueue.put() is not locked here actually
+    # TODO Remove. This thread is useless. InterProcessQueue.put() is not locked here actually
     def send_worker():
         while True:
             bucket = inner_output_queue.get()
