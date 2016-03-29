@@ -1,0 +1,30 @@
+
+1. Ограничение на максимальный размер protobuf
+
+    def _subscribe_all(self):
+        # TODO split in groups in cloud_client?
+
+        if cloud_tags:
+            self._cloud.subscribe(cloud_tags)
+
+4. Тег может быть удалён из YT, хотя находится в памяти rem_server (или в tags.db)
+   который не сможет его изменять (из-за проверки номера версий) и будет
+   записывать и загружать его таким из tags.db
+
+   Вариант решения:
+        1. удалять теги самим cloud_tags_server'ом, добавляя запись в /journal
+        2. при .subscribe уведомлять о том, что тега не существует
+            Тут может быть гонка даже между удалением из YT и проверкой его существования
+            (надо как-то через версии)
+
+5.
+    inline bool IsRetriableError(const NYT::TError& e) {
+        return CheckErrorRecursive(
+            [](const NYT::TError& e) {
+                auto code = e.GetCode();
+
+                // XXX TODO Tablet:
+                // "Tablet %v is not mounted"
+                // "Tablet %v is not known"
+                // "Tablet %v is not in \"mounted\" state"
+
