@@ -959,11 +959,12 @@ class TagStorage(object):
 
         db_filename = self.db_file
         in_memory_tags = set(self.inmem_items.iterkeys())
+        cloud_tags_server = self._cloud_tags_server
 
         return lambda : tags_conversion.convert_on_disk_tags_to_cloud(
             db_filename,
             in_memory_tags,
-            self._cloud_tags_server
+            cloud_tags_server
         )
 
     def _set_modify_func(self, tag):
