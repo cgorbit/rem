@@ -630,7 +630,13 @@ class RemDaemon(object):
         self._started.set()
 
 
-def scheduler_test(opts):
+def scheduler_test(opts, ctx):
+    global _context
+    global _scheduler
+
+    _context = ctx
+    _scheduler = create_scheduler(ctx)
+
     def tag_listeners_stats(tagRef):
         tag_listeners = {}
         for tag in tagRef.inmem_items.itervalues():
@@ -740,46 +746,51 @@ def parse_arguments():
     return p.parse_args()
 
 
-def main():
+def create_scheduler(ctx, restorer=None):
+    sched = Scheduler(ctx)
+    sched.Restore(restorer=restorer)
+    return sched
+
+
+def run_server(ctx):
     global _context
     global _scheduler
 
-    opts = parse_arguments()
+    _context = ctx
 
-    _context = Context(opts.config)
-
-    if opts.mode == 'test':
-        _context.log_warn_level = 'debug'
-        _context.register_objects_creation = True
-
-    osspec.set_process_title("[remd]%s" % ((" at " + _context.network_name) if _context.network_name else ""))
-
-    rem_logging.reinit_logger(_context, log_to_file=opts.mode != 'test')
-
-    is_convert_on_disk_tags_mode = opts.mode == "convert-on-disk-tags"
+    osspec.set_process_title("[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else ""))
 
     logging.debug("rem-server\tbefore_create_scheduler")
-    _scheduler = Scheduler(_context)
-    _scheduler.Restore(restore_tags_only=is_convert_on_disk_tags_mode)
+    _scheduler = create_scheduler(ctx)
     logging.debug("rem-server\tafter_create_scheduler")
 
+    start_daemon(ctx, _scheduler)[1]()
+
+
+def init_logging(ctx):
+    rem_logging.reinit_logger(ctx)
+
+
+def main():
+    opts = parse_arguments()
+
+    ctx = Context(opts.config)
+
+    if opts.mode == 'test':
+        ctx.log_warn_level = 'debug'
+        ctd.log_to_stderr = True
+        ctx.register_objects_creation = True
+
+    init_logging(ctx)
+
     if opts.mode == "start":
-        if _context.allow_startup_tags_conversion:
-            if _scheduler.convert_in_memory_tags_to_cloud_if_need():
-                self.RollBackup()
+        run_server(ctx)
 
-        start_daemon(_context, _scheduler)[1]()
-
-    elif is_convert_on_disk_tags_mode:
-        convert = _scheduler.get_on_disk_tags_to_cloud_converter()
-        _scheduler = None
-        import gc
-        gc.collect(2) # XXX TODO TEST THAT THIS WORKS FOR veles02
-        gc.collect(2)
-        convert()
+    elif opts.mode == "convert-on-disk-tags":
+        Scheduler.convert_on_disk_tags_to_cloud(ctx)
 
     elif opts.mode == "test":
-        scheduler_test(opts)
+        scheduler_test(opts, ctx)
 
     else:
         raise RuntimeError("Unknown exec mode '%s'" % opts.mode)

@@ -952,7 +952,7 @@ class TagStorage(object):
 
         return True
 
-    def get_on_disk_tags_to_cloud_converter(self):
+    def create_on_disk_tags_to_cloud_converter(self):
         if not self._has_cloud_setup():
             raise RuntimeError()
 

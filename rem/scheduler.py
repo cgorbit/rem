@@ -491,6 +491,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
             if restore_tags_only:
+                self.qRef = qRef
                 return
 
             self._vivify_queues(qRef)
@@ -500,11 +501,18 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.schedWatcher.Clear() # remove tasks from Queue.relocatePacket
             self.FillSchedWatcher(prevWatcher)
 
-    def convert_in_memory_tags_to_cloud_if_need(self):
-        return self.tagRef.convert_in_memory_tags_to_cloud_if_need()
+    @classmethod
+    def convert_on_disk_tags_to_cloud(cls, ctx):
+        sched = cls(ctx)
+        sched.Restore(restore_tags_only=True)
 
-    def get_on_disk_tags_to_cloud_converter(self):
-        return self.tagRef.get_on_disk_tags_to_cloud_converter()
+        convert = sched.tagRef.create_on_disk_tags_to_cloud_converter()
+
+        sched = None
+        gc.collect(2) # XXX TODO TEST THAT THIS WORKS FOR veles02
+        gc.collect(2)
+
+        convert()
 
     def FillSchedWatcher(self, prev_watcher=None):
         def list_packets_in_queues(state):
@@ -577,6 +585,13 @@ class Scheduler(Unpickable(lock=PickableRLock,
             t, v, tb = sys.exc_info()
             logging.exception("can't restore from '%s'", backup_filename)
             raise t, v, tb
+
+        if restore_tags_only:
+            return
+
+        if ctx.allow_startup_tags_conversion:
+            if self.tagRef.convert_in_memory_tags_to_cloud_if_need():
+                self.RollBackup()
 
     def _vivify_queues(self, qRef):
         for name, q in qRef.iteritems():

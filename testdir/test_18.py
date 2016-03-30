@@ -55,6 +55,7 @@ error_packet_lifetime = 604800
 success_packet_lifetime = 259200
 cloud_tags_server = no-such-domain-ldfkgjsghkjgfdkjgfdkj:1023
 cloud_tags_masks = file://%(project_dir)s/cloud_tags.masks
+allow_startup_tags_conversion = no
 
 [log]
 dir = %(project_dir)s/log
@@ -89,9 +90,10 @@ def create_scheduler(work_dir):
     with open(config_filename, "w") as conf:
         produce_config(conf, work_dir, hostname='foobar')
 
-    ctx = rem.context.Context(config_filename, "start")
+    ctx = rem.context.Context(config_filename)
 
     rem_server._init_fork_locking(ctx)
+    rem_server.init_logging(ctx)
 
     with open(work_dir + '/cloud_tags.masks', 'w') as out:
         print >>out, '_cloud_.*'
@@ -100,7 +102,7 @@ def create_scheduler(work_dir):
         print >>out, '[servers]'
         print >>out, 'foobar = http://localhost:8884, http://localhost:8885'
 
-    return rem_server.CreateScheduler(ctx)
+    return rem_server.create_scheduler(ctx)
 
 
 class Scheduler(object):

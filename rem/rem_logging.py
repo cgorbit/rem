@@ -38,26 +38,26 @@ class StableRotateFileHandler(logging.handlers.TimedRotatingFileHandler):
         return logging.handlers.TimedRotatingFileHandler.shouldRollover(self, record)
 
 
-def _create_logger(ctx, log_to_file):
+def _create_logger(ctx):
     log_level = getattr(logging, ctx.log_warn_level.upper())
 
     logger = logging.getLogger('rem_server')
     logger.handlers = [] # oops
     logger.propagate = False
 
-    if log_to_file:
+    if ctx.log_to_stderr:
+        logger.addHandler(logging.StreamHandler())
+    else:
         logHandler = StableRotateFileHandler(
             os.path.join(ctx.log_directory, ctx.log_filename),
             when="midnight", backupCount=ctx.log_backup_count)
         logHandler.setFormatter(LogFormatter("%(asctime)s %(thread_id)s %(levelname)-8s %(module)s:\t%(message)s"))
         logger.addHandler(logHandler)
-    else:
-        logger.addHandler(logging.StreamHandler())
 
     logger.setLevel(log_level)
 
     return logger
 
-def reinit_logger(ctx, log_to_file=True):
+def reinit_logger(ctx):
     global logger
-    logger = _create_logger(ctx, log_to_file)
+    logger = _create_logger(ctx)

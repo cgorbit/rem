@@ -49,6 +49,7 @@ class Context(object):
         self.log_filename = config.get("log", "filename")
         self.log_backup_count = config.getint("log", "rollcount")
         self.log_warn_level = config.get("log", "warnlevel")
+        self.log_to_stderr = False
         self.packets_directory = self.prep_dir(config.get("store", "pck_dir"))
         self.backup_directory = self.prep_dir(config.get("store", "backup_dir"))
         self.backup_period = config.getint("store", "backup_period")
