@@ -1073,8 +1073,8 @@ class TagStorage(object):
         self._cloud_tags_masks = context.cloud_tags_masks
         self._cloud_tags_masks_reload_interval = context.cloud_tags_masks_reload_interval
         self._cloud_tags_release_delay = context.cloud_tags_release_delay
-        self._tags_random_cloudiness = context.tags_random_cloudiness
-        self._all_tags_in_cloud = context.all_tags_in_cloud
+        self._tags_random_cloudiness = self._has_cloud_setup() and context.tags_random_cloudiness
+        self._all_tags_in_cloud = self._has_cloud_setup() and context.all_tags_in_cloud
 
         logging.debug("TagStorage.UpdateContext, masks = %s, share = %s, server = %s" % (
             self._cloud_tags_masks, self._all_tags_in_cloud, self._cloud_tags_server))
