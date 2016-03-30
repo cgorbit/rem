@@ -310,7 +310,7 @@ class JobRunner(object):
                                     self._stderr_summary)
             )
 
-        if job.tries >= job.maxTryCount:
+        if self.returncode != 0 and job.tries >= job.maxTryCount:
             logging.info("Job's %s result: TriesExceededResult", job.id)
             append_result(TriesExceededResult(job.tries))
 
