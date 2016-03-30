@@ -638,7 +638,7 @@ class TagStorage(object):
 
     def _create_cloud_client(self, on_event):
         if not self._has_cloud_setup():
-            raise RuntimeError()
+            raise RuntimeError("No cloud tags setup")
 
         return cloud_client.Client(self._cloud_tags_server_instances, on_event=on_event)
 
@@ -954,7 +954,7 @@ class TagStorage(object):
 
     def create_on_disk_tags_to_cloud_converter(self):
         if not self._has_cloud_setup():
-            raise RuntimeError()
+            raise RuntimeError("No cloud tags setup")
 
         import tags_conversion
 
