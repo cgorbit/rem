@@ -857,7 +857,7 @@ class TagStorage(object):
         with self.lock:
             ret = self.inmem_items.setdefault(tagname, raw)
 
-            if ret is raw and ret.IsCloud() and self._cloud:
+            if ret is raw and ret.IsCloud():
                 self._cloud.subscribe(tagname)
 
         return TagWrapper(ret)
@@ -1035,7 +1035,7 @@ class TagStorage(object):
         cloud_tags_server_released = False # XXX
 
         cloud_result = None
-        if not memory_only and self._cloud and cloud_tags_server_released:
+        if not memory_only and self._has_cloud_setup():
             cloud_result = self._cloud.match(
                 prefix=prefix,
                 regexp='^' + regexp.pattern if regexp else None
