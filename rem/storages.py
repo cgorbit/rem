@@ -541,7 +541,6 @@ class TagsMasks(object):
 
 
 class TagStorage(object):
-    _CLOUD_TAG_REPR_UPDATE_WAITING_TTL = 7200 # Hack for hostA:RemoteTag -> hostB:CloudTag
     CLOUD_CLIENT_STOP_TIMEOUT = 10.0
 
     def __init__(self, rhs=None):
@@ -792,8 +791,9 @@ class TagStorage(object):
         self._set_min_release_time(tag)
         self._safe_cloud.update(update)
 
+    # Hack for hostA:RemoteTag -> hostB:CloudTag (shame on me)
     def _set_min_release_time(self, tag):
-        tag._min_release_time = time.time() + self._CLOUD_TAG_REPR_UPDATE_WAITING_TTL
+        tag._min_release_time = time.time() + self._cloud_tags_release_delay
 
     # for calls from from RPC
     def _modify_tags_unsafe(self, updates):
@@ -1072,6 +1072,7 @@ class TagStorage(object):
         self._cloud_tags_server = context.cloud_tags_server
         self._cloud_tags_masks = context.cloud_tags_masks
         self._cloud_tags_masks_reload_interval = context.cloud_tags_masks_reload_interval
+        self._cloud_tags_release_delay = context.cloud_tags_release_delay
         self._tags_random_cloudiness = context.tags_random_cloudiness
         self._all_tags_in_cloud = context.all_tags_in_cloud
 
@@ -1094,7 +1095,6 @@ class TagStorage(object):
             if tag.GetListenersNumber() == 0 \
                 and sys.getrefcount(tag) == 4 \
                 and getattr(tag, '_min_release_time', 0) < now:
-                                # FIXME How to prolongate _min_release_time on "can't connect" _cloud?
 
                 if tag.IsCloud():
                     unsub_tags.add(name)
