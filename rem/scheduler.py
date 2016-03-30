@@ -2,6 +2,7 @@ from __future__ import with_statement
 import shutil
 import time
 import os
+import sys
 import re
 from collections import deque
 import gc
@@ -509,7 +510,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         convert = sched.tagRef.create_on_disk_tags_to_cloud_converter()
 
         sched = None
-        gc.collect(2) # XXX TODO TEST THAT THIS WORKS FOR veles02
+        gc.collect(2) # XXX TODO TEST THAT THIS WORKS FOR veles02 backup
         gc.collect(2)
 
         convert()
