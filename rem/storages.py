@@ -907,11 +907,10 @@ class TagStorage(object):
             tag._request_modify = modify
 
     def _make_tag_cloud(self, tag):
-        new = CloudTag(tag_name, None)
-        tag.__dict__.clear()
-        tag.__dict__.update(new.__dict__)
-        tag.__class__ = new.__class__
+        assert isinstance(tag, LocalTag)
 
+        tag.__class__ = CloudTag
+        tag.version = 0
         self._set_modify_func(tag)
 
     def convert_in_memory_tags_to_cloud_if_need(self):
