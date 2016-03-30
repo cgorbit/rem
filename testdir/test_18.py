@@ -281,7 +281,6 @@ class T18(unittest.TestCase):
     """Test rem.storages.SafeCloud backup and journal"""
 
     def testSafeCloudBackupAndJournalling(self):
-        return
         original_timeout = rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT
         rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT = 1.0
 
@@ -305,7 +304,6 @@ class T18(unittest.TestCase):
             rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT = original_timeout
 
     def testCloudTagsOnDiskWithoutCloudSetup(self):
-        return
         start_time = str(time.time())
 
         def tag_name(name):
