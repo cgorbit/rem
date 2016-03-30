@@ -294,3 +294,7 @@ def convert_on_disk_tags_to_cloud(db_filename, in_memory_tags, cloud_tags_server
 
     join(db_writer)
     print_stats()
+
+    if False: # XXX TODO UNCOMMENT
+        os.rename(db_filename, db_filename + '.prev')
+        os.rename(new_db_filename, db_filename)
