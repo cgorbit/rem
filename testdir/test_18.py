@@ -15,6 +15,7 @@ from rem.callbacks import ETagEvent
 
 
 LEAVE_WORK_DIR = bool(os.getenv('LEAVE_WORK_DIR', False))
+CLOUD_TAGS_SERVER = 'nanny://47821a5802574cdf9e23db6d15ec9b0d@nanny.yandex-team.ru/test_rem_cloud_tags_proxy'
 
 
 class NamedTemporaryDir(object):
@@ -247,10 +248,40 @@ def run_common_safecloud_tests(self,
                     self.assertEqual(updates, [])
 
 
+def CloudTag(name, is_set, version):
+    return ('cloud', name, is_set, version)
+
+def LocalTag(name, is_set):
+    return ('local', name, is_set)
+
+def RemoteTag(name, is_set):
+    return ('remote', name, is_set)
+
+def test_tag_from_real_tag(tag):
+    if tag.IsCloud():
+        f = lambda name, is_set: CloudTag(name, is_set, tag.version)
+    elif tag.IsRemote():
+        f = RemoteTag
+    else:
+        f = LocalTag
+
+    return f(tag.GetFullname(), tag.IsLocallySet())
+
+def tags_dict(*tags):
+    return {t[1]: t for t in tags}
+
+def tags_dict_from_sched(sched):
+    return {
+        tag_name: test_tag_from_real_tag(tag)
+            for tag_name, tag in sched.tagRef.inmem_items.iteritems()
+    }
+
+
 class T18(unittest.TestCase):
     """Test rem.storages.SafeCloud backup and journal"""
 
     def testSafeCloudBackupAndJournalling(self):
+        return
         original_timeout = rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT
         rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT = 1.0
 
@@ -274,10 +305,8 @@ class T18(unittest.TestCase):
             rem.storages.TagStorage.CLOUD_CLIENT_STOP_TIMEOUT = original_timeout
 
     def testCloudTagsOnDiskWithoutCloudSetup(self):
+        return
         start_time = str(time.time())
-
-        #cloud_tags_server = 'localhost:17780'
-        cloud_tags_server = 'nanny://47821a5802574cdf9e23db6d15ec9b0d@nanny.yandex-team.ru/test_rem_cloud_tags_proxy'
 
         def tag_name(name):
             return name + '-' + start_time
@@ -293,33 +322,8 @@ class T18(unittest.TestCase):
 
         #all_updates = first_part + second_part
 
-        def CloudTag(name, is_set, version):
-            return ('cloud', name, is_set, version)
-
-        def LocalTag(name, is_set):
-            return ('local', name, is_set)
-
-        def RemoteTag(name, is_set):
-            return ('remote', name, is_set)
-
-        def test_tag_from_real_tag(tag):
-            if tag.IsCloud():
-                f = lambda name, is_set: CloudTag(name, is_set, tag.version)
-            elif tag.IsRemote():
-                f = RemoteTag
-            else:
-                f = LocalTag
-
-            return f(tag.GetFullname(), tag.IsLocallySet())
-
-        def tags_dict(*tags):
-            return {t[1]: t for t in tags}
-
-        def tags_dict_from_sched():
-            return {
-                tag_name: test_tag_from_real_tag(tag)
-                    for tag_name, tag in sched.tagRef.inmem_items.iteritems()
-            }
+        def _tags_dict_from_sched():
+            return tags_dict_from_sched(sched)
 
         with NamedTemporaryDir(prefix='remd-') as work_dir:
             #cloud_tags_masks_file = work_dir + '/cloud_tags.masks'
@@ -331,7 +335,7 @@ class T18(unittest.TestCase):
 
             ctx.cloud_tags_release_delay = 0 # XXX
 
-            ctx.cloud_tags_server = cloud_tags_server
+            ctx.cloud_tags_server = CLOUD_TAGS_SERVER
             ctx.all_tags_in_cloud = True
             #ctx.cloud_tags_masks = 'file://' + cloud_tags_masks_file
             ctx.allow_startup_tags_conversion = False
@@ -352,7 +356,7 @@ class T18(unittest.TestCase):
                 time.sleep(5) # ugly
 
                 self.assertEqual(
-                    tags_dict_from_sched(),
+                    _tags_dict_from_sched(),
                     tags_dict(
                         CloudTag(tag_name('_cloud_tag_01'), False, 3),
                         CloudTag(tag_name('_cloud_tag_02'), False, 1),
@@ -361,7 +365,7 @@ class T18(unittest.TestCase):
 
                 _backup()
 
-                self.assertEqual(tags_dict_from_sched(), {})
+                self.assertEqual(_tags_dict_from_sched(), {})
 
 
             ctx.cloud_tags_server = None
@@ -372,7 +376,7 @@ class T18(unittest.TestCase):
                 logging.debug('stage1')
 
                 self.assertEqual(get_updates(), [])
-                self.assertEqual(tags_dict_from_sched(), {})
+                self.assertEqual(_tags_dict_from_sched(), {})
 
                 second_part = [
                     (tag_name('_cloud_tag_02'), ETagEvent.Set, None),
@@ -391,7 +395,7 @@ class T18(unittest.TestCase):
                 time.sleep(5) # ugly
 
                 self.assertEqual(
-                    tags_dict_from_sched(),
+                    _tags_dict_from_sched(),
                     tags_dict(
                         CloudTag(tag_name('_cloud_tag_01'), False, 3),
                         CloudTag(tag_name('_cloud_tag_02'), False, 1),
@@ -400,13 +404,13 @@ class T18(unittest.TestCase):
 
                 _backup()
 
-                self.assertEqual(tags_dict_from_sched(), {})
+                self.assertEqual(_tags_dict_from_sched(), {})
 
             def vivify_tags(tags):
                 for tag in tags:
                     sched.tagRef.AcquireTag(tag)
 
-            ctx.cloud_tags_server = cloud_tags_server
+            ctx.cloud_tags_server = CLOUD_TAGS_SERVER
             ctx.all_tags_in_cloud = True
             ctx.Scheduler = None
 
@@ -414,7 +418,7 @@ class T18(unittest.TestCase):
                 logging.debug('stage2')
 
                 self.assertEqual(get_updates(), second_part)
-                self.assertEqual(tags_dict_from_sched(), {})
+                self.assertEqual(_tags_dict_from_sched(), {})
 
                 vivify_tags([
                     tag_name('_cloud_tag_01'),
@@ -424,9 +428,150 @@ class T18(unittest.TestCase):
                 time.sleep(5) # ugly
 
                 self.assertEqual(
-                    tags_dict_from_sched(),
+                    _tags_dict_from_sched(),
                     tags_dict(
                         CloudTag(tag_name('_cloud_tag_01'), True,  5),
                         CloudTag(tag_name('_cloud_tag_02'), False, 4),
                     )
                 )
+
+    def testToCloudStartupConversion(self):
+        start_time = str(time.time())
+
+        def tag_name(name):
+            return name + '-' + start_time
+
+        def get_updates():
+            return get_safecloud_updates(sched)
+
+        def _apply_updates(updates):
+            apply_updates(sched, updates)
+
+        def _backup():
+            backup(sched)
+
+        def _tags_dict_from_sched():
+            return tags_dict_from_sched(sched)
+
+        with NamedTemporaryDir(prefix='remd-') as work_dir:
+            cloud_tags_masks_file = work_dir + '/cloud_tags.masks'
+
+            with open(cloud_tags_masks_file, 'w') as out:
+                print >>out, 'tag_02-.*'
+
+            ctx = create_default_context(work_dir)
+
+            ctx.cloud_tags_release_delay = 0 # XXX
+
+            ctx.cloud_tags_server = CLOUD_TAGS_SERVER
+            ctx.cloud_tags_masks = 'file://' + cloud_tags_masks_file
+
+            with Scheduler(ctx) as sched:
+                logging.debug('stage0')
+
+                self.assertEqual(get_updates(), [])
+
+                first_part = [
+                    (tag_name('tag_%02d' % idx), ETagEvent.Set, None) for idx in range(4)
+                ]
+
+                _apply_updates(first_part)
+                time.sleep(5) # ugly
+
+                self.assertEqual(
+                    _tags_dict_from_sched(),
+                    tags_dict(
+                        LocalTag(tag_name('tag_00'), True),
+                        LocalTag(tag_name('tag_01'), True),
+                        CloudTag(tag_name('tag_02'), True, 1),
+                        LocalTag(tag_name('tag_03'), True),
+                    )
+                )
+
+                wait_tags = [
+                    sched.tagRef.AcquireTag(tag_name('tag_%02d' % idx))
+                        for idx in range(5)
+                ]
+
+                pck = rem.packet.JobPacket('foobar', 0, ctx, [], wait_tags)
+
+                sched.AddPacketToQueue('q', pck)
+
+                del pck
+
+                _backup()
+
+            with open(cloud_tags_masks_file, 'w') as out:
+                print >>out, 'tag_00-.*'
+                print >>out, 'tag_02-.*'
+
+            ctx.allow_startup_tags_conversion = False
+            ctx.Scheduler = None
+
+            with Scheduler(ctx) as sched:
+                logging.debug('stage1')
+
+                time.sleep(5) # ugly
+
+                self.assertEqual(get_updates(), [])
+
+                self.assertEqual(
+                    _tags_dict_from_sched(),
+                    tags_dict(
+                        LocalTag(tag_name('tag_00'), True),
+                        LocalTag(tag_name('tag_01'), True),
+                        CloudTag(tag_name('tag_02'), True, 1),
+                        LocalTag(tag_name('tag_03'), True),
+                        LocalTag(tag_name('tag_04'), False),
+                    )
+                )
+
+                _backup()
+
+            ctx.allow_startup_tags_conversion = True
+            ctx.Scheduler = None
+
+            with Scheduler(ctx) as sched:
+                logging.debug('stage2')
+
+                time.sleep(5) # ugly
+
+                self.assertEqual(get_updates(), [])
+
+                self.assertEqual(
+                    _tags_dict_from_sched(),
+                    tags_dict(
+                        CloudTag(tag_name('tag_00'), True, 1),
+                        LocalTag(tag_name('tag_01'), True),
+                        CloudTag(tag_name('tag_02'), True, 1),
+                        LocalTag(tag_name('tag_03'), True),
+                        LocalTag(tag_name('tag_04'), False),
+                    )
+                )
+
+                _backup()
+
+            ctx.allow_startup_tags_conversion = True
+            ctx.all_tags_in_cloud = True
+            ctx.Scheduler = None
+
+            self.maxDiff = None
+            with Scheduler(ctx) as sched:
+                logging.debug('stage3')
+
+                time.sleep(5) # ugly
+
+                self.assertEqual(get_updates(), [])
+
+                self.assertEqual(
+                    _tags_dict_from_sched(),
+                    tags_dict(
+                        CloudTag(tag_name('tag_00'), True,  1),
+                        CloudTag(tag_name('tag_01'), True,  1),
+                        CloudTag(tag_name('tag_02'), True,  1),
+                        CloudTag(tag_name('tag_03'), True,  1),
+                        CloudTag(tag_name('tag_04'), False, 0),
+                    )
+                )
+
+                _backup()
