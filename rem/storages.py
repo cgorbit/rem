@@ -920,8 +920,7 @@ class TagStorage(object):
 
         updates = []
 
-        for tag in self.inmem_items.iteritems():
-            tag_name = tag.GetFullname()
+        for tag_name, tag in self.inmem_items.iteritems():
             must_be_cloud = self._is_cloud_tag_name(tag_name)
 
             if must_be_cloud == tag.IsCloud():
