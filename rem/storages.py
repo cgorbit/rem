@@ -1120,7 +1120,7 @@ class TagStorage(object):
                 tag.__dict__.pop('_min_release_time', None) # FIXME
 
                 try:
-                    self.infile_items[name] = cPickle.dumps(tag)
+                    self.infile_items[name] = cPickle.dumps(tag, 2)
                 except bsddb3.error as e:
                     if 'BSDDB object has already been closed' in e.message:
                         self.db_file_opened = False
