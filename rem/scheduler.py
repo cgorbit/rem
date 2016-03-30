@@ -591,8 +591,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             return
 
         if ctx.allow_startup_tags_conversion:
-            if self.tagRef.convert_in_memory_tags_to_cloud_if_need():
-                self.RollBackup()
+            self.tagRef.convert_in_memory_tags_to_cloud_if_need()
 
     def _vivify_queues(self, qRef):
         for name, q in qRef.iteritems():
