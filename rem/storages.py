@@ -857,7 +857,7 @@ class TagStorage(object):
         with self.lock:
             ret = self.inmem_items.setdefault(tagname, raw)
 
-            if ret is raw and ret.IsCloud():
+            if ret is raw and ret.IsCloud() and self._cloud: # no _cloud before Start()
                 self._cloud.subscribe(tagname)
 
         return TagWrapper(ret)
