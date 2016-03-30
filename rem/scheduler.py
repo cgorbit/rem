@@ -197,7 +197,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.tagRef.PreInit()
         self.ObjectRegistratorClass = ObjectRegistrator if context.register_objects_creation \
                                                       else FakeObjectRegistrator
-        if context.useMemProfiler:
+        if context.use_memory_profiler:
             self.initProfiler()
 
     def UpdateContext(self, context=None):
@@ -412,7 +412,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         os.rename(tmpFilename, filename)
 
-        if self.context.useMemProfiler:
+        if self.context.use_memory_profiler:
             try:
                 last_heap = self.LastHeap
                 self.LastHeap = self.HpyInstance.heap()

@@ -83,7 +83,7 @@ class Context(object):
         self.send_emails = config.getboolean("server", "send_emails")
         self.send_emergency_emails = config.safe_getboolean("server", "send_emergency_emails")
         self.mailer_thread_count = config.safe_getint("server", "mailer_thread_count", 1)
-        self.useMemProfiler = config.getboolean("server", "use_memory_profiler")
+        self.use_memory_profiler = config.getboolean("server", "use_memory_profiler")
         self.max_remotetags_resend_delay = config.safe_getint("server", "max_remotetags_resend_delay", 300)
         self.allow_backup_rpc_method = config.safe_getboolean("server", "allow_backup_rpc_method", False)
         self.register_objects_creation = False
