@@ -89,8 +89,7 @@ def _write_to_yt(input_queue, output_queue, in_memory_tags, cloud_tags_server_ad
         lambda ev: None
     )
 
-    inner_input_queue  = InterThreadQueue() # FIXME TODO
-    #inner_input_queue  = InterThreadQueue(4) # FIXME TODO
+    inner_input_queue  = InterThreadQueue()
     inner_output_queue = InterThreadQueue()
 
     def receive_worker():
@@ -295,6 +294,5 @@ def convert_on_disk_tags_to_cloud(db_filename, in_memory_tags, cloud_tags_server
     join(db_writer)
     print_stats()
 
-    if False: # XXX TODO UNCOMMENT
-        os.rename(db_filename, db_filename + '.prev')
-        os.rename(new_db_filename, db_filename)
+    os.rename(db_filename, db_filename + '.prev')
+    os.rename(new_db_filename, db_filename)
