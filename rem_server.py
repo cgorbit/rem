@@ -138,32 +138,35 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
 def get_safe_cloud_state():
     pass # TODO XXX
 
+
+# FIXME Timeouts?
+
 @readonly_method
 @traced_rpc_method()
-def check_tag(tagname):
-    return _scheduler.tagRef._are_tags_set([tagname]).get()[tagname] # TODO timeout
+def check_tag(tagname, timeout=None):
+    return _scheduler.tagRef._are_tags_set([tagname]).get(timeout)[tagname]
 
 @traced_rpc_method("info")
-def set_tag(tagname):
-    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Set).get() # TODO timeout
+def set_tag(tagname, timeout=None):
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Set).get(timeout)
 
 @traced_rpc_method("info")
-def unset_tag(tagname):
-    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Unset).get() # TODO timeout
+def unset_tag(tagname, timeout=None):
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Unset).get(timeout)
 
 @traced_rpc_method()
-def reset_tag(tagname, msg=""):
-    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get() # TODO timeout
+def reset_tag(tagname, msg="", timeout=None):
+    return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get(timeout)
 
 @readonly_method
 @traced_rpc_method()
 def check_tags(tags):
-    return _scheduler.tagRef._are_tags_set(tags).get() # TODO timeout
+    return _scheduler.tagRef._are_tags_set(tags).get()
 
 @readonly_method
 @traced_rpc_method()
 def lookup_tags(tags):
-    return _scheduler.tagRef._lookup_tags(tags).get() # TODO timeout
+    return _scheduler.tagRef._lookup_tags(tags).get()
 
 @readonly_method
 @traced_rpc_method()
