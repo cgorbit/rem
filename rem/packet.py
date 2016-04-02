@@ -259,7 +259,7 @@ class JobPacketImpl(object):
 
 class _ActiveJobs(object):
     def __init__(self):
-        self._active = {} # From GetJobToRun moment
+        self._running = {} # From GetJobToRun moment
         self._results = []
         self._lock = threading.Lock()
         self._empty = threading.Condition(self._lock)
@@ -270,36 +270,36 @@ class _ActiveJobs(object):
     # FIXME Non-obvious meaning?
     def __len__(self):
         with self._lock:
-            return len(self._active) + len(self._results)
+            return len(self._running) + len(self._results)
 
     def wait_empty(self):
-        if not self._active:
+        if not self._running:
             return
 
         with self._lock:
-            while self._active:
+            while self._running:
                 self._empty.wait()
 
     def add(self, runner):
         with self._lock:
             job_id = runner.job.id
-            #logging.debug('_active[%d] = %s' % (job_id, runner.job))
-            assert job_id not in self._active, "Job %d already in _active" % job_id
-            self._active[job_id] = runner
+            #logging.debug('_running[%d] = %s' % (job_id, runner.job))
+            assert job_id not in self._running, "Job %d already in _running" % job_id
+            self._running[job_id] = runner
 
     def on_done(self, runner):
         with self._lock:
             job_id = runner.job.id
-            #logging.debug('_active.pop(%d)' % job_id)
-            assert job_id in self._active, "No Job %d in _active" % job_id
-            self._active.pop(job_id)
+            #logging.debug('_running.pop(%d)' % job_id)
+            assert job_id in self._running, "No Job %d in _running" % job_id
+            self._running.pop(job_id)
             self._results.append(runner)
 
-            if not self._active:
+            if not self._running:
                 self._empty.notify_all()
 
     def terminate(self):
-        for runner in self._active.values():
+        for runner in self._running.values():
             runner.cancel()
 
     def pop_results(self):
@@ -336,7 +336,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
                            notify_on_skipped_reset=(bool, True),
                            directory=lambda *args: args[0] if args else None,
 
-                           # FIXME equal to _active_jobs.{_active + _results}?
+                           # FIXME equal to _active_jobs.{_running + _results}?
                            # Need to be consistent with Queue.working under JobPacket.lock
                            as_in_queue_working=always(set),
                           ),
