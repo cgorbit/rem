@@ -13,12 +13,12 @@ import xmlrpclib
 from Queue import Queue as StdQueue
 from Queue import PriorityQueue as StdPriorityQueue
 import heapq
-import subprocess
 
 import fork_locking
 from heap import PriorityQueue
 import osspec
 from rem_logging import logger as logging
+import runproc
 
 class RpcUserError(Exception):
     def __init__(self, exc):
@@ -573,17 +573,14 @@ def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
 
 @should_execute_maker(20, 5, Exception)
 def send_email(emails, subject, message):
-    sender = subprocess.Popen(["sendmail"] + map(str, emails), stdin=subprocess.PIPE)
-    print >> sender.stdin, \
+    body = \
         """Subject: %(subject)s
 To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-    sender.stdin.close()
-    sender.communicate()
-    return sender.poll()
-
+    sender = runproc.Popen(["sendmail"] + map(str, emails), stdin_content=body)
+    return sender.wait()
 
 def parse_network_address(addr):
     try:

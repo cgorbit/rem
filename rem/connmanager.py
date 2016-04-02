@@ -4,7 +4,6 @@ import socket
 import bsddb3
 from ConfigParser import ConfigParser
 import cPickle
-import subprocess
 from collections import deque
 
 from xmlrpc import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported, SimpleXMLRPCServer
@@ -12,6 +11,7 @@ from common import *
 from callbacks import TagBase, ICallbackAcceptor, ETagEvent, TagEventName
 from rem.profile import ProfiledThread
 from rem_logging import logger as logging
+import rem.runproc as runproc
 
 PROTOCOL_VERSION = 2
 
@@ -225,7 +225,7 @@ class TopologyInfo(Unpickable(servers=dict, location=str)):
         tmp_dir = tempfile.mkdtemp(dir=".", prefix="network-topology")
         try:
             config_temporary_path = os.path.join(tmp_dir, os.path.split(location)[1])
-            subprocess.check_call(
+            runproc.check_call(
                 ["svn", "export", "--force", "--non-interactive", "-q", location, config_temporary_path])
             return cls.ReadConfigFromFile(config_temporary_path)
         finally:

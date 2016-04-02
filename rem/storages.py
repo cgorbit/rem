@@ -8,7 +8,6 @@ import bsddb3
 import cPickle
 import threading
 import tempfile
-import subprocess
 import re
 
 from common import *
@@ -20,6 +19,7 @@ import fork_locking
 from future import Promise, WaitFutures, READY_FUTURE
 from profile import ProfiledThread
 from rem_logging import logger as logging
+import runproc
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -528,7 +528,7 @@ class TagsMasks(object):
     @classmethod
     def _load_from_svn(cls, path):
         with tempfile.NamedTemporaryFile(prefix='cloud_tags_list') as file:
-            subprocess.check_call(
+            runproc.check_call(
                 ["svn", "export", "--force", "-q", "--non-interactive", path, file.name])
             return cls._load_from_file(file.name)
 

@@ -38,8 +38,11 @@ def _set_cloexec(fd, state=True):
 
     fcntl.fcntl(fd, fcntl.F_SETFD, flags)
 
+def _unset_cloexec(fd):
+    _set_cloexec(fd, False)
+
 def _preexec_fn(report_fd):
-    _set_cloexec(report_fd, False)
+    _unset_cloexec(report_fd)
 
     # Python has no sigprocmask (for portability), so use sigaction
 
@@ -131,7 +134,8 @@ class ProcessGroupGuard(object):
         self._report_fd = report_pipe[0]
         self.pid = self._proc.pid
 
-    def _parse_report(self, str):
+    @classmethod
+    def _parse_report(str):
         offset = [0]
 
         def get_int():

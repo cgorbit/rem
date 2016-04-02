@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 from __future__ import with_statement
+
+import rem.runner
+rem.runner.ResetDefaultRunner()
+
 import os
 import re
 import select
