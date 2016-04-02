@@ -272,7 +272,13 @@ class _ActiveJobs(object):
         with self._lock:
             return len(self._running) + len(self._results)
 
-    def wait_empty(self):
+    def has_results(self):
+        return bool(self._results)
+
+    def has_running(self):
+        return bool(self._running)
+
+    def wait_running_empty(self):
         if not self._running:
             return
 
@@ -302,9 +308,9 @@ class _ActiveJobs(object):
         for runner in self._running.values():
             runner.cancel()
 
-    def pop_results(self):
-        with self._lock:
-            ret, self._results = self._results, []
+    def pop_result(self):
+        ret = self._results[0]
+        del self._results[0:1]
         return ret
 
 
@@ -635,7 +641,10 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self._apply_jobs_results()
 
     def _process_jobs_results(self, processor):
-        for runner in self._active_jobs.pop_results():
+        active = self._active_jobs
+
+        while active.has_results():
+            runner = active.pop_result()
             try:
                 self._process_job_result(processor, runner)
             except Exception:
@@ -665,7 +674,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         active = self._active_jobs
 
         active.terminate()
-        active.wait_empty()
+        active.wait_running_empty()
 
         self._close_streams()
 
