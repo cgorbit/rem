@@ -168,17 +168,17 @@ class RunprocProcessProxy(object):
         if self._impl.is_terminated():
             return
 
-        # TODO _impl.send_signal().get() gives better approximation
+        # TODO _impl.send_signal_safe().get() gives better approximation
         self._signal_was_sent = True
 
         # FIXME .get() future?
-        self._impl.send_signal(signal.SIGTERM, False)
+        self._impl.send_signal_safe(signal.SIGTERM, False)
 
         if self._impl.wait_no_throw(self.BEFORE_KILL_DELAY):
             return
 
         # FIXME .get() future?
-        self._impl.send_signal(signal.SIGKILL, True)
+        self._impl.send_signal_safe(signal.SIGKILL, True)
 
     def was_signal_sent(self):
         return self._signal_was_sent
