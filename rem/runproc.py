@@ -9,6 +9,7 @@ import signal
 import time
 from collections import deque
 from tempfile import NamedTemporaryFile
+import subprocess
 from subprocess import CalledProcessError, MAXFD
 import types
 import errno
@@ -53,7 +54,7 @@ class NewTaskParamsMessage(object):
         self.stdin = stdin # string or None
         self.stdout = stdout # filename or None
         self.stderr = stderr # filename or None
-        self.setpgrp = setpgrp
+        self.setpgrp = setpgrp # useless with use_pgrpguard=True
         self.cwd = cwd # filename or None
         self.shell = shell # filename or None
         self.use_pgrpguard = use_pgrpguard
@@ -159,7 +160,6 @@ LL_DEBUG = 90
 LL_INFO  = 80
 LL_ERROR = 20
 LOG_LEVEL = LL_INFO
-#LOG_LEVEL = LL_DEBUG # TODO
 
 
 def _log(lvl, args):
@@ -1256,6 +1256,55 @@ class BrokenRunner(object):
         pass
 
 
+def _Popen_fallback(*args, **kwargs):
+    logging.error("using fallback # TODO")
+
+    stdin_content = kwargs.pop('stdin_content', None)
+
+    task = NewTaskParamsMessage(*args, **kwargs)
+
+    def file_or_none(file):
+        if file is None:
+            return ScopedVal(None)
+        elif isinstance(file, str):
+            return open(file, 'r')
+        else:
+            raise ValueError()
+
+    class NamedTemporaryFileWithContent(object):
+        def __init__(self, content):
+            self._file = NamedTemporaryFile()
+            self._file.write(content)
+            self._file.flush()
+
+        def __enter__(self):
+            return self._file.__enter__()
+
+        def __exit__(self, *args):
+            self._file.__exit__(*args)
+
+    stdin_mgr = NamedTemporaryFileWithContent(stdin_content) \
+        if stdin_content is not None \
+        else file_or_none(task.stdin)
+
+    with stdin_mgr as stdin:
+        with file_or_none(task.stdout) as stdout:
+            with file_or_none(task.stderr) as stderr:
+                refl=dict(
+                    args=task.args,
+                    stdin=stdin,
+                    stdout=stdout,
+                    stderr=stderr,
+                    preexec_fn=os.setpgrp if task.setpgrp else None,
+                    cwd=task.cwd,
+                    shell=task.shell,
+                    close_fds=True, # as in _Server
+                )
+                logging.error(repr(refl))
+
+                return subprocess.Popen(**refl)
+
+
 class FallbackkedRunner(object):
     def __init__(self, backend):
         self._backend = backend
@@ -1263,60 +1312,13 @@ class FallbackkedRunner(object):
 
     def Popen(self, *args, **kwargs):
         if self._broken:
-            return self._Popen_fallback(*args, **kwargs)
+            return _Popen_fallback(*args, **kwargs)
 
         try:
             return self._backend.Popen(*args, **kwargs)
         except ServiceUnavailable:
             self._broken = True
-            return self._Popen_fallback(*args, **kwargs)
-
-    def _Popen_fallback(self, *args, **kwargs):
-        logging.error("using fallback # TODO")
-
-        stdin_content = kwargs.pop('stdin_content', None)
-
-        task = NewTaskParamsMessage(*args, **kwargs)
-
-        def file_or_none(file):
-            if file is None:
-                return ScopedVal(None)
-            elif isinstance(file, str):
-                return open(file, 'r')
-            else:
-                raise ValueError()
-
-        class NamedTemporaryFileWithContent(object):
-            def __init__(self, content):
-                self._file = NamedTemporaryFile()
-                self._file.write(content)
-                self._file.flush()
-
-            def __enter__(self):
-                return self._file.__enter__()
-
-            def __exit__(self, *args):
-                self._file.__exit__(*args)
-
-        stdin_mgr = NamedTemporaryFileWithContent(stdin_content) \
-            if stdin_content is not None \
-            else file_or_none(task.stdin)
-
-        with stdin_mgr as stdin:
-            with file_or_none(task.stdout) as stdout:
-                with file_or_none(task.stderr) as stderr:
-                    refl=dict(
-                        args=task.args,
-                        stdin=stdin,
-                        stdout=stdout,
-                        stderr=stderr,
-                        preexec_fn=os.setpgrp if task.setpgrp else None,
-                        cwd=task.cwd,
-                        shell=task.shell
-                    )
-                    logging.error(repr(refl))
-                    #return subprocess.Popen(refl)
-                    return refl
+            return _Popen_fallback(*args, **kwargs)
 
     def start(self, *args, **kwargs):
         raise NotImplementedError() # FIXME
@@ -1328,14 +1330,20 @@ class FallbackkedRunner(object):
 DEFAULT_RUNNER = None
 
 
-def ResetDefaultRunner(size=1, pgrpguard_binary=None):
+def ResetDefaultRunner(pool_size=1, pgrpguard_binary=None, runner=None):
     global DEFAULT_RUNNER
 
-    if size <= 0:
-        raise ValueError("size must be greater than 0");
+    if runner:
+        DEFAULT_RUNNER = runner
+        return
+
+    if pool_size <= 0:
+        raise ValueError("pool_size must be greater than 0");
 
     DEFAULT_RUNNER = None
-    DEFAULT_RUNNER = Runner(pgrpguard_binary) if size == 1 else RunnerPool(size)
+
+    DEFAULT_RUNNER = Runner(pgrpguard_binary) if pool_size == 1 \
+        else RunnerPool(pool_size, pgrpguard_binary)
 
 
 def DestroyDefaultRunner():

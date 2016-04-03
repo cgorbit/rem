@@ -8,6 +8,7 @@ import random
 sys.path[0:0] = ['/home/trofimenkov/rem']
 
 import runproc
+runproc.LOG_LEVEL = runproc.LL_DEBUG
 
 def readlines():
     while True:
@@ -42,8 +43,8 @@ def theloop(use_pgrpguard=False):
             try:
                 proc.wait()
             except Exception as e:
-                #logging.exception("proc.returncode = raise")
-                print >>sys.stderr, 'except:', repr(e)
+                logging.exception("proc.returncode = raise")
+                #print >>sys.stderr, 'except:', repr(e)
             else:
                 logging.debug("proc.returncode = %s" % proc.returncode)
         logging.debug("AFTER RUN")
@@ -55,13 +56,20 @@ if __name__ == '__main__':
     logging.root.setLevel(logging.DEBUG)
 
     pgrpguard_binary = sys.argv[1] if len(sys.argv) > 1 else None
-    runproc.ResetDefaultRunner(pgrpguard_binary=pgrpguard_binary)
 
-    print os.getpid()
+    #runproc.ResetDefaultRunner(pgrpguard_binary=pgrpguard_binary)
+    runproc.ResetDefaultRunner(
+        runner=runproc.FallbackkedRunner(
+            #runproc.RunnerPool(3, pgrpguard_binary)
+            runproc.BrokenRunner()
+        )
+    )
+
+    print >>sys.stderr, '__main__ pid:', os.getpid()
 
     use_pgrpguard = bool(pgrpguard_binary)
 
-    if False:
+    if True:
         try:
             theloop(use_pgrpguard)
         except KeyboardInterrupt:
