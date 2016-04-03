@@ -19,8 +19,10 @@ from future import Promise
 from profile import ProfiledThread
 import pgrpguard
 
+
 class ServiceUnavailable(RuntimeError):
     pass
+
 
 class ProcessStartMessage(object):
     def __init__(self, task_id, pid, error):
@@ -28,19 +30,24 @@ class ProcessStartMessage(object):
         self.pid = pid
         self.error = error
 
+
 class ProcessTerminationMessage(object):
     def __init__(self, task_id, exit_status):
         self.task_id = task_id
         self.exit_status = exit_status
 
+
 class StopServiceRequestMessage(object):
     pass
+
 
 class StopServiceResponseMessage(object):
     pass
 
+
 class NewTaskParamsMessage(object):
-    def __init__(self, args, stdin=None, stdout=None, stderr=None, setpgrp=False, cwd=None, shell=False):
+    def __init__(self, args, stdin=None, stdout=None, stderr=None, setpgrp=False,
+                 cwd=None, shell=False, use_pgrpguard=False):
         self.task_id = None
         self.args = args
         self.stdin = stdin # string or None
@@ -49,6 +56,8 @@ class NewTaskParamsMessage(object):
         self.setpgrp = setpgrp
         self.cwd = cwd # filename or None
         self.shell = shell # filename or None
+        self.use_pgrpguard = use_pgrpguard
+
 
 class SendSignalRequestMessage(object):
     def __init__(self, process_task_id, sig, group):
@@ -57,26 +66,31 @@ class SendSignalRequestMessage(object):
         self.sig = sig
         self.group = group
 
+
 class SendSignalResponseMessage(object):
     def __init__(self, task_id, was_sent, error):
         self.task_id = task_id
         self.was_sent = was_sent
         self.error = error
 
+
 def _send_signal(pid, sig, group):
     kill = os.killpg if group else os.kill
     print >>sys.stderr, "+ %s(%s, %s)" % (kill, pid, sig)
     kill(pid, sig)
+
 
 def _set_cloexec(fd):
     if not isinstance(fd, int):
         fd = fd.fileno()
     fcntl.fcntl(fd, fcntl.F_SETFD, fcntl.FD_CLOEXEC | fcntl.fcntl(fd, fcntl.F_GETFD))
 
+
 def set_nonblock(fd):
     if not isinstance(fd, int):
         fd = fd.fileno()
     fcntl.fcntl(fd, fcntl.F_SETFL, os.O_NONBLOCK | fcntl.fcntl(fd, fcntl.F_GETFL))
+
 
 #class PipeEvent(object):
     #def __init__(self):
@@ -112,14 +126,18 @@ def set_nonblock(fd):
                 #else:
                     #raise
 
+
 def serialize(stream, data):
     return pickle.dump(data, stream, pickle.HIGHEST_PROTOCOL)
+
 
 def deserialize(stream):
     return pickle.load(stream)
 
+
 def dupfdopen(f, mode):
     return os.fdopen(os.dup(f.fileno()), mode)
+
 
 def exit_on_error(func):
     def impl(self):
@@ -136,18 +154,26 @@ def exit_on_error(func):
 
     return impl
 
+
 LL_DEBUG = 90
 LL_INFO  = 80
-LOG_LEVEL = 80
+LL_ERROR = 20
+LOG_LEVEL = LL_INFO
+#LOG_LEVEL = LL_DEBUG # TODO
+
 
 def _log(lvl, args):
     if LOG_LEVEL >= lvl:
         sys.stderr.write((args[0] % args[1:]) + '\n')
 
+
 def logging_debug(*args):
     _log(LL_DEBUG, args)
 def logging_info(*args):
     _log(LL_INFO, args)
+def logging_error(*args):
+    _log(LL_ERROR, args)
+
 
 # XXX Don't use logging in _Server
 
@@ -176,11 +202,14 @@ class _Active(object):
     def __nonzero__(self):
         return bool(self._by_pid)
 
+
 class _Server(object):
-    def __init__(self, channel):
+    def __init__(self, channel, pgrpguard_binary=None):
         self._sig_chld_handler_pid = os.getpid() # #9535
 
         self._modify_signals(True)
+
+        self.pgrpguard_binary = pgrpguard_binary
 
         self._channel = channel
         _set_cloexec(self._channel)
@@ -232,32 +261,41 @@ class _Server(object):
             self.task_id = task_id
             self.pid = None
             self.start_sent = False
-            self.exit_status = None
             self.exec_errored = False
-
-        def __enter__(self):
-
-        def on_before_fork():
-            pass
-
-        def on_before_exec():
-            pass
-
-        def fix_args():
-            pass
-
-    class PgrpguardRunningTask(object):
-        def __init__(self, task_id):
-            self.task_id = task_id
-            self.pid = None
-            self.start_sent = False
             self.exit_status = None
-            self.exec_errored = False
+            self.error = None
 
         def on_before_fork(self):
-            self._report_pipe = os.pipe()
-            _set_cloexec(report_pipe[0])
-            _set_cloexec(report_pipe[1])
+            pass
+
+        def on_after_fork(self):
+            pass
+
+        def on_fork_error(self):
+            pass
+
+        def on_before_exec(self):
+            pass
+
+        def on_exec_error(self, exc):
+            return exc
+
+        def on_process_termination(self, exit_status):
+            self.exit_status = _handle_exitstatus(exit_status)
+
+        def fix_args(self, args):
+            return args
+
+    class PgrpguardRunningTask(RunningTask):
+        def __init__(self, task_id, pgrpguard_binary):
+            _Server.RunningTask.__init__(self, task_id)
+            self._pgrpguard_binary = pgrpguard_binary
+
+        def on_before_fork(self):
+            pipe = os.pipe()
+            self._report_pipe = pipe
+            _set_cloexec(pipe[0])
+            _set_cloexec(pipe[1])
 
         def _close_fd(self, fd):
             try:
@@ -274,32 +312,44 @@ class _Server(object):
                 self._close_fd(fd)
 
         def on_before_exec(self):
-            pgrpguard._preexec_fn(self._report_pipe[1]) # FIXME
+            pgrpguard._preexec_fn(self._report_pipe[1]) # FIXME Split _preexec_fn?
 
-        def on_exec_error(self):
+        def on_exec_error(self, exc):
             self._close_fd(self._report_pipe[0])
+            return pgrpguard._interpret_exec_error(exc)
 
-        def on_process_termination(self, ...):
-            READ_PIPE
-            self.exit_status = ...
+        def on_process_termination(self, status):
+            if self.exec_errored:
+                self.exit_status = _handle_exitstatus(status) # FIXME
+                return
+
+            self.exit_status = pgrpguard._real_status_from_report(
+                self._report_pipe[0],
+                _handle_exitstatus(status), # FIXME Better
+                self._pgrpguard_binary)
+
+            self._report_pipe = None
 
         def fix_args(self, args):
-            return [self.pgrpguard_binary] + args
+            return [self._pgrpguard_binary, str(self._report_pipe[1])] + args
 
     def _start_process(self, task):
+        if task.use_pgrpguard:
+            if not self.pgrpguard_binary:
+                return None, RuntimeError("No setup for pgrpguard")
+            running_task = self.PgrpguardRunningTask(task.task_id, self.pgrpguard_binary)
+        else:
+            running_task = self.RunningTask(task.task_id)
+
         try:
             exec_err_rd, exec_err_wr = os.pipe()
         except OSError as e:
-            return None, str(e)
-
-        running_task = self.PgrpguardRunningTask(task.task_id, task.pgrpguard_binary) \
-            if task.pgrpguard_binary \
-            else self.RunningTask(task.task_id)
+            return None, e
 
         try:
             running_task.on_before_fork()
         except Exception as e:
-            return None, str(e)
+            return None, e
 
         with self._lock:
             before_fork_time = time.time()
@@ -312,7 +362,13 @@ class _Server(object):
                     os.close(exec_err_wr)
                 except:
                     pass
-                return None, str(e)
+
+                try:
+                    running_task.on_fork_error()
+                except Exception as e:
+                    logging_error('on_fork_error failed: %s' % e)
+
+                return None, e
 
             fork_time = time.time() - before_fork_time
 
@@ -324,24 +380,35 @@ class _Server(object):
         if pid:
             logging_debug('fork time %s' % fork_time)
 
-        if pid:
+            try:
+                running_task.on_after_fork()
+            except Exception as e:
+                logging_error('on_after_fork failed: %s' % e) # FIXME
+
             os.close(exec_err_wr)
+
             exec_error = None
             try:
                 with os.fdopen(exec_err_rd) as in_:
                     s = in_.read()
                     if s:
                         exec_error = pickle.loads(s)
-            except BaseException as exec_error:
+            except Exception as exec_error:
                 try:
                     os.close(exec_err_rd)
                 except:
                     pass
+            else:
+                if exec_error:
+                    try:
+                        exec_error = running_task.on_exec_error(exec_error)
+                    except Exception as e:
+                        logging_error('on_exec_error failed: %s' % e)
 
             running_task.exec_errored = bool(exec_error)
             return pid, exec_error or None
 
-        else:
+        else: # child
             exit_code = 0
             try:
                 _set_cloexec(exec_err_wr)
@@ -386,10 +453,11 @@ class _Server(object):
                     #executable = args[0]
 
                 args = running_task.fix_args(args)
+                logging_debug('+ args %s' % args)
 
                 self._modify_signals(False)
 
-                running_task.on_before_exec()
+                running_task.on_before_exec() # Must run after _modify_signals
 
                 os.execvp(args[0], args)
 
@@ -403,6 +471,7 @@ class _Server(object):
                     exit_code = 65
             except:
                 exit_code = 66
+
             os._exit(exit_code)
 
     def _process_send_signal_message(self, msg):
@@ -531,6 +600,9 @@ class _Server(object):
         self._send_queue.append(
             ProcessStartMessage(task_id, pid, error))
 
+        if not task: # failed before/on fork
+            return
+
         task.start_sent = True
 
         if terminated and not task.exec_errored:
@@ -540,13 +612,18 @@ class _Server(object):
     def _enqueue_term_msg(self, pid, exit_status):
         task = self._active.get_by_pid(pid)
 
+        task.on_process_termination(exit_status)
+
         if task.start_sent:
             self._active.pop_by_pid(pid)
+
             if not task.exec_errored:
                 self._send_queue.append(
-                    ProcessTerminationMessage(task.task_id, exit_status))
+                    ProcessTerminationMessage(task.task_id, task.exit_status))
+
+        # SIGCHLD before _send_queue.append(ProcessStartMessage(
         else:
-            task.exit_status = exit_status
+            pass
 
     def _sig_chld_handler(self, signum, frame):
         # http://bugs.python.org/issue9535
@@ -568,36 +645,36 @@ class _Server(object):
             self._send_queue_not_empty.notify()
 
 
+def _handle_exitstatus(sts, _WIFSIGNALED=os.WIFSIGNALED,
+        _WTERMSIG=os.WTERMSIG, _WIFEXITED=os.WIFEXITED,
+        _WEXITSTATUS=os.WEXITSTATUS):
+    if _WIFSIGNALED(sts):
+        return -_WTERMSIG(sts)
+    elif _WIFEXITED(sts):
+        return _WEXITSTATUS(sts)
+    else:
+        raise RuntimeError("Unknown child exit status!")
+
+
 class _Popen(object):
     def __init__(self, pid, task_id, exit_status, client):
         self.pid = pid
         self._task_id = task_id
         self._exit_status = exit_status
         self._client = client
-        self.returncode = None
+        self._returncode = None
 
     def __repr__(self):
         self.poll()
         cls = type(self)
         ret = '<%s.%s: pid=%s, ' % (cls.__module__, cls.__name__, self.pid)
-        ret += 'returncode=%s' % self.returncode if not self._exit_status else 'running'
+        ret += 'returncode=%s' % self._returncode if not self._exit_status else 'running'
         ret += '>'
         return ret
 
-    def _handle_exitstatus(self, sts, _WIFSIGNALED=os.WIFSIGNALED,
-            _WTERMSIG=os.WTERMSIG, _WIFEXITED=os.WIFEXITED,
-            _WEXITSTATUS=os.WEXITSTATUS):
-        if _WIFSIGNALED(sts):
-            return -_WTERMSIG(sts)
-        elif _WIFEXITED(sts):
-            return _WEXITSTATUS(sts)
-        else:
-            # Should never happen
-            raise RuntimeError("Unknown child exit status!")
-
     def wait(self, timeout=None, deadline=None):
-        if self.returncode is not None:
-            return self.returncode
+        if self._returncode is not None:
+            return self._returncode
 
         if timeout is not None:
             pass
@@ -607,10 +684,18 @@ class _Popen(object):
         if not self._exit_status.wait(timeout):
             return None
 
-        self.returncode = self._handle_exitstatus(self._exit_status.get())
+    # FIXME Not kosher enough?
+        #self._returncode = _handle_exitstatus(self._exit_status.get())
+        self._returncode = self._exit_status.get()
         self._exit_status = None
 
-        return self.returncode
+        return self._returncode
+
+    @property
+    def returncode(self):
+        if isinstance(self._returncode, Exception):
+            raise self._returncode
+        return self._returncode
 
     def poll(self):
         return self.wait(timeout=0)
@@ -648,6 +733,7 @@ class _Popen(object):
     def pipe_cloexec(self):
         raise NotImplementedError("pipe_cloexec not implemented")
 
+
 def _weak_method(m):
     obj = weakref.proxy(m.__self__)
     func = m.__func__
@@ -657,6 +743,8 @@ def _weak_method(m):
 
     return run
 
+
+# TODO Use __slots__
 class Bool(object):
     def __init__(self):
         self.__state = False
@@ -675,6 +763,7 @@ class Bool(object):
 
     def __repr__(self):
         return repr(self.__state)
+
 
 def fail_on_error(func):
     def impl(self):
@@ -947,7 +1036,8 @@ class _Client(object):
                 pid, error = msg.pid, msg.error
 
                 if error:
-                    error = RuntimeError(error) # FIXME pickle Exception?
+                    #error = RuntimeError(error) # FIXME pickle Exception?
+                    pass # TODO Check! :)
 
                 with lock:
                     try:
@@ -971,7 +1061,12 @@ class _Client(object):
                         else:
                             raise
 
-                task.term_info.set(msg.exit_status)
+            # FIXME Better?
+                p = task.term_info
+                if isinstance(msg.exit_status, Exception):
+                    p.set(None, msg.exit_status)
+                else:
+                    p.set(msg.exit_status)
 
             elif isinstance(msg, SendSignalResponseMessage):
                 with lock:
@@ -1010,8 +1105,10 @@ def dup2file(filename, newfd, flags, mode=0666):
     os.dup2(oldfd, newfd)
     os.close(oldfd)
 
+
 def dup2devnull(newfd, flags):
     dup2file('/dev/null', newfd, flags)
+
 
 def _close_fds(white_list):
     for fd in xrange(3, MAXFD):
@@ -1021,7 +1118,8 @@ def _close_fds(white_list):
             except:
                 pass
 
-def _run_executor(child_err_wr, channel):
+
+def _run_executor(child_err_wr, channel, pgrpguard_binary=None):
     _close_fds([channel.fileno(), child_err_wr])
 
     dup2devnull(0, os.O_RDONLY)
@@ -1030,8 +1128,9 @@ def _run_executor(child_err_wr, channel):
     #os.dup2(child_err_wr, 2) # FIXME
     os.close(child_err_wr)
 
-    ex = _Server(channel)
+    ex = _Server(channel, pgrpguard_binary)
     ex.wait()
+
 
 def _run_executor_wrapper(*args):
     try:
@@ -1045,7 +1144,8 @@ def _run_executor_wrapper(*args):
         exit_code = 1
     os._exit(exit_code)
 
-def Runner():
+
+def Runner(pgrpguard_binary=None):
     child_err_rd, child_err_wr = os.pipe()
     channel_parent, channel_child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM, 0)
 
@@ -1068,11 +1168,12 @@ def Runner():
             except:
                 pass
             os._exit(1)
-        _run_executor_wrapper(child_err_wr, channel_child)
+        _run_executor_wrapper(child_err_wr, channel_child, pgrpguard_binary)
+
 
 class RunnerPool(object):
-    def __init__(self, size):
-        self._good = [Runner() for _ in xrange(size)]
+    def __init__(self, size, pgrpguard_binary=None):
+        self._good = [Runner(pgrpguard_binary) for _ in xrange(size)]
         self._bad  = []
         self._counter = 0
         self._lock = threading.Lock()
@@ -1113,9 +1214,10 @@ class RunnerPool(object):
         self._good = []
         self._bad  = []
 
+
 class RunnerPoolNaive(object):
-    def __init__(self, size):
-        self._good = [Runner() for _ in xrange(size)]
+    def __init__(self, size, pgrpguard_binary=None):
+        self._good = [Runner(pgrpguard_binary) for _ in xrange(size)]
         self._counter = 0
 
     def _get_impl(self):
@@ -1131,6 +1233,7 @@ class RunnerPoolNaive(object):
     def stop():
         self._good = []
 
+
 class ScopedVal(object):
     def __init__(self, val):
         self._val = val
@@ -1141,6 +1244,7 @@ class ScopedVal(object):
     def __exit__(self, *args):
         pass
 
+
 class BrokenRunner(object):
     def Popen(self, *args, **kwargs):
         raise ServiceUnavailable()
@@ -1150,6 +1254,7 @@ class BrokenRunner(object):
 
     def stop():
         pass
+
 
 class FallbackkedRunner(object):
     def __init__(self, backend):
@@ -1219,33 +1324,41 @@ class FallbackkedRunner(object):
     def stop(self):
         self._backend.stop()
 
+
 DEFAULT_RUNNER = None
 
-def ResetDefaultRunner(size=1):
+
+def ResetDefaultRunner(size=1, pgrpguard_binary=None):
     global DEFAULT_RUNNER
 
     if size <= 0:
         raise ValueError("size must be greater than 0");
 
     DEFAULT_RUNNER = None
-    DEFAULT_RUNNER = Runner() if size == 1 else RunnerPool(size)
+    DEFAULT_RUNNER = Runner(pgrpguard_binary) if size == 1 else RunnerPool(size)
+
 
 def DestroyDefaultRunner():
     global DEFAULT_RUNNER
     DEFAULT_RUNNER = None
 
+
 atexit.register(DestroyDefaultRunner)
+
 
 def Popen(*args, **kwargs):
     return DEFAULT_RUNNER.Popen(*args, **kwargs)
 
+
 def start(*args, **kwargs):
     return DEFAULT_RUNNER.start(*args, **kwargs)
+
 
 # XXX Copy-pasted from subprocess.py
 
 def call(*args, **kwargs):
     return Popen(*args, **kwargs).wait()
+
 
 def check_call(*args, **kwargs):
     retcode = call(*args, **kwargs)
@@ -1256,9 +1369,11 @@ def check_call(*args, **kwargs):
         check_retcode(retcode, cmd)
     return 0
 
+
 def check_retcode(retcode, cmd):
     if retcode:
         raise CalledProcessError(retcode, cmd)
+
 
 def check_output(*args, **kwargs):
     raise NotImplementedError('check_output not implemented')

@@ -82,6 +82,81 @@ class WrapperProtocolError(Error):
     pass
 
 
+def _interpret_exec_error(e):
+    if isinstance(e, OSError):
+        if e.errno == errno.ENOENT:
+            return WrapperNotFoundError("Can't find wrapper binary")
+        return WrapperStartOSError(e.errno, "Failed to run wrapper binary: %s" % e.strerror)
+    return WrapperStartError("Failed to run wrapper binary: %s" % e)
+
+
+def _parse_report(str):
+    offset = [0]
+
+    def get_int():
+        len = struct.calcsize('i')
+        ret = struct.unpack('i', buffer(str, offset[0], len))
+        offset[0] += len
+        return ret[0]
+
+    def get_str():
+        len = get_int()
+        ret = struct.unpack('%ds' % len, buffer(str, offset[0], len))
+        offset[0] += len
+        return ret[0]
+
+    type = get_int()
+
+    if type == _RT_ERROR:
+        get_int()
+        errno = get_int()
+        msg = get_str()
+        ret = ProcessStartOSError(errno, "%s: %s" % (msg, os.strerror(errno)))
+
+    elif type == _RT_CHILD_STATUS:
+        ret = _handle_status(get_int())
+
+    else:
+        raise WrapperProtocolError("Unknown report type %d" % type)
+
+    if offset[0] != len(str):
+        raise WrapperProtocolError('Extra data in wrapper report')
+
+    return ret
+
+
+def _real_status_from_report(report_fd, wrapper_status, wrapper_filename):
+    try:
+        with os.fdopen(report_fd) as in_:
+            report_str = in_.read()
+    except Exception as e:
+        return WrapperProtocolError("Failed to read report: %s" % e)
+
+    if wrapper_status < 0:
+        return WrapperProtocolError("Wrapper was terminated by %s signal" % -wrapper_status)
+
+    elif wrapper_status == _EXIT_NO_ARGV:
+        return WrapperUsageError("No enough arguments for %s" % wrapper_filename)
+
+    elif wrapper_status == _EXIT_BAD_REPORT_FD:
+        return WrapperUsageError("Bad report fd for %s" % wrapper_filename)
+
+    elif wrapper_status == _EXIT_NOT_SUPER_USER:
+        return WrapperUsageError("No set-uid root on %s" % wrapper_filename)
+
+    elif wrapper_status == _EXIT_STATUS_IN_FILE:
+        try:
+            return _parse_report(report_str)
+        except Exception as e:
+            return WrapperProtocolError("Failed to parse report from %s: %s" % (wrapper_filename, e))
+
+    elif wrapper_status == _EXIT_FAILED_REPORT:
+        return WrapperProtocolError("%s failed to write report" % wrapper_filename)
+
+    else:
+        return wrapper_status
+
+
 class ProcessGroupGuard(object):
     def __init__(self, argv, *args, **kwargs):
         if isinstance(argv, types.StringTypes):
@@ -117,11 +192,8 @@ class ProcessGroupGuard(object):
         except Exception:
             try:
                 t, e, tb = sys.exc_info()
-                if isinstance(e, OSError):
-                    if e.errno == errno.ENOENT:
-                        raise WrapperNotFoundError, WrapperNotFoundError("Can't find wrapper binary"), tb
-                    raise WrapperStartOSError, WrapperStartOSError(e.errno, "Failed to run wrapper binary: %s" % e.strerror), tb
-                raise WrapperStartError, WrapperStartError("Failed to run wrapper binary: %s" % e.message), tb
+                e = _interpret_exec_error(e)
+                raise type(e), e, tb
             finally:
                 for fd in report_pipe:
                     try:
@@ -134,76 +206,9 @@ class ProcessGroupGuard(object):
         self._report_fd = report_pipe[0]
         self.pid = self._proc.pid
 
-    @classmethod
-    def _parse_report(str):
-        offset = [0]
-
-        def get_int():
-            len = struct.calcsize('i')
-            ret = struct.unpack('i', buffer(str, offset[0], len))
-            offset[0] += len
-            return ret[0]
-
-        def get_str():
-            len = get_int()
-            ret = struct.unpack('%ds' % len, buffer(str, offset[0], len))
-            offset[0] += len
-            return ret[0]
-
-        type = get_int()
-
-        if type == _RT_ERROR:
-            get_int()
-            errno = get_int()
-            msg = get_str()
-            ret = ProcessStartOSError(errno, "%s: %s" % (msg, os.strerror(errno)))
-
-        elif type == _RT_CHILD_STATUS:
-            ret = _handle_status(get_int())
-
-        else:
-            raise WrapperProtocolError("Unknown report type %d" % type)
-
-        if offset[0] != len(str):
-            raise WrapperProtocolError('Extra data in wrapper report')
-
-        return ret
-
     def _handle_status(self, wrapper_status):
-        try:
-            with os.fdopen(self._report_fd) as in_:
-                report_str = in_.read()
-        except Exception as e:
-            self._result = WrapperProtocolError("Failed to read report: %s" % e.message)
-            return
-        finally:
-            self._report_fd = None
-
-        if wrapper_status < 0:
-            result = WrapperProtocolError("Wrapper was terminated by %s signal" % -wrapper_status)
-
-        elif wrapper_status == _EXIT_NO_ARGV:
-            result = WrapperUsageError("No enough arguments for %s" % self._wrapper_filename)
-
-        elif wrapper_status == _EXIT_BAD_REPORT_FD:
-            result = WrapperUsageError("Bad report fd for %s" % self._wrapper_filename)
-
-        elif wrapper_status == _EXIT_NOT_SUPER_USER:
-            result = WrapperUsageError("No set-uid root on %s" % self._wrapper_filename)
-
-        elif wrapper_status == _EXIT_STATUS_IN_FILE:
-            try:
-                result = self._parse_report(report_str)
-            except Exception as e:
-                result = WrapperProtocolError("Failed to parse report from %s: %s" % (self._wrapper_filename, e))
-
-        elif wrapper_status == _EXIT_FAILED_REPORT:
-            result = WrapperProtocolError("%s failed to write report" % self._wrapper_filename)
-
-        else:
-            result = wrapper_status
-
-        self._result = result
+        self._result = _real_status_from_report(self._report_fd, wrapper_status, self._wrapper_filename)
+        self._report_fd = None
 
     @property
     def stdin(self):
