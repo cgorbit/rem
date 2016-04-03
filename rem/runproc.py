@@ -17,7 +17,7 @@ import weakref
 import atexit
 
 from future import Promise
-from profile import ProfiledThread
+from profile import ProfiledThread, set_thread_name
 import pgrpguard
 
 
@@ -286,6 +286,14 @@ class _Server(object):
         def fix_args(self, args):
             return args
 
+        def _check_pid_is_set(self):
+            if not self.pid:
+                raise RuntimeError(".pid is not set in %s" % type(self).__name__)
+
+        def send_signal(self, sig, group):
+            self._check_pid_is_set()
+            _send_signal(self.pid, sig, group)
+
     class PgrpguardRunningTask(RunningTask):
         def __init__(self, task_id, pgrpguard_binary):
             _Server.RunningTask.__init__(self, task_id)
@@ -332,6 +340,18 @@ class _Server(object):
 
         def fix_args(self, args):
             return [self._pgrpguard_binary, str(self._report_pipe[1])] + args
+
+        def send_signal(self, sig, group):
+            self._check_pid_is_set()
+
+            if sig == signal.SIGTERM and not group:
+                pgrpguard.send_term_to_process(self.pid)
+
+            elif sig == signal.SIGKILL and group:
+                pgrpguard.send_kill_to_group(self.pid)
+
+            else:
+                raise RuntimeError("pgrpguard can't send signal %d (is_group=%d)" % (sig, group))
 
     def _start_process(self, task):
         if task.use_pgrpguard:
@@ -484,9 +504,9 @@ class _Server(object):
                     err = RuntimeError("Can't kill exec_errored tasks")
                 else:
                     try:
+                        task.send_signal(msg.sig, msg.group)
                         was_sent = True
-                        _send_signal(task.pid, msg.sig, msg.group)
-                    except OSError as err:
+                    except Exception as err:
                         print >>sys.stderr, "+ _process_send_signal_message:", err
                         pass
             else:
@@ -568,7 +588,7 @@ class _Server(object):
 
                 if self._should_stop and not self._active:
                     last_iter = True
-                    logging_info('_Server._write_loop append(StopServiceResponseMessage)')
+                    logging_debug('_Server._write_loop append(StopServiceResponseMessage)')
                     messages.append(StopServiceResponseMessage())
 
             for msg in messages:
@@ -662,19 +682,20 @@ class _Popen(object):
         self._task_id = task_id
         self._exit_status = exit_status
         self._client = client
-        self._returncode = None
 
     def __repr__(self):
         self.poll()
         cls = type(self)
         ret = '<%s.%s: pid=%s, ' % (cls.__module__, cls.__name__, self.pid)
-        ret += 'returncode=%s' % self._returncode if not self._exit_status else 'running'
+        ret += 'returncode=%s' % self._exit_status.get_raw() \
+            if self._exit_status.is_set() \
+            else 'running'
         ret += '>'
         return ret
 
-    def wait(self, timeout=None, deadline=None):
-        if self._returncode is not None:
-            return self._returncode
+    def wait_no_throw(self, timeout=None, deadline=None):
+        if self._exit_status.is_set():
+            return True
 
         if timeout is not None:
             pass
@@ -682,20 +703,22 @@ class _Popen(object):
             timeout = deadline - time.time()
 
         if not self._exit_status.wait(timeout):
-            return None
+            return False
 
-    # FIXME Not kosher enough?
-        #self._returncode = _handle_exitstatus(self._exit_status.get())
-        self._returncode = self._exit_status.get()
-        self._exit_status = None
+        return True
 
-        return self._returncode
+    def wait(self, timeout=None, deadline=None):
+        self.wait_no_throw(timeout, deadline)
+        return self.returncode
+
+    def is_terminated(self):
+        return self._exit_status.is_set()
 
     @property
     def returncode(self):
-        if isinstance(self._returncode, Exception):
-            raise self._returncode
-        return self._returncode
+        if self._exit_status.is_set():
+            return self._exit_status.get()
+        return None
 
     def poll(self):
         return self.wait(timeout=0)
@@ -706,26 +729,26 @@ class _Popen(object):
     def send_signal_safe(self, sig, group=False):
         return self._client._send_signal(self, sig, group)
 
-    def send_signal(self, sig, group=False):
-        _send_signal(self.pid, sig, group)
+    #def send_signal(self, sig, group=False):
+        #_send_signal(self.pid, sig, group)
 
-    def terminate(self, group=False):
-        self.send_signal(signal.SIGTERM, group)
+    #def terminate(self, group=False):
+        #self.send_signal(signal.SIGTERM, group)
 
-    def kill(self):
-        self.send_signal(signal.SIGKILL)
+    #def kill(self):
+        #self.send_signal(signal.SIGKILL)
 
-    def killpg(self):
-        self.send_signal(signal.SIGKILL, group=True)
+    #def killpg(self):
+        #self.send_signal(signal.SIGKILL, group=True)
 
-    def terminate_safe(self, group=False):
-        return self.send_signal_safe(signal.SIGTERM, group)
+    #def terminate_safe(self, group=False):
+        #return self.send_signal_safe(signal.SIGTERM, group)
 
-    def kill_safe(self):
-        return self.send_signal_safe(signal.SIGKILL)
+    #def kill_safe(self):
+        #return self.send_signal_safe(signal.SIGKILL)
 
-    def killpg_safe(self):
-        return self.send_signal_safe(signal.SIGKILL, group=True)
+    #def killpg_safe(self):
+        #return self.send_signal_safe(signal.SIGKILL, group=True)
 
     def communicate(self):
         raise NotImplementedError("communicate not implemented")
@@ -1168,6 +1191,7 @@ def Runner(pgrpguard_binary=None):
             except:
                 pass
             os._exit(1)
+        set_thread_name("rem-RunnerSrv")
         _run_executor_wrapper(child_err_wr, channel_child, pgrpguard_binary)
 
 

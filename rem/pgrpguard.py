@@ -20,6 +20,12 @@ _RT_CHILD_STATUS = 2
 _PRC_TERM_SIGNAL = signal.SIGUSR1
 _GRP_KILL_SIGNAL = signal.SIGUSR2
 
+def send_term_to_process(pid):
+    os.kill(pid, _PRC_TERM_SIGNAL)
+
+def send_kill_to_group(pid):
+    os.kill(pid, _GRP_KILL_SIGNAL)
+
 def _handle_status(status):
     if os.WIFSIGNALED(status):
         return -os.WTERMSIG(status)
@@ -249,7 +255,7 @@ class ProcessGroupGuard(object):
         return ret
 
     def send_term_to_process(self):
-        os.kill(self.pid, _PRC_TERM_SIGNAL)
+        send_term_to_process(self.pid)
 
     def send_kill_to_group(self):
-        os.kill(self.pid, _GRP_KILL_SIGNAL)
+        send_kill_to_group(self.pid)

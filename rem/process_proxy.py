@@ -3,11 +3,14 @@ import sys
 import time
 import signal
 import subprocess
-import pgrpguard
 import threading
+
+import runproc
+import pgrpguard
 
 _inf = float('inf')
 _MAX_WAIT_DELAY = 2.0
+
 
 def _wait(f, timeout=None, deadline=None):
     if timeout is not None:
@@ -31,6 +34,7 @@ def _wait(f, timeout=None, deadline=None):
         time.sleep(delay)
 
     return None
+
 
 class ProcessProxyBase(object):
     BEFORE_KILL_DELAY = 1.0
@@ -68,6 +72,7 @@ class ProcessProxyBase(object):
     @property
     def stderr(self):
         return self._impl.stderr
+
 
 def _get_process_state(pid):
     with open('/proc/%d/status' % pid) as in_:
@@ -139,3 +144,51 @@ class ProcessGroupGuardProxy(ProcessProxyBase):
             if self._waited():
                 return
             self._send_kill_to_group()
+
+
+class RunprocProcessProxy(object):
+    BEFORE_KILL_DELAY = ProcessProxyBase.BEFORE_KILL_DELAY
+
+    def __init__(self, argv, stdin=None, stdout=None, stderr=None, setpgrp=False,
+                 cwd=None, shell=False, use_pgrpguard=False):
+
+        self._signal_was_sent = False
+
+        if stdin:
+            stdin = stdin.name
+        if stdout:
+            stdout = stdout.name
+        if stderr:
+            stderr = stderr.name
+
+        self._impl = runproc.Popen(argv, stdin, stdout, stderr, setpgrp, cwd,
+                                   shell, use_pgrpguard)
+
+    def terminate(self):
+        if self._impl.is_terminated():
+            return
+
+        # TODO _impl.send_signal().get() gives better approximation
+        self._signal_was_sent = True
+
+        # FIXME .get() future?
+        self._impl.send_signal(signal.SIGTERM, False)
+
+        if self._impl.wait_no_throw(self.BEFORE_KILL_DELAY):
+            return
+
+        # FIXME .get() future?
+        self._impl.send_signal(signal.SIGKILL, True)
+
+    def was_signal_sent(self):
+        return self._signal_was_sent
+
+    @property
+    def returncode(self):
+        return self._impl.returncode
+
+    def wait(self, timeout=None, deadline=None):
+        return self._impl.wait(timeout, deadline)
+
+    def poll(self):
+        return self._impl.poll()

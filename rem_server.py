@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 from __future__ import with_statement
 
-import rem.runner
-rem.runner.ResetDefaultRunner()
-
 import os
 import re
 import select
@@ -30,6 +27,7 @@ import rem.fork_locking
 from rem.rem_logging import logger as logging
 import rem.rem_logging as rem_logging
 from rem.context import Context
+import rem.runproc
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -782,6 +780,13 @@ def main():
     opts = parse_arguments()
 
     ctx = Context(opts.config)
+
+# TODO Use runproc.FallbackkedRunner XXX
+    if ctx.runproc_runner_count:
+        rem.runproc.ResetDefaultRunner(
+            pool_size=ctx.runproc_runner_count,
+            pgrpguard_binary=ctx.process_wrapper
+        )
 
     if opts.mode == 'test':
         ctx.log_warn_level = 'debug'

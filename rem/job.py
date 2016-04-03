@@ -124,13 +124,24 @@ class Job(Unpickable(err=nullobject,
 
     @staticmethod
     def start_process(*args, **kwargs):
-        wrapper = packet.PacketCustomLogic.SchedCtx.process_wrapper
+        ctx = packet.PacketCustomLogic.SchedCtx
 
-        if wrapper is None:
-            return process_proxy.ProcessProxy(*args, **kwargs)
+        pgrpguard_binary = ctx.process_wrapper
+
+        if ctx.runproc_runner_count:
+            if pgrpguard_binary is not None:
+                kwargs['use_pgrpguard'] = True
+            return process_proxy.RunprocProcessProxy(*args, **kwargs)
+
         else:
-            kwargs['wrapper_binary'] = wrapper
-            return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
+            kwargs['close_fds'] = True
+
+            if pgrpguard_binary is None:
+                return process_proxy.ProcessProxy(*args, **kwargs)
+
+            else:
+                kwargs['wrapper_binary'] = pgrpguard_binary
+                return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
 
     def last_result(self):
         return self.results[-1] if self.results else None
@@ -217,10 +228,9 @@ class JobRunner(object):
         try:
             process = job.start_process(
                 argv,
-                stdout=stdout.fileno(),
-                stdin=stdin.fileno(),
-                stderr=stderr.fileno(),
-                close_fds=True,
+                stdout=stdout,
+                stdin=stdin,
+                stderr=stderr,
                 cwd=job.get_working_directory(),
             )
 
