@@ -231,8 +231,8 @@ class _Server(object):
         self._read_stopped = False
         self._write_stopped = False
 
-        self._read_thread = ProfiledThread(target=self._read_loop, name_prefix='RunnerSrvRd')
-        self._write_thread = ProfiledThread(target=self._write_loop, name_prefix='RunnerSrvWr')
+        self._read_thread = threading.Thread(target=self._read_loop)
+        self._write_thread = threading.Thread(target=self._write_loop)
         self._read_thread.start()
         self._write_thread.start()
 
@@ -531,6 +531,8 @@ class _Server(object):
 
     @exit_on_error
     def _read_loop(self):
+        set_thread_name('rem-RunnerSrvRd')
+
         channel_in = self._channel_in
         stop_request_received = False
 
@@ -570,6 +572,8 @@ class _Server(object):
 
     @exit_on_error
     def _write_loop(self):
+        set_thread_name('rem-RunnerSrvWr')
+
         channel_out = self._channel_out
         send_queue = self._send_queue
 
@@ -974,7 +978,8 @@ class _Client(object):
         if stdin_content is None:
             return start()
 
-        # TODO Reimplement
+    # FIXME Why 'stdin_content' supported only in Popen?
+    # TODO Reimplement: use named pipes?
         with NamedTemporaryFile() as tmp:
             tmp.write(stdin_content)
             tmp.flush()
