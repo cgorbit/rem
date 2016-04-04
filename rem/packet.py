@@ -309,9 +309,7 @@ class _ActiveJobs(object):
             runner.cancel()
 
     def pop_result(self):
-        ret = self._results[0]
-        del self._results[0:1]
-        return ret
+        return self._results.pop(0)
 
 
 def always(ctor):
