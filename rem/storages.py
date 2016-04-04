@@ -40,7 +40,7 @@ class GlobalPacketStorage(object):
     def __setitem__(self, key, value):
         self.box[key] = value
 
-    def keys(self):
+    def ids(self):
         return self.box.keys()
 
     Add = add
@@ -86,6 +86,9 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
             if pck:
                 return pck[1][1]
 
+    def ids(self):
+        return self.packets.revIndex.keys()
+
 
 class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=str)):
     digest_length = 32
@@ -113,6 +116,9 @@ class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=st
                 bad_files.add(checksum)
         for checksum in bad_files:
             self.files.pop(checksum).release()
+
+    def cleanup_fs(self):
+        cleanup_directory(self.binDirectory, set(self.files.keys()))
 
     def UpdateContext(self, context):
         for file in self.files.itervalues():

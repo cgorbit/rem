@@ -6,7 +6,7 @@ import sys
 import re
 from collections import deque
 import gc
-from common import PickableStdQueue, PickableStdPriorityQueue, as_rpc_user_error, RpcUserError, send_email
+from common import PickableStdQueue, PickableStdPriorityQueue, as_rpc_user_error, RpcUserError, send_email, cleanup_directory
 import common
 from Queue import Empty, Queue as ThreadSafeQueue
 import cStringIO
@@ -588,6 +588,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         if ctx.allow_startup_tags_conversion:
             self.tagRef.convert_in_memory_tags_to_cloud_if_need()
+
+    def cleanup_bin_storage_fs(self):
+        self.binStorage.cleanup_fs()
+
+    def cleanup_packet_storage_fs(self):
+        to_keep = set(self.packStorage.ids())
+        to_keep |= set(self.tempStorage.ids())
+
+        cleanup_directory(self.context.packets_directory, to_keep)
 
     def _vivify_queues(self, qRef):
         for name, q in qRef.iteritems():
