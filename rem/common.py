@@ -18,7 +18,7 @@ import fork_locking
 from heap import PriorityQueue
 import osspec
 from rem_logging import logger as logging
-import runproc
+import subprocsrv
 
 class RpcUserError(Exception):
     def __init__(self, exc):
@@ -579,7 +579,7 @@ To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-    sender = runproc.Popen(["sendmail"] + map(str, emails), stdin_content=body)
+    sender = subprocsrv.Popen(["sendmail"] + map(str, emails), stdin_content=body)
     return sender.wait()
 
 def parse_network_address(addr):

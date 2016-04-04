@@ -5,7 +5,7 @@ import signal
 import subprocess
 import threading
 
-import runproc
+import subprocsrv
 import pgrpguard
 
 _inf = float('inf')
@@ -146,7 +146,7 @@ class ProcessGroupGuardProxy(ProcessProxyBase):
             self._send_kill_to_group()
 
 
-class RunprocProcessProxy(object):
+class SubprocsrvProcessProxy(object):
     BEFORE_KILL_DELAY = ProcessProxyBase.BEFORE_KILL_DELAY
 
     def __init__(self, argv, stdin=None, stdout=None, stderr=None, setpgrp=False,
@@ -161,7 +161,7 @@ class RunprocProcessProxy(object):
         if stderr:
             stderr = stderr.name
 
-        self._impl = runproc.Popen(argv, stdin, stdout, stderr, setpgrp, cwd,
+        self._impl = subprocsrv.Popen(argv, stdin, stdout, stderr, setpgrp, cwd,
                                    shell, use_pgrpguard)
 
     def terminate(self):

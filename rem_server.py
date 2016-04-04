@@ -27,7 +27,7 @@ import rem.fork_locking
 from rem.rem_logging import logger as logging
 import rem.rem_logging as rem_logging
 from rem.context import Context
-import rem.runproc
+import rem.subprocsrv
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -781,10 +781,10 @@ def main():
 
     ctx = Context(opts.config)
 
-# TODO Use runproc.FallbackkedRunner XXX
-    if ctx.runproc_runner_count:
-        rem.runproc.ResetDefaultRunner(
-            pool_size=ctx.runproc_runner_count,
+# TODO Use subprocsrv.FallbackkedRunner XXX
+    if ctx.subprocsrv_runner_count:
+        rem.subprocsrv.ResetDefaultRunner(
+            pool_size=ctx.subprocsrv_runner_count,
             pgrpguard_binary=ctx.process_wrapper
         )
 

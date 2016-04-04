@@ -19,7 +19,7 @@ import fork_locking
 from future import Promise, WaitFutures, READY_FUTURE
 from profile import ProfiledThread
 from rem_logging import logger as logging
-import runproc
+import subprocsrv
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
@@ -528,7 +528,7 @@ class TagsMasks(object):
     @classmethod
     def _load_from_svn(cls, path):
         with tempfile.NamedTemporaryFile(prefix='cloud_tags_list') as file:
-            runproc.check_call(
+            subprocsrv.check_call(
                 ["svn", "export", "--force", "-q", "--non-interactive", path, file.name])
             return cls._load_from_file(file.name)
 

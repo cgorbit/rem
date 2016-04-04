@@ -128,10 +128,10 @@ class Job(Unpickable(err=nullobject,
 
         pgrpguard_binary = ctx.process_wrapper
 
-        if ctx.runproc_runner_count:
+        if ctx.subprocsrv_runner_count:
             if pgrpguard_binary is not None:
                 kwargs['use_pgrpguard'] = True
-            return process_proxy.RunprocProcessProxy(*args, **kwargs)
+            return process_proxy.SubprocsrvProcessProxy(*args, **kwargs)
 
         else:
             kwargs['close_fds'] = True
