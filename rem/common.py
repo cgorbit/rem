@@ -619,7 +619,7 @@ def cleanup_directory(directory, to_keep, max_removed_items_to_output=100):
         filename = directory + '/' + basename
 
         remove = shutil.rmtree \
-            if os.path.isdir(filename) and not os.path.islink(filename):
+            if os.path.isdir(filename) and not os.path.islink(filename) \
             else os.unlink
 
         try:

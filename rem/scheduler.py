@@ -595,7 +595,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def cleanup_packet_storage_fs(self):
         to_keep = set(self.packStorage.ids())
         to_keep |= set(self.tempStorage.ids())
-
         cleanup_directory(self.context.packets_directory, to_keep)
 
     def _vivify_queues(self, qRef):
