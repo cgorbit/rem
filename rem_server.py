@@ -707,6 +707,12 @@ def _init_fork_locking(ctx):
 
 
 def start_daemon(ctx, sched, wait=True):
+    global _context
+    global _scheduler
+
+    _context = ctx
+    _scheduler = sched
+
     _init_fork_locking(ctx)
 
     should_stop = [False]
@@ -746,6 +752,7 @@ def parse_arguments():
     p = argparse.ArgumentParser()
 
     p.add_argument('-c', '--config', dest='config', default='rem.cfg')
+    p.add_argument('--yt-writer-count', dest='yt_writer_count', type=int, default=20)
     p.add_argument('mode', nargs='?', default='start')
 
     return p.parse_args()
@@ -758,18 +765,22 @@ def create_scheduler(ctx, restorer=None):
 
 
 def run_server(ctx):
-    global _context
-    global _scheduler
-
-    _context = ctx
-
     osspec.set_process_title("[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else ""))
 
-    logging.debug("rem-server\tbefore_create_scheduler")
-    _scheduler = create_scheduler(ctx)
-    logging.debug("rem-server\tafter_create_scheduler")
+    def logged(f, *args):
+        logging.debug("rem-server\tbefore_%s" % f.__name__)
+        return f(*args)
 
-    start_daemon(ctx, _scheduler)[1]()
+    sched = logged(
+        create_scheduler, ctx)
+
+    logged(
+        sched.cleanup_bin_storage_fs)
+
+    logged(
+        sched.cleanup_packet_storage_fs)
+
+    start_daemon(ctx, sched)[1]()
 
 
 def init_logging(ctx):
@@ -799,7 +810,8 @@ def main():
         run_server(ctx)
 
     elif opts.mode == "convert-on-disk-tags":
-        Scheduler.convert_on_disk_tags_to_cloud(ctx)
+        convert = Scheduler.create_on_disk_tags_to_cloud_converter(ctx)
+        convert(yt_writer_count=opts.yt_writer_count)
 
     elif opts.mode == "test":
         scheduler_test(opts, ctx)

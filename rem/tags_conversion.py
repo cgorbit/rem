@@ -208,11 +208,14 @@ def _update_db(db_filename, input_queue, write_count):
             pass
 
 
-def convert_on_disk_tags_to_cloud(db_filename, in_memory_tags, cloud_tags_server_addr):
-    start_time = time.time()
+def convert_on_disk_tags_to_cloud(db_filename,
+                                  in_memory_tags,
+                                  cloud_tags_server_addr,
+                                  yt_writer_count=20,
+                                  bucket_size=2500,
+                                 ):
 
-    bucket_size = 2500
-    yt_writer_count = 20
+    start_time = time.time()
 
     to_yt_queue = InterProcessQueue()
     from_yt_queue = InterProcessQueue()

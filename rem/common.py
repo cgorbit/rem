@@ -603,3 +603,30 @@ def parse_network_address(addr):
 
     return host, port
 
+
+def cleanup_directory(directory, to_keep, max_removed_items_to_output=100):
+    removed = []
+
+    files = os.listdir(directory)
+
+    for basename in files:
+        if basename in to_keep:
+            continue
+
+        filename = directory + '/' + basename
+
+        remove = shutil.rmtree \
+            if os.path.isdir(filename) and not os.path.islink(filename) \
+            else os.unlink
+
+        try:
+            remove(filename)
+        except Exception as e:
+            logging.error("Can't remove %s: %s" % (filename, e))
+        else:
+            removed.append(basename)
+
+    if removed:
+        logging.info('%d files removed from %s: %s' \
+            % (len(removed), directory, ', '.join(removed[:max_removed_items_to_output])))
+
