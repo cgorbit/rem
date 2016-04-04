@@ -54,6 +54,7 @@ class T02(unittest.TestCase):
         for _ in xrange(timeout):
             if self.connector.Tag(name).Check():
                 return True
+            time.sleep(1)
         return False
 
     def testWorkingPacket(self):
