@@ -2,13 +2,13 @@ from time import sleep
 import logging
 import os
 import sys
+import time
 import threading
 import random
 
 sys.path[0:0] = ['/home/trofimenkov/rem']
 
 import subprocsrv
-subprocsrv.LOG_LEVEL = subprocsrv.LL_DEBUG
 
 def readlines():
     while True:
@@ -55,32 +55,67 @@ if __name__ == '__main__':
     logging.basicConfig(format="%(asctime)s %(message)s")
     logging.root.setLevel(logging.DEBUG)
 
+    #subprocsrv.LOG_LEVEL = subprocsrv.LL_DEBUG
+
     pgrpguard_binary = sys.argv[1] if len(sys.argv) > 1 else None
 
-    #subprocsrv.ResetDefaultRunner(pgrpguard_binary=pgrpguard_binary)
-    subprocsrv.ResetDefaultRunner(
-        runner=subprocsrv.FallbackkedRunner(
-            #subprocsrv.RunnerPool(3, pgrpguard_binary)
-            subprocsrv.BrokenRunner()
-        )
-    )
+    subprocsrv.ResetDefaultRunner(pgrpguard_binary=pgrpguard_binary, pool_size=10)
+
+    #subprocsrv.ResetDefaultRunner(
+        #runner=subprocsrv.FallbackkedRunner(
+            ##subprocsrv.RunnerPool(3, pgrpguard_binary)
+            #subprocsrv.BrokenRunner()
+        #)
+    #)
 
     print >>sys.stderr, '__main__ pid:', os.getpid()
 
     use_pgrpguard = bool(pgrpguard_binary)
 
-    if True:
+    if  False:
         try:
             theloop(use_pgrpguard)
         except KeyboardInterrupt:
             subprocsrv.DEFAULT_RUNNER.stop()
 
-    elif True:
-        threads = [threading.Thread(target=sleeps_thread, args=(use_pgrpguard,)) for _ in xrange(300)]
+    elif False:
+        threads = [
+            threading.Thread(target=sleeps_thread, args=(use_pgrpguard,))
+                for _ in xrange(300)
+        ]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
+
+    elif True:
+        count = 0
+        prev_t = time.time()
+        while True:
+            if False:
+                joiners = []
+                for _ in xrange(50):
+                    join_pid = subprocsrv.start(['true'])
+                    joiners.append(join_pid)
+                    count += 1
+
+                for join in joiners:
+                    join()
+
+            elif True:
+                join = subprocsrv.start(['sleep', '1'])
+                join()
+                count += 1
+
+            else:
+                raise RuntimeError()
+
+            if count == 1000:
+                t = time.time()
+                print >>sys.stderr, 1 / ((t - prev_t) / count)
+                prev_t = t
+                count = 0
+
     else:
         pass
 
