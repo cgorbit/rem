@@ -503,13 +503,10 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.FillSchedWatcher(prevWatcher)
 
     @classmethod
-    def convert_on_disk_tags_to_cloud(cls, ctx):
+    def create_on_disk_tags_to_cloud_converter(cls, ctx):
         sched = cls(ctx)
         sched.Restore(restore_tags_only=True)
-
-        convert = sched.tagRef.create_on_disk_tags_to_cloud_converter()
-
-        convert()
+        return sched.tagRef.create_on_disk_tags_to_cloud_converter()
 
     def FillSchedWatcher(self, prev_watcher=None):
         def list_packets_in_queues(state):
