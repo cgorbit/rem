@@ -750,6 +750,7 @@ def parse_arguments():
     p = argparse.ArgumentParser()
 
     p.add_argument('-c', '--config', dest='config', default='rem.cfg')
+    p.add_argument('--yt-writer-count', dest='yt_writer_count', type=int, default=20)
     p.add_argument('mode', nargs='?', default='start')
 
     return p.parse_args()
@@ -800,7 +801,8 @@ def main():
         run_server(ctx)
 
     elif opts.mode == "convert-on-disk-tags":
-        Scheduler.convert_on_disk_tags_to_cloud(ctx)
+        convert = Scheduler.create_on_disk_tags_to_cloud_converter(ctx)
+        convert(yt_writer_count=opts.yt_writer_count)
 
     elif opts.mode == "test":
         scheduler_test(opts, ctx)
