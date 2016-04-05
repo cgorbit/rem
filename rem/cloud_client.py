@@ -215,7 +215,7 @@ def _make_protobuf_connection((host, port)):
 
 
 class Client(object):
-    MESSAGE_MAX_ITEM_COUNT = 1000
+    MESSAGE_MAX_ITEM_COUNT = 100000
     __FAKE_PROMISE = _FakePromise()
 
     _ST_NONE   = 0
@@ -366,23 +366,29 @@ class Client(object):
                 self._io._connected = True
                 #self._connection_state_changed.notify_all()
 
-            read_thread = ProfiledThread(target=self._read_loop, name_prefix='CldTg-ReadLoop')
-            write_thread = ProfiledThread(target=self._write_loop, name_prefix='CldTg-WriteLoop')
+            io_threads = [
+                ProfiledThread(target=self._read_loop, name_prefix='CldTg-ReadLoop'),
+                ProfiledThread(target=self._write_loop, name_prefix='CldTg-WriteLoop')
+            ]
 
-            read_thread.start()
-            write_thread.start()
+            for t in io_threads:
+                t.start()
 
-            read_thread.join()
-            write_thread.join()
+            for t in io_threads:
+                t.join()
 
             logging.info("Disconnected from %s" % (addr,))
 
     def _reconstruct_outgoing(self):
         with self._lock:
+            resend_ids = [id for id, task in self._running.iteritems() if task.is_resend]
+
+            for id in resend_ids:
+                self._running.pop(id)
+
             self._outgoing = deque(
                 self._running[id]
-                    for id in sorted(self._running.iterkeys())
-                        if not self._running[id].is_resend
+                    for id in sorted(self._running.keys())
             )
 
             # XXX _subscriptions после _outgoing, чтобы не приходили события по
