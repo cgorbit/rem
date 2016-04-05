@@ -466,6 +466,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         return sdict, packets_registrator
 
+    @classmethod
+    def DeserializeFile(cls, filename, registrator=FakeObjectRegistrator()):
+        with open(filename, 'r') as stream:
+            return cls.Deserialize(stream, registrator)
+
     def LoadBackup(self, filename, restorer=None, restore_tags_only=False):
         with self.lock:
             with open(filename, "r") as stream:
