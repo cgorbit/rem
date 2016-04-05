@@ -572,14 +572,15 @@ def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
     return should_execute
 
 @should_execute_maker(20, 5, Exception)
-def send_email(emails, subject, message):
+def send_email(runner, emails, subject, message):
     body = \
         """Subject: %(subject)s
 To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-    sender = subprocsrv.Popen(["sendmail"] + map(str, emails), stdin_content=body)
+# TODO
+    sender = runner.Popen(["sendmail"] + map(str, emails), stdin_content=body)
     return sender.wait()
 
 def parse_network_address(addr):

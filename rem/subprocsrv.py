@@ -4,7 +4,6 @@ import fcntl
 import socket
 import cPickle as pickle
 import threading
-import logging
 import signal
 import time
 from collections import deque
@@ -19,7 +18,7 @@ import atexit
 from future import Promise
 from profile import ProfiledThread, set_thread_name
 import pgrpguard
-
+from rem_logging import logger as logging
 
 class ServiceUnavailable(RuntimeError):
     pass
@@ -465,7 +464,7 @@ class _Server(object):
                     args = list(args)
 
                 if task.shell:
-                    args = ["/bin/sh", "-c"] + ' '.join(args)
+                    args = ["/bin/sh", "-c", ' '.join(args)]
                     #if executable:
                         #args[0] = executable
 
@@ -988,6 +987,12 @@ class _Client(object):
 
             return start()
 
+    def call(self, *args, **kwargs):
+        return self.Popen(*args, **kwargs).wait()
+
+    def check_call(self, *args, **kwargs):
+        return _check_call(self.call, args, kwargs) # TODO
+
     def _send_signal(self, target_task, sig, group):
         task = self.SignalTask()
         self._enqueue(task, SendSignalRequestMessage(target_task._task_id, sig, group))
@@ -1263,17 +1268,6 @@ class RunnerPoolNaive(object):
         self._good = []
 
 
-class ScopedVal(object):
-    def __init__(self, val):
-        self._val = val
-
-    def __enter__(self):
-        return self._val
-
-    def __exit__(self, *args):
-        pass
-
-
 class BrokenRunner(object):
     def Popen(self, *args, **kwargs):
         raise ServiceUnavailable()
@@ -1285,78 +1279,15 @@ class BrokenRunner(object):
         pass
 
 
-def _Popen_fallback(*args, **kwargs):
-    logging.error("using fallback # TODO")
-
-    stdin_content = kwargs.pop('stdin_content', None)
-
-    task = NewTaskParamsMessage(*args, **kwargs)
-
-    def file_or_none(file):
-        if file is None:
-            return ScopedVal(None)
-        elif isinstance(file, str):
-            return open(file, 'r')
-        else:
-            raise ValueError()
-
-    class NamedTemporaryFileWithContent(object):
-        def __init__(self, content):
-            self._file = NamedTemporaryFile()
-            self._file.write(content)
-            self._file.flush()
-
-        def __enter__(self):
-            return self._file.__enter__()
-
-        def __exit__(self, *args):
-            self._file.__exit__(*args)
-
-    stdin_mgr = NamedTemporaryFileWithContent(stdin_content) \
-        if stdin_content is not None \
-        else file_or_none(task.stdin)
-
-    with stdin_mgr as stdin:
-        with file_or_none(task.stdout) as stdout:
-            with file_or_none(task.stderr) as stderr:
-                refl=dict(
-                    args=task.args,
-                    stdin=stdin,
-                    stdout=stdout,
-                    stderr=stderr,
-                    preexec_fn=os.setpgrp if task.setpgrp else None,
-                    cwd=task.cwd,
-                    shell=task.shell,
-                    close_fds=True, # as in _Server
-                )
-                logging.error(repr(refl))
-
-                return subprocess.Popen(**refl)
-
-
-class FallbackkedRunner(object):
-    def __init__(self, backend):
-        self._backend = backend
-        self._broken = False
-
-    def Popen(self, *args, **kwargs):
-        if self._broken:
-            return _Popen_fallback(*args, **kwargs)
-
-        try:
-            return self._backend.Popen(*args, **kwargs)
-        except ServiceUnavailable:
-            self._broken = True
-            return _Popen_fallback(*args, **kwargs)
-
-    def start(self, *args, **kwargs):
-        raise NotImplementedError() # FIXME
-
-    def stop(self):
-        self._backend.stop()
-
-
 DEFAULT_RUNNER = None
+
+
+def create_runner(pool_size=1, pgrpguard_binary=None):
+    if pool_size <= 0:
+        raise ValueError("pool_size must be greater than 0");
+
+    return Runner(pgrpguard_binary) if pool_size == 1 \
+        else RunnerPool(pool_size, pgrpguard_binary)
 
 
 def ResetDefaultRunner(pool_size=1, pgrpguard_binary=None, runner=None):
@@ -1371,8 +1302,7 @@ def ResetDefaultRunner(pool_size=1, pgrpguard_binary=None, runner=None):
 
     DEFAULT_RUNNER = None
 
-    DEFAULT_RUNNER = Runner(pgrpguard_binary) if pool_size == 1 \
-        else RunnerPool(pool_size, pgrpguard_binary)
+    DEFAULT_RUNNER = create_runner(pool_size, pgrpguard_binary)
 
 
 def DestroyDefaultRunner():
@@ -1391,20 +1321,12 @@ def start(*args, **kwargs):
     return DEFAULT_RUNNER.start(*args, **kwargs)
 
 
-# XXX Copy-pasted from subprocess.py
-
 def call(*args, **kwargs):
-    return Popen(*args, **kwargs).wait()
+    return DEFAULT_RUNNER.call(*args, **kwargs)
 
 
 def check_call(*args, **kwargs):
-    retcode = call(*args, **kwargs)
-    if retcode:
-        cmd = kwargs.get("args")
-        if cmd is None:
-            cmd = args[0]
-        check_retcode(retcode, cmd)
-    return 0
+    return DEFAULT_RUNNER.check_call(*args, **kwargs)
 
 
 def check_retcode(retcode, cmd):

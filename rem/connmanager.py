@@ -225,7 +225,8 @@ class TopologyInfo(Unpickable(servers=dict, location=str)):
         tmp_dir = tempfile.mkdtemp(dir=".", prefix="network-topology")
         try:
             config_temporary_path = os.path.join(tmp_dir, os.path.split(location)[1])
-            subprocsrv.check_call(
+# TODO
+            runner.check_call(
                 ["svn", "export", "--force", "--non-interactive", "-q", location, config_temporary_path])
             return cls.ReadConfigFromFile(config_temporary_path)
         finally:
