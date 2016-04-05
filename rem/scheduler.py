@@ -491,7 +491,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             tagStorage.vivify_tags_from_backup(registrator.tags)
 
-            for pck in registrator.packets:
+            for pck in registrator.packets: # ATW each packet exists in register in 2 copies
                 pck.VivifyDoneTagsIfNeed(tagStorage)
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
