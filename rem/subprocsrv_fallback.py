@@ -1,8 +1,8 @@
 import os
-
 import subprocess
-import subprocsrv
 
+import subprocsrv
+from common import check_process_call, check_process_retcode
 
 class ScopedVal(object):
     def __init__(self, val):
@@ -38,7 +38,7 @@ class _NamedTemporaryFileWithContent(object):
 
 
 class _Popen(subprocess.Popen):
-    def __init__(*args, **kwargs):
+    def __init__(self, *args, **kwargs):
         stdin_content = kwargs.pop('stdin_content', None)
 
         task = subprocsrv.NewTaskParamsMessage(*args, **kwargs)
@@ -84,41 +84,30 @@ class _Popen(subprocess.Popen):
         self.poll()
         return self.returncode is not None
 
-    def communicate(self):
+    #def communicate(self):
+        #raise NotImplementedError()
+
+    #def pipe_cloexec(self):
+        #raise NotImplementedError()
+
+
+class Runner(object):
+    @staticmethod
+    def start(*args, **kwargs):
         raise NotImplementedError()
 
-    def pipe_cloexec(self):
-        raise NotImplementedError()
-
-
-def Runner(object):
-    @classmethod
-    def start(cls, *args, **kwargs):
-        raise NotImplementedError()
-
-    @classmethod
-    def Popen(cls, *args, **kwargs):
+    @staticmethod
+    def Popen(*args, **kwargs):
         return _Popen(*args, **kwargs)
 
     @classmethod
     def check_call(cls, *args, **kwargs):
-        return _check_call(cls.call, args, kwargs)
+        return check_process_call(cls.call, args, kwargs)
 
-    @classmethod
-    def call(cls, *args, **kwargs):
-        return cls._Popen(*args, **kwargs).wait()
+    @staticmethod
+    def call(*args, **kwargs):
+        return _Popen(*args, **kwargs).wait()
 
     @classmethod
     def stop(cls):
         pass
-
-
-# TODO Move
-def _check_call(call, args, kwargs):
-    retcode = call(*args, **kwargs)
-    if retcode:
-        cmd = kwargs.get("args")
-        if cmd is None:
-            cmd = args[0]
-        check_retcode(retcode, cmd)
-    return 0

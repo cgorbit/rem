@@ -11,7 +11,6 @@ from common import *
 from callbacks import TagBase, ICallbackAcceptor, ETagEvent, TagEventName
 from rem.profile import ProfiledThread
 from rem_logging import logger as logging
-import rem.subprocsrv as subprocsrv
 
 PROTOCOL_VERSION = 2
 
@@ -223,9 +222,10 @@ class TopologyInfo(Unpickable(servers=dict, location=str)):
     @classmethod
     def ReadConfigFromSVN(cls, location):
         tmp_dir = tempfile.mkdtemp(dir=".", prefix="network-topology")
+# TODO
+        raise NotImplementedError()
         try:
             config_temporary_path = os.path.join(tmp_dir, os.path.split(location)[1])
-# TODO
             runner.check_call(
                 ["svn", "export", "--force", "--non-interactive", "-q", location, config_temporary_path])
             return cls.ReadConfigFromFile(config_temporary_path)

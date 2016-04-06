@@ -9,7 +9,7 @@ import time
 from collections import deque
 from tempfile import NamedTemporaryFile
 import subprocess
-from subprocess import CalledProcessError, MAXFD
+from subprocess import MAXFD
 import types
 import errno
 import weakref
@@ -19,6 +19,7 @@ from future import Promise
 from profile import ProfiledThread, set_thread_name
 import pgrpguard
 from rem_logging import logger as logging
+from common import check_process_call, check_process_retcode
 
 class ServiceUnavailable(RuntimeError):
     pass
@@ -727,7 +728,7 @@ class _Popen(object):
         return self.wait(timeout=0)
 
     def check(self):
-        check_retcode(self.wait(), '#TODO args')
+        check_process_retcode(self.wait(), '#TODO args')
 
     def send_signal_safe(self, sig, group=False):
         return self._client._send_signal(self, sig, group)
@@ -991,7 +992,7 @@ class _Client(object):
         return self.Popen(*args, **kwargs).wait()
 
     def check_call(self, *args, **kwargs):
-        return _check_call(self.call, args, kwargs) # TODO
+        return check_process_call(self.call, args, kwargs) # TODO
 
     def _send_signal(self, target_task, sig, group):
         task = self.SignalTask()
@@ -1329,11 +1330,5 @@ def check_call(*args, **kwargs):
     return DEFAULT_RUNNER.check_call(*args, **kwargs)
 
 
-def check_retcode(retcode, cmd):
-    if retcode:
-        raise CalledProcessError(retcode, cmd)
-
-
 def check_output(*args, **kwargs):
     raise NotImplementedError('check_output not implemented')
-

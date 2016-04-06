@@ -9,6 +9,7 @@ import subprocsrv
 import subprocsrv_fallback
 import pgrpguard
 
+from common import check_process_call, check_process_retcode
 from rem_logging import logger as logging
 
 _inf = float('inf')
@@ -202,108 +203,3 @@ class SubprocsrvProcessProxy(object):
 
     def poll(self):
         return self._impl.poll()
-
-
-# XXX #1
-def _RunnerWithFallbackFunctor(self, main, fallback):
-    broken = [False]
-
-    def impl(*args, **kwargs):
-        if [broken]:
-            return fallback(*args, *kwargs)
-
-        try:
-            return main(*args, **kwargs)
-
-        except subprocsrv.ServiceUnavailable:
-            broken = True
-            return fallback(*args, *kwargs)
-
-    return impl
-
-# XXX #2
-class _RunnerWithFallbackFunctor(object):
-    def __init__(self, main, fallback):
-        self._main = main
-        self._fallback = fallback
-        self._broken = False
-
-    def __call__(self, *args, **kwargs):
-        if self._broken:
-            return self._fallback(*args, *kwargs)
-
-        try:
-            return self._main(*args, **kwargs)
-
-        except subprocsrv.ServiceUnavailable:
-            self._broken = True
-            return self._fallback(*args, *kwargs)
-
-
-class _RunnerWithFallback(object):
-    def __init__(self, main, fallback):
-        self._main = main
-        self._fallback = fallback
-        self._broken = False
-
-    def Popen(self, *args, **kwargs):
-        if self._broken:
-            return self._fallback.Popen(*args, **kwargs)
-
-        try:
-            return self._main.Popen(*args, **kwargs)
-
-        except subprocsrv.ServiceUnavailable:
-            self._broken = True
-            return self._fallback.Popen(*args, *kwargs)
-
-    def check_call(self, *args, **kwargs):
-        return _check_call(self.call, args, kwargs)
-
-    def call(self, *args, **kwargs):
-        return self.Popen(*args, **kwargs).wait()
-
-    def stop(self):
-        pass
-
-
-def create_packet_job_runner(ctx, runner):
-    pgrpguard_binary = ctx.process_wrapper
-
-    runner = None
-    if ctx.subprocsrv_runner_count:
-        runner = subprocsrv.create_runner(
-            pool_size=ctx.subprocsrv_runner_count,
-            pgrpguard_binary=ctx.process_wrapper
-        )
-
-    def create_job_runner():
-        def subprocsrv_backend(*args, **kwargs):
-            if pgrpguard_binary is not None:
-                kwargs['use_pgrpguard'] = True
-            return process_proxy.SubprocsrvProcessProxy(runner, *args, **kwargs)
-
-        def ordinal_backend(*args, **kwargs):
-            kwargs['close_fds'] = True
-
-            if pgrpguard_binary is None:
-                return process_proxy.ProcessProxy(*args, **kwargs)
-
-            else:
-                kwargs['wrapper_binary'] = pgrpguard_binary
-                return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
-
-        return _RunnerWithFallbackFunctor(subprocsrv_backend, ordinal_backend) \
-            if runner \
-            else ordinal_backend
-
-    ctx.job_runner = create_job_runner()
-
-    def create_aux_runner():
-        ordinal_runner = subprocsrv_fallback.Runner()
-
-        return _RunnerWithFallback(runner, ordinal_runner) \
-            if runner \
-            else ordinal_runner
-
-    ctx.aux_runner = create_aux_runner()

@@ -16,6 +16,66 @@ from rem_logging import logger as logging
 DUMMY_COMMAND_CREATOR = None
 _DEFAULT_STDERR_SUMMAY_LEN = 2000
 
+
+# XXX #1
+def _RunnerWithFallbackFunctor(self, main, fallback):
+    broken = [False]
+
+    def impl(*args, **kwargs):
+        if [broken]:
+            return fallback(*args, **kwargs)
+
+        try:
+            return main(*args, **kwargs)
+
+        except subprocsrv.ServiceUnavailable:
+            broken = True
+            return fallback(*args, **kwargs)
+
+    return impl
+
+# XXX #2
+class _RunnerWithFallbackFunctor(object):
+    def __init__(self, main, fallback):
+        self._main = main
+        self._fallback = fallback
+        self._broken = False
+
+    def __call__(self, *args, **kwargs):
+        if self._broken:
+            return self._fallback(*args, **kwargs)
+
+        try:
+            return self._main(*args, **kwargs)
+
+        except subprocsrv.ServiceUnavailable:
+            self._broken = True
+            return self._fallback(*args, **kwargs)
+
+
+def create_job_runner(ctx, runner):
+    pgrpguard_binary = ctx.process_wrapper
+
+    def subprocsrv_backend(*args, **kwargs):
+        if pgrpguard_binary is not None:
+            kwargs['use_pgrpguard'] = True
+        return process_proxy.SubprocsrvProcessProxy(runner, *args, **kwargs)
+
+    def ordinal_backend(*args, **kwargs):
+        kwargs['close_fds'] = True
+
+        if pgrpguard_binary is None:
+            return process_proxy.ProcessProxy(*args, **kwargs)
+
+        else:
+            kwargs['wrapper_binary'] = pgrpguard_binary
+            return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
+
+    return _RunnerWithFallbackFunctor(subprocsrv_backend, ordinal_backend) \
+        if runner \
+        else ordinal_backend
+
+
 class IResult(Unpickable(type=str,
                          code=safeint,
                          message=str)):
@@ -124,24 +184,8 @@ class Job(Unpickable(err=nullobject,
 
     @staticmethod
     def start_process(*args, **kwargs):
-        ctx = packet.PacketCustomLogic.SchedCtx
-
-        pgrpguard_binary = ctx.process_wrapper
-
-        if ctx.subprocsrv_runner_count:
-            if pgrpguard_binary is not None:
-                kwargs['use_pgrpguard'] = True
-            return process_proxy.SubprocsrvProcessProxy(*args, **kwargs)
-
-        else:
-            kwargs['close_fds'] = True
-
-            if pgrpguard_binary is None:
-                return process_proxy.ProcessProxy(*args, **kwargs)
-
-            else:
-                kwargs['wrapper_binary'] = pgrpguard_binary
-                return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
+        ctx = packet.PacketCustomLogic.SchedCtx # XXX
+        return ctx.run_job(*args, **kwargs)
 
     def last_result(self):
         return self.results[-1] if self.results else None

@@ -18,7 +18,7 @@ import fork_locking
 from heap import PriorityQueue
 import osspec
 from rem_logging import logger as logging
-import subprocsrv
+from subprocess import CalledProcessError, MAXFD
 
 class RpcUserError(Exception):
     def __init__(self, exc):
@@ -580,6 +580,7 @@ To: %(email-list)s
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
 # TODO
+    raise NotImplementedError()
     sender = runner.Popen(["sendmail"] + map(str, emails), stdin_content=body)
     return sender.wait()
 
@@ -631,3 +632,19 @@ def cleanup_directory(directory, to_keep, max_removed_items_to_output=100):
         logging.info('%d files removed from %s: %s' \
             % (len(removed), directory, ', '.join(removed[:max_removed_items_to_output])))
 
+
+def check_process_retcode(retcode, cmd):
+    if retcode:
+        if isinstance(cmd, list):
+            cmd = ' '.join(cmd)
+        raise CalledProcessError(retcode, cmd)
+
+
+def check_process_call(call, args, kwargs):
+    retcode = call(*args, **kwargs)
+    if retcode:
+        cmd = kwargs.get("args")
+        if cmd is None:
+            cmd = args[0]
+        check_process_retcode(retcode, cmd)
+    return 0
