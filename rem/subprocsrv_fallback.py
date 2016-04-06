@@ -74,15 +74,21 @@ class _Popen(subprocess.Popen):
     def send_signal_safe(self, sig, group=False):
         raise NotImplementedError()
 
-    def wait_no_throw(self, timeout=None, deadline=None):
-        return self.wait(timeout, deadline)
+# FIXME
+    #def wait_no_throw(self, timeout=None, deadline=None):
+        #return self.wait(timeout, deadline)
 
-    def wait(self, timeout=None, deadline=None):
-        raise NotImplementedError() # TODO
+# FIXME
+    #def wait(self, timeout=None, deadline=None):
+        #if timeout is not None:
+            #pass
+        #elif deadline is not None:
+            #timeout = deadline - time.time()
+        #return subprocess.Popen.wait(self, timeout)
 
-    def is_terminated(self):
-        self.poll()
-        return self.returncode is not None
+    #def is_terminated(self):
+        #self.poll()
+        #return self.returncode is not None
 
     #def communicate(self):
         #raise NotImplementedError()

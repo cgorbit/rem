@@ -1245,6 +1245,14 @@ class RunnerPool(object):
             return impl.start(*args, **kwargs)
         return self._do(do)
 
+    def call(self, *args, **kwargs):
+        return self.Popen(*args, **kwargs).wait()
+
+    def check_call(self, *args, **kwargs):
+        def do(impl):
+            return impl.check_call(*args, **kwargs)
+        return self._do(do)
+
     def stop(self):
         self._good = []
         self._bad  = []
