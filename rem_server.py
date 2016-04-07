@@ -784,6 +784,12 @@ def run_server(ctx):
 
     start_daemon(ctx, sched)[1]()
 
+# TODO XXX
+    global _context
+    global _scheduler
+    _context = ctx
+    _scheduler = sched
+
 
 def init_logging(ctx):
     rem_logging.reinit_logger(ctx)
@@ -843,14 +849,23 @@ def main():
 
     ctx = Context(opts.config)
 
-    create_process_runners(ctx) # XXX FIXME
-
     if opts.mode == 'test':
         ctx.log_warn_level = 'debug'
         ctd.log_to_stderr = True
         ctx.register_objects_creation = True
 
     init_logging(ctx)
+
+# XXX
+    create_process_runners(ctx) # XXX FIXME
+
+    def unset_aux_runner():
+        rem.common.proc_runner = None
+    import atexit
+    atexit.register(unset_aux_runner)
+
+    rem.common.proc_runner = ctx.aux_runner
+# XXX
 
     if opts.mode == "start":
         run_server(ctx)

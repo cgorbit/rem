@@ -1299,12 +1299,8 @@ def create_runner(pool_size=1, pgrpguard_binary=None):
         else RunnerPool(pool_size, pgrpguard_binary)
 
 
-def ResetDefaultRunner(pool_size=1, pgrpguard_binary=None, runner=None):
+def ResetDefaultRunner(pool_size=1, pgrpguard_binary=None):
     global DEFAULT_RUNNER
-
-    if runner:
-        DEFAULT_RUNNER = runner
-        return
 
     if pool_size <= 0:
         raise ValueError("pool_size must be greater than 0");
