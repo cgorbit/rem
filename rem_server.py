@@ -859,13 +859,12 @@ def main():
 # XXX
     create_process_runners(ctx) # XXX FIXME
 
-    def unset_aux_runner():
-        rem.common.proc_runner = None
-    import atexit
-    atexit.register(unset_aux_runner)
-
-    rem.common.proc_runner = ctx.aux_runner
+    rem.common.set_proc_runner(ctx.aux_runner)
 # XXX
+
+    time.sleep(2)
+
+    return
 
     if opts.mode == "start":
         run_server(ctx)

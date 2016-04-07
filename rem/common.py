@@ -13,6 +13,7 @@ import xmlrpclib
 from Queue import Queue as StdQueue
 from Queue import PriorityQueue as StdPriorityQueue
 import heapq
+import atexit
 
 import fork_locking
 from heap import PriorityQueue
@@ -648,3 +649,16 @@ def check_process_call(call, args, kwargs):
             cmd = args[0]
         check_process_retcode(retcode, cmd)
     return 0
+
+
+proc_runner = None
+
+def set_proc_runner(runner):
+    global proc_runner
+    proc_runner = runner
+
+def _unset_proc_runner():
+    global proc_runner
+    proc_runner = None
+
+atexit.register(_unset_proc_runner)
