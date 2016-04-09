@@ -223,7 +223,6 @@ class TopologyInfo(Unpickable(servers=dict, location=str)):
     @classmethod
     def ReadConfigFromSVN(cls, location):
         tmp_dir = tempfile.mkdtemp(dir=".", prefix="network-topology")
-# TODO
         try:
             config_temporary_path = os.path.join(tmp_dir, os.path.split(location)[1])
             rem_common.proc_runner.check_call(

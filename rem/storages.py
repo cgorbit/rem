@@ -9,8 +9,8 @@ import cPickle
 import threading
 import tempfile
 import re
+import shutil
 
-#from common import *
 from common import Unpickable, TimedMap, PickableLock, cleanup_directory
 import common as rem_common
 from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor, ETagEvent
@@ -555,7 +555,6 @@ class TagsMasks(object):
     @classmethod
     def _load_from_svn(cls, path):
         with tempfile.NamedTemporaryFile(prefix='cloud_tags_list') as file:
-# TODO
             rem_common.proc_runner.check_call(
                 ["svn", "export", "--force", "-q", "--non-interactive", path, file.name])
             return cls._load_from_file(file.name)
