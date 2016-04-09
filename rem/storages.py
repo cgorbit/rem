@@ -272,10 +272,10 @@ class SerialUpdateOnlyDummyCloudClient(object):
     def debug_server(self):
         return self._wrong_setup_future
 
-    def subscribe(self, tags):
+    def subscribe(self, tags, with_future=True):
         return READY_FUTURE
 
-    def unsubscribe(self, tags):
+    def unsubscribe(self, tags, with_future=True):
         return READY_FUTURE
 
     def lookup(self, tags):
