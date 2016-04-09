@@ -23,6 +23,21 @@ from rem_logging import logger as logging
 
 __all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
 
+
+class OnDiskTagsConvertParams(object):
+    def __init__(self, db_filename, in_memory_tags, cloud_tags_server):
+        self.db_filename = db_filename
+        self.in_memory_tags = in_memory_tags
+        self.cloud_tags_server = cloud_tags_server
+
+    def __repr__(self):
+        return "<%s db=%s, len(in_mem_tags)=%d, proxy=%s>" \
+            % (type(self).__name__,
+               self.db_filename,
+               len(self.in_memory_tags),
+               self.cloud_tags_server)
+
+
 class GlobalPacketStorage(object):
     def __init__(self):
         self.box = weakref.WeakValueDictionary()
@@ -120,9 +135,10 @@ class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=st
     def cleanup_fs(self):
         cleanup_directory(self.binDirectory, set(self.files.keys()))
 
-    def UpdateContext(self, context):
+    def _fix_files_on_update_context(self, context):
         for file in self.files.itervalues():
             file.FixLinks()
+
         if self.binDirectory != context.binary_directory:
             badFiles = set()
             for checksum, file in self.files.iteritems():
@@ -142,6 +158,10 @@ class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=st
                     del self.files[checksum]
                     logging.warning("binstorage\tnonexisted file %s cleaning attempt", checksum)
                 logging.warning("can't recover %d files; %d files left in storage", len(badFiles), len(self.files))
+
+    def UpdateContext(self, context, fix_files=True):
+        if fix_files:
+            self._fix_files_on_update_context(context)
         self.binDirectory = context.binary_directory
         self.lifeTime = context.binary_lifetime
 
@@ -955,22 +975,14 @@ class TagStorage(object):
 
         return True
 
-    def create_on_disk_tags_to_cloud_converter(self):
+    def make_on_disk_tags_conversion_params(self):
         if not self._has_cloud_setup():
             raise RuntimeError("No cloud tags setup")
 
-        import tags_conversion
-
-        db_filename = self.db_file
-        in_memory_tags = set(self.inmem_items.iterkeys())
-        cloud_tags_server = self._cloud_tags_server
-
-        return lambda *args, **kwargs: tags_conversion.convert_on_disk_tags_to_cloud(
-            db_filename,
-            in_memory_tags,
-            cloud_tags_server,
-            *args,
-            **kwargs
+        return OnDiskTagsConvertParams(
+            db_filename=self.db_file,
+            in_memory_tags=set(self.inmem_items.keys()),
+            cloud_tags_server=self._cloud_tags_server
         )
 
     def _set_modify_func(self, tag):

@@ -200,13 +200,13 @@ class Scheduler(Unpickable(lock=PickableRLock,
         if context.use_memory_profiler:
             self.initProfiler()
 
-    def UpdateContext(self, context=None):
+    def UpdateContext(self, context=None, fix_bin_files=True):
         if context is not None:
             self.context = context
             self.poolSize = context.thread_pool_size
             self.initBackupSystem(context)
             context.registerScheduler(self)
-        self.binStorage.UpdateContext(self.context)
+        self.binStorage.UpdateContext(self.context, fix_files=fix_bin_files)
         self.tagRef.UpdateContext(self.context)
         PacketCustomLogic.UpdateContext(self.context)
         self.connManager.UpdateContext(self.context)
@@ -484,7 +484,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             self.__setstate__(sdict)
 
-            self.UpdateContext(None)
+            self.UpdateContext(None, fix_bin_files=not restore_tags_only)
             self.tagRef.PreInit()
 
             tagStorage = self.tagRef
@@ -508,10 +508,62 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.FillSchedWatcher(prevWatcher)
 
     @classmethod
-    def create_on_disk_tags_to_cloud_converter(cls, ctx):
-        sched = cls(ctx)
-        sched.Restore(restore_tags_only=True)
-        return sched.tagRef.create_on_disk_tags_to_cloud_converter()
+    def _make_on_disk_tags_conversion_params(cls, ctx):
+        import cPickle as pickle
+
+        pipe_rd, pipe_wr = os.pipe()
+
+        pid = os.fork()
+
+        if not pid:
+            try:
+                os.close(pipe_rd)
+
+                sched = cls(ctx)
+                sched.Restore(restore_tags_only=True)
+
+                params = sched.tagRef.make_on_disk_tags_conversion_params()
+
+                with os.fdopen(pipe_wr, 'w') as out:
+                    pickle.dump(params, out, pickle.HIGHEST_PROTOCOL)
+
+            except:
+                try:
+                    logging.exception("Failed to collect and dump in-memory tags")
+                except:
+                    pass
+                os._exit(1)
+            else:
+                os._exit(0)
+
+        os.close(pipe_wr)
+
+        with os.fdopen(pipe_rd, 'r') as in_:
+            params = pickle.load(in_)
+
+        _, status = os.waitpid(pid, 0)
+
+        if status:
+            raise RuntimeError("Child process failed to produce OnDiskTagsConvertParams: %s" \
+                % osspec.repr_term_status(status))
+
+        return params
+
+    @classmethod
+    def convert_on_disk_tags_to_cloud(cls, ctx, yt_writer_count=20, bucket_size=2500):
+        import tags_conversion
+
+        params = cls._make_on_disk_tags_conversion_params(ctx)
+
+        logging.debug("convert_params=%r" % params)
+
+        tags_conversion.convert_on_disk_tags_to_cloud(
+            db_filename=params.db_filename,
+            in_memory_tags=params.in_memory_tags,
+            cloud_tags_server_addr=params.cloud_tags_server,
+            yt_writer_count=yt_writer_count,
+            bucket_size=bucket_size
+        )
 
     def FillSchedWatcher(self, prev_watcher=None):
         def list_packets_in_queues(state):
