@@ -20,7 +20,6 @@ from heap import PriorityQueue
 import osspec
 from rem_logging import logger as logging
 from subprocess import CalledProcessError, MAXFD
-import common as rem_common
 
 class RpcUserError(Exception):
     def __init__(self, exc):
@@ -575,14 +574,14 @@ def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
 
 @should_execute_maker(20, 5, Exception)
 def send_email(emails, subject, message):
+    global proc_runner
     body = \
         """Subject: %(subject)s
 To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-# TODO
-    sender = rem_common.proc_runner.Popen(["sendmail"] + map(str, emails), stdin_content=body)
+    sender = proc_runner.Popen(["sendmail"] + map(str, emails), stdin_content=body)
     return sender.wait()
 
 def parse_network_address(addr):
