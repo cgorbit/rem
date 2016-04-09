@@ -1,5 +1,6 @@
 import os
 import subprocess
+from tempfile import NamedTemporaryFile
 
 import subprocsrv
 from common import check_process_call, check_process_retcode, wait as _wait_process
