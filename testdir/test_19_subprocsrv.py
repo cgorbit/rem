@@ -22,19 +22,19 @@ import rem.subprocsrv_fallback as subprocsrv_fallback
 
 class T19(unittest.TestCase):
     def testXXX(self):
-        self._testXXX(subprocsrv.Runner(pgrpguard_binary=None), use_pgrpguard=False)
+        self._test_common(subprocsrv.Runner(pgrpguard_binary=None), use_pgrpguard=False)
 
     def testYYY(self):
-        self._testXXX(subprocsrv.Runner(pgrpguard_binary='pgrpguard'), use_pgrpguard=True)
+        self._test_common(subprocsrv.Runner(pgrpguard_binary='pgrpguard'), use_pgrpguard=True)
 
     def testZZZ(self):
         runner = subprocsrv_fallback.RunnerWithFallback(
             main=subprocsrv.BrokenRunner(),
             fallback=subprocsrv_fallback.Runner()
         )
-        self._testXXX(runner)
+        self._test_common(runner)
 
-    def _testXXX(self, runner, use_pgrpguard=False):
+    def _test_common(self, runner, use_pgrpguard=False):
         msg = str(time.time())
 
         with NamedTemporaryFile('w') as stdin:
