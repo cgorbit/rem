@@ -63,7 +63,8 @@ class _FutureState(object):
                 to_run.append(code)
             else:
                 self._ready_callbacks.append(code)
-        self._run(to_run)
+        if to_run:
+            self._run(to_run)
 
     def wait(self, timeout=None):
         if self._is_set:
