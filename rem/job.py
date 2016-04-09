@@ -12,6 +12,7 @@ import constants
 import job_process
 import pgrpguard
 from rem_logging import logger as logging
+import subprocsrv
 
 DUMMY_COMMAND_CREATOR = None
 _DEFAULT_STDERR_SUMMAY_LEN = 2000
@@ -53,9 +54,7 @@ class _RunnerWithFallbackFunctor(object):
             return self._fallback(*args, **kwargs)
 
 
-def create_job_runner(ctx, runner):
-    pgrpguard_binary = ctx.pgrpguard_binary
-
+def create_job_runner(runner, pgrpguard_binary):
     def subprocsrv_backend(*args, **kwargs):
         if pgrpguard_binary is not None:
             kwargs['use_pgrpguard'] = True
