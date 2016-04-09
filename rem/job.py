@@ -12,6 +12,7 @@ import constants
 import job_process
 import pgrpguard
 from rem_logging import logger as logging
+import subprocsrv
 
 DUMMY_COMMAND_CREATOR = None
 _DEFAULT_STDERR_SUMMAY_LEN = 2000
