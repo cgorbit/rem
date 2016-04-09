@@ -54,7 +54,7 @@ class _RunnerWithFallbackFunctor(object):
 
 
 def create_job_runner(ctx, runner):
-    pgrpguard_binary = ctx.process_wrapper
+    pgrpguard_binary = ctx.pgrpguard_binary
 
     def subprocsrv_backend(*args, **kwargs):
         if pgrpguard_binary is not None:

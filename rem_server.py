@@ -825,13 +825,13 @@ class _RunnerWithFallback(object):
 
 
 def create_process_runners(ctx):
-    pgrpguard_binary = ctx.process_wrapper
+    pgrpguard_binary = ctx.pgrpguard_binary
 
     runner = None
     if ctx.subprocsrv_runner_count:
         runner = subprocsrv.create_runner(
             pool_size=ctx.subprocsrv_runner_count,
-            pgrpguard_binary=ctx.process_wrapper
+            pgrpguard_binary=ctx.pgrpguard_binary
         )
 
     ctx.run_job = rem.job.create_job_runner(ctx, runner)
