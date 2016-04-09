@@ -21,6 +21,7 @@ from test_17 import *
 from test_18 import T18
 from test_19_subprocsrv import T19
 from test_20_pgrpguard import T20
+from test_21_job_process import T21
 from test_last import *
 
 
