@@ -1,8 +1,10 @@
 import sys
 import threading
 
+
 class NotReadyError(RuntimeError):
     pass
+
 
 class _FutureState(object):
     def __init__(self):
@@ -91,10 +93,16 @@ class _FutureState(object):
                 raise self._exc
         return self._val
 
+    def get_nonblock(self, default=None):
+        if self._is_set:
+            return self.get()
+        return default
+
     def is_success(self):
         if not self._is_set:
             raise NotReadyError()
         return not self._exc
+
 
 def _repr(self):
     return '<%s.%s %s at 0x%x>' % (
@@ -103,6 +111,7 @@ def _repr(self):
         self._state._repr_inter(),
         id(self)
     )
+
 
 class Future(object):
     def __init__(self, state):
@@ -122,6 +131,9 @@ class Future(object):
 
     def get_exception(self, timeout=None):
         return self._state.get_exception(timeout)
+
+    def get_nonblock(self, default=None):
+        return self._state.get_nonblock(default)
 
     def subscribe(self, code):
         self._state.subscribe(code)

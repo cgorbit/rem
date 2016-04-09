@@ -711,6 +711,7 @@ class _Popen(object):
 
         return True
 
+    # May throw
     def wait(self, timeout=None, deadline=None):
         self.wait_no_throw(timeout, deadline)
         return self.returncode
@@ -719,10 +720,9 @@ class _Popen(object):
         return self._exit_status.is_set()
 
     @property
+    # May throw
     def returncode(self):
-        if self._exit_status.is_set():
-            return self._exit_status.get()
-        return None
+        return self._exit_status.get_nonblock(None)
 
     def poll(self):
         return self.wait(timeout=0)

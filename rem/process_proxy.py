@@ -55,6 +55,7 @@ class ProcessProxyBase(object):
         return self._impl.returncode is not None
 
     @property
+    # May throw
     def returncode(self):
         return self._impl.returncode
 
@@ -64,18 +65,6 @@ class ProcessProxyBase(object):
     def poll(self):
         with self._lock:
             return self._impl.poll()
-
-    #@property
-    #def stdin(self):
-        #return self._impl.stdin
-
-    #@property
-    #def stdout(self):
-        #return self._impl.stdout
-
-    #@property
-    #def stderr(self):
-        #return self._impl.stderr
 
 
 def _get_process_state(pid):
@@ -195,6 +184,7 @@ class SubprocsrvProcessProxy(object):
         return self._signal_was_sent
 
     @property
+    # May throw
     def returncode(self):
         return self._impl.returncode
 

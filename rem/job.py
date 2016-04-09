@@ -131,8 +131,10 @@ class TimeOutExceededResult(IResult):
         ts = datetime.datetime.fromtimestamp(time.time())
         IResult.__init__(self, "Timeout exceeded", 1, "Job %s timelimit exceeded at %s" % (jobId, ts.strftime(self.time_format)))
 
+
 class PackedExecuteResult(object): # for old backups
     pass
+
 
 class Job(Unpickable(err=nullobject,
                      results=list,
@@ -164,6 +166,9 @@ class Job(Unpickable(err=nullobject,
 
     def __repr__(self):
         return "<Job(id: %s; packet: %s)>" % (self.id, self.packetRef.id)
+
+    def full_id(self):
+        return "%s.%s" % (self.packetRef.id, self.id)
 
     def __getstate__(self):
         return self.__dict__.copy()
@@ -364,7 +369,7 @@ class JobRunner(object):
                                     self._stderr_summary)
             )
 
-        if self.returncode != 0 and job.tries >= job.maxTryCount:
+        if self.returncode_robust != 0 and job.tries >= job.maxTryCount:
             logging.info("Job's %s result: TriesExceededResult", job.id)
             append_result(TriesExceededResult(job.tries))
 
@@ -401,7 +406,8 @@ class JobRunner(object):
         return self._cancelled
 
     @property
-    def returncode(self):
+    # Will not throw
+    def returncode_robust(self):
         if not self._finish_time:
             return None
         return self._process.returncode
