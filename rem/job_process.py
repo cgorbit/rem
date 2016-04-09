@@ -7,35 +7,8 @@ import threading
 
 import pgrpguard
 
-from common import check_process_call, check_process_retcode
+from common import check_process_call, check_process_retcode, wait as _wait
 from rem_logging import logger as logging
-
-_inf = float('inf')
-_MAX_WAIT_DELAY = 2.0
-
-
-def _wait(f, timeout=None, deadline=None):
-    if timeout is not None:
-        deadline = time.time() + timeout
-
-    delay = 0.005
-
-    while True:
-        res = f()
-        if res is not None:
-            return res
-
-        if deadline is not None:
-            remaining = deadline - time.time()
-            if remaining <= 0.0:
-                break
-        else:
-            remaining = _inf
-
-        delay = min(delay * 2, remaining, _MAX_WAIT_DELAY)
-        time.sleep(delay)
-
-    return None
 
 
 class _ProcessProxyBase(object):

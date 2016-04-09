@@ -698,8 +698,6 @@ def scheduler_test(opts, ctx):
         runner, runtm = sc.schedWatcher.tasks.get()
         print runtm, runner
 
-    _context = None
-    _scheduler = None
 
 def _init_fork_locking(ctx):
     set_timeout = getattr(rem.fork_locking, 'set_fork_friendly_acquire_timeout', None)
@@ -786,60 +784,30 @@ def run_server(ctx):
 
     start_daemon(ctx, sched)[1]()
 
-# TODO XXX
-    global _context
-    global _scheduler
-    _context = None
-    _scheduler = None
-
 
 def init_logging(ctx):
     rem_logging.reinit_logger(ctx)
-
-
-class _RunnerWithFallback(object):
-    def __init__(self, main, fallback):
-        self._main = main
-        self._fallback = fallback
-        self._broken = False
-
-    def Popen(self, *args, **kwargs):
-        if self._broken:
-            return self._fallback.Popen(*args, **kwargs)
-
-        try:
-            return self._main.Popen(*args, **kwargs)
-
-        except subprocsrv.ServiceUnavailable:
-            self._broken = True
-            return self._fallback.Popen(*args, **kwargs)
-
-    def check_call(self, *args, **kwargs):
-        return check_process_call(self.call, args, kwargs)
-
-    def call(self, *args, **kwargs):
-        return self.Popen(*args, **kwargs).wait()
-
-    def stop(self):
-        pass
 
 
 def create_process_runners(ctx):
     pgrpguard_binary = ctx.pgrpguard_binary
 
     runner = None
+
     if ctx.subprocsrv_runner_count:
         runner = subprocsrv.create_runner(
             pool_size=ctx.subprocsrv_runner_count,
             pgrpguard_binary=ctx.pgrpguard_binary
         )
 
+    ctx._subprocsrv_runner = runner
+
     ctx.run_job = rem.job.create_job_runner(ctx, runner)
 
     def create_aux_runner():
         ordinal_runner = rem.subprocsrv_fallback.Runner()
 
-        return _RunnerWithFallback(runner, ordinal_runner) \
+        return rem.subprocsrv_fallback.RunnerWithFallback(runner, ordinal_runner) \
             if runner \
             else ordinal_runner
 
@@ -879,6 +847,9 @@ def main():
 
     else:
         raise RuntimeError("Unknown exec mode '%s'" % opts.mode)
+
+    if ctx._subprocsrv_runner:
+        ctx._subprocsrv_runner.stop()
 
     logging.debug("rem-server\texit_main")
 

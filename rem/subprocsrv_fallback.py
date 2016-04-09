@@ -2,7 +2,8 @@ import os
 import subprocess
 
 import subprocsrv
-from common import check_process_call, check_process_retcode
+from common import check_process_call, check_process_retcode, wait as _wait_process
+
 
 class ScopedVal(object):
     def __init__(self, val):
@@ -71,7 +72,7 @@ class _Popen(object):
                     #logging.error(repr(refl))
 
                     # XXX at least shell option meaning differs (in list argv)
-                    self._impl = subprocess.Popen.__init__(self, **refl)
+                    self._impl = subprocess.Popen(**refl)
 
     def send_signal_safe(self, sig, group=False):
         raise NotImplementedError()
@@ -83,12 +84,9 @@ class _Popen(object):
         if self.returncode:
             return self.returncode
 
-        if timeout is not None:
-            pass
-        elif deadline is not None:
-            timeout = deadline - time.time()
+        _wait_process(self._impl.poll, timeout, deadline)
 
-        self.returncode = self._impl.wait(self, timeout)
+        self.returncode = self._impl.returncode
         return self.returncode
 
     wait = wait_no_throw
@@ -120,3 +118,32 @@ class Runner(object):
     @classmethod
     def stop(cls):
         pass
+
+
+class RunnerWithFallback(object):
+    def __init__(self, main, fallback):
+        self._main = main
+        self._fallback = fallback
+        self._broken = False
+
+    def Popen(self, *args, **kwargs):
+        if self._broken:
+            return self._fallback.Popen(*args, **kwargs)
+
+        try:
+            return self._main.Popen(*args, **kwargs)
+
+        except subprocsrv.ServiceUnavailable:
+            self._broken = True
+            return self._fallback.Popen(*args, **kwargs)
+
+    def check_call(self, *args, **kwargs):
+        return check_process_call(self.call, args, kwargs)
+
+    def call(self, *args, **kwargs):
+        return self.Popen(*args, **kwargs).wait()
+
+    def stop(self):
+        pass
+
+

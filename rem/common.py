@@ -662,3 +662,32 @@ def _unset_proc_runner():
     proc_runner = None
 
 atexit.register(_unset_proc_runner)
+
+
+_inf = float('inf')
+_MAX_WAIT_DELAY = 2.0
+
+def wait(f, timeout=None, deadline=None):
+    if timeout is not None:
+        deadline = time.time() + timeout
+
+    delay = 0.005
+
+    while True:
+        res = f()
+        if res is not None:
+            return res
+
+        if deadline is not None:
+            remaining = deadline - time.time()
+            if remaining <= 0.0:
+                break
+        else:
+            remaining = _inf
+
+        delay = min(delay * 2, remaining, _MAX_WAIT_DELAY)
+        time.sleep(delay)
+
+    return None
+
+

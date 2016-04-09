@@ -7,7 +7,8 @@ import unittest
 from tempfile import NamedTemporaryFile
 
 import rem.subprocsrv as subprocsrv
-import rem.process_proxy
+import rem.subprocsrv_fallback as subprocsrv_fallback
+#import rem.job_process
 #import rem.pgrpguard
 
 # TODO base_test(pgrpguard_binary=None){None, which}
@@ -27,7 +28,11 @@ class T19(unittest.TestCase):
         self._testXXX(subprocsrv.Runner(pgrpguard_binary='pgrpguard'), use_pgrpguard=True)
 
     def testZZZ(self):
-        self._testXXX(subprocsrv.FallbackkedRunner(subprocsrv.BrokenRunner()))
+        runner = subprocsrv_fallback.RunnerWithFallback(
+            main=subprocsrv.BrokenRunner(),
+            fallback=subprocsrv_fallback.Runner()
+        )
+        self._testXXX(runner)
 
     def _testXXX(self, runner, use_pgrpguard=False):
         msg = str(time.time())
