@@ -5,8 +5,6 @@ import signal
 import subprocess
 import threading
 
-import subprocsrv
-import subprocsrv_fallback
 import pgrpguard
 
 from common import check_process_call, check_process_retcode
@@ -40,7 +38,7 @@ def _wait(f, timeout=None, deadline=None):
     return None
 
 
-class ProcessProxyBase(object):
+class _ProcessProxyBase(object):
     BEFORE_KILL_DELAY = 1.0
 
     def __init__(self):
@@ -74,13 +72,13 @@ def _get_process_state(pid):
                 return line.rstrip('\n').split('\t')[1][0]
 
 
-class ProcessProxy(ProcessProxyBase):
+class DefaultProcess(_ProcessProxyBase):
 
     # If process terminated by itself, we will not send SIGKILL to group
     # in contrast to pgrpguard
 
     def __init__(self, *args, **kwargs):
-        ProcessProxyBase.__init__(self)
+        _ProcessProxyBase.__init__(self)
         kwargs['preexec_fn'] = os.setpgrp
         self._impl = subprocess.Popen(*args, **kwargs)
 
@@ -108,12 +106,12 @@ class ProcessProxy(ProcessProxyBase):
             self._send_kill_to_group()
 
 
-class ProcessGroupGuardProxy(ProcessProxyBase):
+class PgrpguardProcess(_ProcessProxyBase):
 
     # pgrpguard will send SIGKILL to group in any case
 
     def __init__(self, *args, **kwargs):
-        ProcessProxyBase.__init__(self)
+        _ProcessProxyBase.__init__(self)
         self._impl = pgrpguard.ProcessGroupGuard(*args, **kwargs)
 
     def _send_term_to_process(self):
@@ -139,8 +137,8 @@ class ProcessGroupGuardProxy(ProcessProxyBase):
             self._send_kill_to_group()
 
 
-class SubprocsrvProcessProxy(object):
-    BEFORE_KILL_DELAY = ProcessProxyBase.BEFORE_KILL_DELAY
+class SubprocsrvProcess(object):
+    BEFORE_KILL_DELAY = _ProcessProxyBase.BEFORE_KILL_DELAY
 
     def __init__(self, runner, argv, stdin=None, stdout=None, stderr=None,
                  setpgrp=False, cwd=None, shell=False, use_pgrpguard=False):

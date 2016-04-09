@@ -698,6 +698,8 @@ def scheduler_test(opts, ctx):
         runner, runtm = sc.schedWatcher.tasks.get()
         print runtm, runner
 
+    _context = None
+    _scheduler = None
 
 def _init_fork_locking(ctx):
     set_timeout = getattr(rem.fork_locking, 'set_fork_friendly_acquire_timeout', None)
@@ -787,8 +789,8 @@ def run_server(ctx):
 # TODO XXX
     global _context
     global _scheduler
-    _context = ctx
-    _scheduler = sched
+    _context = None
+    _scheduler = None
 
 
 def init_logging(ctx):
@@ -862,9 +864,9 @@ def main():
     rem.common.set_proc_runner(ctx.aux_runner)
 # XXX
 
-    time.sleep(2)
+    #time.sleep(2)
 
-    return
+    #return
 
     if opts.mode == "start":
         run_server(ctx)

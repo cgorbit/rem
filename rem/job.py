@@ -9,7 +9,7 @@ from common import FuncRunner, Unpickable, safeint, nullobject, zeroint, get_Non
 import osspec
 import packet
 import constants
-import process_proxy
+import job_process
 import pgrpguard
 from rem_logging import logger as logging
 
@@ -59,17 +59,17 @@ def create_job_runner(ctx, runner):
     def subprocsrv_backend(*args, **kwargs):
         if pgrpguard_binary is not None:
             kwargs['use_pgrpguard'] = True
-        return process_proxy.SubprocsrvProcessProxy(runner, *args, **kwargs)
+        return job_process.SubprocsrvProcess(runner, *args, **kwargs)
 
     def ordinal_backend(*args, **kwargs):
         kwargs['close_fds'] = True
 
         if pgrpguard_binary is None:
-            return process_proxy.ProcessProxy(*args, **kwargs)
+            return job_process.DefaultProcess(*args, **kwargs)
 
         else:
             kwargs['wrapper_binary'] = pgrpguard_binary
-            return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
+            return job_process.PgrpguardProcess(*args, **kwargs)
 
     return _RunnerWithFallbackFunctor(subprocsrv_backend, ordinal_backend) \
         if runner \
