@@ -802,7 +802,7 @@ def create_process_runners(ctx):
 
     ctx._subprocsrv_runner = runner
 
-    ctx.run_job = rem.job.create_job_runner(ctx, runner)
+    ctx.run_job = rem.job.create_job_runner(runner, ctx.pgrpguard_binary)
 
     def create_aux_runner():
         ordinal_runner = rem.subprocsrv_fallback.Runner()
