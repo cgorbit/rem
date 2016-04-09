@@ -120,6 +120,9 @@ class Future(object):
     def get_raw(self, timeout=None):
         return self._state.get_raw(timeout)
 
+    def get_exception(self, timeout=None):
+        return self._state.get_exception(timeout)
+
     def subscribe(self, code):
         self._state.subscribe(code)
 
@@ -166,51 +169,90 @@ class Promise(object):
     def __repr__(self):
         return _repr(self)
 
+
 READY_FUTURE = Promise().set(None).to_future()
 
-class _FuturesAwaiter(object):
-    _MAX_EXCEPTIONS = 10
 
+class FutureCombinerBase(object):
     def __init__(self, futures):
-        self._future_count = len(futures)
-        self._exceptions = []
+        self.__pending_count = len(futures)
         self._promise = Promise()
-        self._lock = threading.Lock()
-        for f in futures:
-            f.subscribe(self._on_set)
+        self.__lock = threading.Lock()
 
-    def _on_set(self, f):
-        with self._lock:
-            assert self._future_count
+        for idx, f in enumerate(futures):
+            f.subscribe(lambda f, idx=idx: self.__on_set(f, idx))
 
-            self._future_count -= 1
+    def __on_set(self, f, idx):
+        with self.__lock:
+            assert self.__pending_count
+            self.__pending_count -= 1
 
-            #if self._promise.is_set():
-                #return
+            self._on_set(f, idx)
 
-            #elif not f.is_success():
-                #self._promise.set(None, f.get_raw()[1])
-
-            if not f.is_success():
-                exc = f.get_raw()[1]
-                if isinstance(exc, tuple):
-                    exc = exc[0]
-                self._exceptions.append(exc)
-
-            if not self._future_count:
-                val = None
-                exc = None
-
-                if self._exceptions:
-                    exc = RuntimeError("%d futures failed: %s" % (
-                        len(self._exceptions),
-                        '\n'.join(map(repr, self._exceptions[:self._MAX_EXCEPTIONS]))))
-                self._exceptions = None
-
-                self._promise.set(val, exc)
+            if not self.__pending_count:
+                self._on_after_all()
 
     def to_future(self):
         return self._promise.to_future()
 
-def WaitFutures(futures):
-    return _FuturesAwaiter(futures).to_future()
+    def _on_set(self, f, idx):
+        pass
+
+    def _on_after_all(self):
+        pass
+
+
+class _FutureResultsJoiner(FutureCombinerBase):
+    def __init__(self, futures):
+        self.__results = [None for idx in xrange(len(futures))]
+        self.__failed = False
+        FutureCombinerBase.__init__(self, futures)
+
+    def _on_set(self, f, idx):
+        if f.is_success():
+            self.__results[idx] = f.get()
+        else:
+            self.__failed = True
+            self._promise.set(None, f.get_exception())
+
+    def _on_after_all(self):
+        if self.__failed:
+            return
+
+        self._promise.set(self.__results)
+
+
+def JoinFuturesResults(futures):
+    return _FutureResultsJoiner(futures).to_future()
+
+
+class _AllFuturesAwaiter(FutureCombinerBase):
+    def __init__(self, futures):
+        FutureCombinerBase.__init__(self, futures)
+
+    def _on_after_all(self):
+        self._promise.set(None)
+
+
+def WaitAllFutures(futures):
+    return _AllFuturesAwaiter(futures).to_future()
+
+
+class _AllFutureSucceedChecker(FutureCombinerBase):
+    def __init__(self, futures):
+        self.__failed = False
+        FutureCombinerBase.__init__(self, futures)
+
+    def _on_set(self, f, idx):
+        if not f.is_success():
+            self.__failed = True
+            self._promise.set(None, f.get_exception())
+
+    def _on_after_all(self):
+        if not self.__failed:
+            self._promise.set(None)
+
+
+def CheckAllFuturesSucceed(futures):
+    return _AllFutureSucceedChecker(futures).to_future()
+

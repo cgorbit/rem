@@ -18,7 +18,7 @@ from journal import TagLogger
 from packet import PacketState, JobPacket
 from Queue import Queue
 import fork_locking
-from future import Promise, WaitFutures, READY_FUTURE
+from future import Promise, READY_FUTURE, CheckAllFuturesSucceed
 from profile import ProfiledThread
 from rem_logging import logger as logging
 
@@ -681,10 +681,8 @@ class TagStorage(object):
                         if tag.IsCloud()
             )
 
-            # TODO split in groups in cloud_client?
-
             if cloud_tags:
-                self._cloud.subscribe(cloud_tags)
+                self._cloud.subscribe(cloud_tags, with_future=False)
 
     def _on_cloud_journal_event(self, ev):
         logging.debug('before journal event %s' % ev)
@@ -855,7 +853,7 @@ class TagStorage(object):
         elif cloud_done is None:
             return local_done
         else:
-            return WaitFutures([cloud_done, local_done])
+            return CheckAllFuturesSucceed([cloud_done, local_done])
 
     def _modify_tag_unsafe(self, tagname, event, msg=None):
         return self._modify_tags_unsafe([(tagname, event, msg)]) # FIXME own faster impl?
@@ -871,7 +869,7 @@ class TagStorage(object):
         if not with_future:
             return
 
-        return done[0] if len(done) == 1 else WaitFutures(done)
+        return done[0] if len(done) == 1 else CheckAllFuturesSucceed(done)
 
     def _modify_local_tag_safe(self, tag, event, msg=None):
         self._modify_local_tags([(tag, event, msg)], with_future=False)
@@ -886,7 +884,7 @@ class TagStorage(object):
             ret = self.inmem_items.setdefault(tagname, raw)
 
             if ret is raw and ret.IsCloud() and self._cloud: # no _cloud before Start()
-                self._cloud.subscribe(tagname)
+                self._cloud.subscribe(tagname, with_future=False)
 
         return TagWrapper(ret)
 
@@ -1132,7 +1130,7 @@ class TagStorage(object):
 
         with self.lock:
             if unsub_tags:
-                self._cloud.unsubscribe(unsub_tags)
+                self._cloud.unsubscribe(unsub_tags, with_future=False)
 
             for name in old_tags:
                 tag = self.inmem_items.pop(name)

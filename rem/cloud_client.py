@@ -13,7 +13,7 @@ import errno
 from google.protobuf.internal.decoder import _DecodeVarint32
 from google.protobuf.internal.encoder import _EncodeVarint as EncodeVarint
 
-from future import Promise
+from future import Promise, CheckAllFuturesSucceed
 from profile import ProfiledThread
 import cloud_tags_pb2
 from rem_logging import logger as logging
@@ -184,7 +184,8 @@ class ProtobufConnection(object):
     def __del__(self):
         self.close()
 
-def split_in_groups(iterable, size):
+
+def split_in_groups_lazy(iterable, size):
     it = iter(iterable)
     last = False
 
@@ -202,6 +203,22 @@ def split_in_groups(iterable, size):
         if last:
             return
 
+
+def split_in_groups(iterable, size):
+    items = list(iterable)
+
+    group_idx = 0
+    while True:
+        start_idx = group_idx * size
+
+        if start_idx > len(items) - 1:
+            return
+
+        yield items[start_idx:start_idx + size]
+
+        group_idx += 1
+
+
 class _FakePromise(object):
     def set(self, val=None, exc=None):
         pass
@@ -215,7 +232,7 @@ def _make_protobuf_connection((host, port)):
 
 
 class Client(object):
-    MESSAGE_MAX_ITEM_COUNT = 100000
+    MESSAGE_MAX_ITEM_COUNT = 100000 # ATW CodedInputStream::GetTotalBytesLimit() == 67_108_864
     __FAKE_PROMISE = _FakePromise()
 
     _ST_NONE   = 0
@@ -425,31 +442,19 @@ class Client(object):
         msg.Debug.GetMySubscriptions = True;
         return self._push(msg)
 
-    def subscribe(self, tags):
-        if isinstance(tags, str):
-            tags = set([tags])
+    def subscribe(self, tags, with_future=True):
+        return self._sub_unsub_in_groups(tags, self._do_subscribe, with_future)
 
-        if not isinstance(tags, set):
-            tags = set(tags)
+    def unsubscribe(self, tags, with_future=True):
+        return self._sub_unsub_in_groups(tags, self._do_unsubscribe, with_future)
 
-        if not tags:
-            return READY_ACK_FUTURE
-
+    def _do_subscribe(self, tags):
         def update():
             self._subscriptions |= tags
 
         return self._push(self._create_subscribe_message(tags), code=update)
 
-    def unsubscribe(self, tags):
-        if isinstance(tags, str):
-            tags = set([tags])
-
-        if not isinstance(tags, set):
-            tags = set(tags)
-
-        if not tags:
-            return READY_ACK_FUTURE
-
+    def _do_unsubscribe(self, tags):
         msg = cloud_tags_pb2.TClientMessage()
         msg.Unsubscribe.Tags.extend(tags)
 
@@ -457,6 +462,32 @@ class Client(object):
             self._subscriptions -= tags
 
         return self._push(msg, code=update)
+
+    def _sub_unsub_in_groups(self, tags, method, with_future=True):
+        if isinstance(tags, str):
+            tags = set([tags])
+
+        if not isinstance(tags, set):
+            tags = set(tags)
+
+        def fix_result(f):
+            return f if with_future else None
+
+        if not tags:
+            return fix_result(READY_ACK_FUTURE)
+
+        if len(tags) < self.MESSAGE_MAX_ITEM_COUNT:
+            return fix_result(method(tags))
+
+        futures = [
+            method(set(tags_group))
+                for tags_group in split_in_groups(tags, self.MESSAGE_MAX_ITEM_COUNT)
+        ]
+
+        if not with_future:
+            return
+
+        return CheckAllFuturesSucceed(futures)
 
     def lookup(self, tags):
         if not isinstance(tags, set):
