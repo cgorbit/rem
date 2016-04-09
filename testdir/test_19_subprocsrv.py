@@ -10,7 +10,6 @@ import rem.subprocsrv as subprocsrv
 import rem.subprocsrv_fallback as subprocsrv_fallback
 
 # TODO self.setpgrp = setpgrp # useless with use_pgrpguard=True
-# TODO self.cwd = cwd # filename or None
 # TODO self.shell = shell # filename or None
 
 class T19(unittest.TestCase):
