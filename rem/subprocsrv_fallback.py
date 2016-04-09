@@ -31,6 +31,7 @@ class _NamedTemporaryFileWithContent(object):
         self._file = NamedTemporaryFile()
         self._file.write(content)
         self._file.flush()
+        self._file.file.seek(0)
 
     def __enter__(self):
         return self._file.__enter__()
