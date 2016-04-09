@@ -25,8 +25,8 @@ class _ProcessProxyBase(object):
     def _waited(self):
         return self._impl.returncode is not None
 
-    @property
     # May throw
+    @property
     def returncode(self):
         return self._impl.returncode
 
@@ -154,8 +154,8 @@ class SubprocsrvProcess(object):
     def was_signal_sent(self):
         return self._signal_was_sent
 
-    @property
     # May throw
+    @property
     def returncode(self):
         return self._impl.returncode
 

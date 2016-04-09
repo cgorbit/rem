@@ -719,8 +719,8 @@ class _Popen(object):
     def is_terminated(self):
         return self._exit_status.is_set()
 
-    @property
     # May throw
+    @property
     def returncode(self):
         return self._exit_status.get_nonblock(None)
 
