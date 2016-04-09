@@ -37,8 +37,10 @@ class _NamedTemporaryFileWithContent(object):
         self._file.__exit__(*args)
 
 
-class _Popen(subprocess.Popen):
+class _Popen(object):
     def __init__(self, *args, **kwargs):
+        self.returncode = None
+
         stdin_content = kwargs.pop('stdin_content', None)
 
         task = subprocsrv.NewTaskParamsMessage(*args, **kwargs)
@@ -69,32 +71,33 @@ class _Popen(subprocess.Popen):
                     #logging.error(repr(refl))
 
                     # XXX at least shell option meaning differs (in list argv)
-                    subprocess.Popen.__init__(self, **refl)
+                    self._impl = subprocess.Popen.__init__(self, **refl)
 
     def send_signal_safe(self, sig, group=False):
         raise NotImplementedError()
 
-# FIXME
-    #def wait_no_throw(self, timeout=None, deadline=None):
-        #return self.wait(timeout, deadline)
+    def send_signal(self, sig, group=False):
+        raise NotImplementedError()
 
-# FIXME
-    #def wait(self, timeout=None, deadline=None):
-        #if timeout is not None:
-            #pass
-        #elif deadline is not None:
-            #timeout = deadline - time.time()
-        #return subprocess.Popen.wait(self, timeout)
+    def wait_no_throw(self, timeout=None, deadline=None):
+        if self.returncode:
+            return self.returncode
 
-    #def is_terminated(self):
-        #self.poll()
-        #return self.returncode is not None
+        if timeout is not None:
+            pass
+        elif deadline is not None:
+            timeout = deadline - time.time()
 
-    #def communicate(self):
-        #raise NotImplementedError()
+        self.returncode = self._impl.wait(self, timeout)
+        return self.returncode
 
-    #def pipe_cloexec(self):
-        #raise NotImplementedError()
+    wait = wait_no_throw
+
+    def poll(self):
+        return self.wait(timeout=0)
+
+    def is_terminated(self):
+        return self.returncode is not None
 
 
 class Runner(object):
