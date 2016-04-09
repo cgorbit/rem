@@ -235,6 +235,7 @@ class ProcessGroupGuard(object):
         return self._poll(self._proc.wait)
 
     @property
+    # May throw
     def returncode(self):
         if isinstance(self._result, Exception):
             raise self._result
