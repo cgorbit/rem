@@ -126,7 +126,7 @@ class SubprocsrvProcess(object):
             stderr = stderr.name
 
         self._impl = runner.Popen(argv, stdin, stdout, stderr, setpgrp, cwd,
-                                      shell, use_pgrpguard)
+                                  shell, use_pgrpguard)
 
     @staticmethod
     def _send_signal_safe_inspect_result(f):
