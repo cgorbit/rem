@@ -870,8 +870,7 @@ def main():
         run_server(ctx)
 
     elif opts.mode == "convert-on-disk-tags":
-        convert = Scheduler.create_on_disk_tags_to_cloud_converter(ctx)
-        convert(yt_writer_count=opts.yt_writer_count)
+        Scheduler.convert_on_disk_tags_to_cloud(ctx, yt_writer_count=opts.yt_writer_count)
 
     elif opts.mode == "test":
         scheduler_test(opts, ctx)

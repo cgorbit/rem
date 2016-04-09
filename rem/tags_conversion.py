@@ -211,9 +211,8 @@ def _update_db(db_filename, input_queue, write_count):
 def convert_on_disk_tags_to_cloud(db_filename,
                                   in_memory_tags,
                                   cloud_tags_server_addr,
-                                  yt_writer_count=20,
-                                  bucket_size=2500,
-                                 ):
+                                  yt_writer_count,
+                                  bucket_size):
 
     start_time = time.time()
 
