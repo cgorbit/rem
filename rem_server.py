@@ -826,15 +826,8 @@ def main():
 
     init_logging(ctx)
 
-# XXX
-    create_process_runners(ctx) # XXX FIXME
-
+    create_process_runners(ctx)
     rem.common.set_proc_runner(ctx.aux_runner)
-# XXX
-
-    #time.sleep(2)
-
-    #return
 
     if opts.mode == "start":
         run_server(ctx)
