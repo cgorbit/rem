@@ -633,3 +633,26 @@ def cleanup_directory(directory, to_keep, max_removed_items_to_output=100):
         logging.info('%d files removed from %s: %s' \
             % (len(removed), directory, ', '.join(removed[:max_removed_items_to_output])))
 
+
+def split_in_groups(iterable, size):
+    if isinstance(iterable, list):
+        items = iterable
+    else:
+        items = list(iterable)
+
+    if len(items) <= size:
+        yield items
+        return
+
+    group_idx = 0
+    while True:
+        start_idx = group_idx * size
+
+        if start_idx > len(items) - 1:
+            return
+
+        yield items[start_idx:start_idx + size]
+
+        group_idx += 1
+
+

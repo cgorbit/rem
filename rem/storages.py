@@ -683,7 +683,7 @@ class TagStorage(object):
                 self._cloud.subscribe(cloud_tags, with_future=False)
 
     def _on_cloud_journal_event(self, ev):
-        logging.debug('before journal event %s' % ev)
+        #logging.debug('before journal event %s' % ev)
 
         with self.lock:
             tag = self.inmem_items.get(ev.tag_name)
@@ -966,12 +966,15 @@ class TagStorage(object):
         cloud = self._create_cloud_client(lambda ev: None)
 
         try:
-            cloud.update(updates).get()
+            for bucket in split_in_groups(updates, 100000): # TODO Fix cloud_client.update
+                cloud.update(bucket).get()
         finally:
             try:
                 cloud.stop()
             except:
                 logging.exception("Failed to stop temporary cloud client")
+
+        logging.info("after conversion %d tags to CloudTag's" % len(updates))
 
         return True
 

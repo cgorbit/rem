@@ -158,14 +158,22 @@ def unset_tag(tagname, timeout=None):
 def reset_tag(tagname, msg="", timeout=None):
     return _scheduler.tagRef._modify_tag_unsafe(tagname, ETagEvent.Reset, msg).get(timeout)
 
+# TODO Fix cloud_client.update
+def check_item_count(items):
+    max_item_count = 100000
+    if len(items) > max_item_count:
+        raise RuntimeError("Can't update/lookup more than %d items (got %d)" % (max_item_count, len(items)))
+
 @readonly_method
 @traced_rpc_method()
 def check_tags(tags):
+    check_item_count(tags)
     return _scheduler.tagRef._are_tags_set(tags).get()
 
 @readonly_method
 @traced_rpc_method()
 def lookup_tags(tags):
+    check_item_count(tags)
     return _scheduler.tagRef._lookup_tags(tags).get()
 
 @readonly_method
@@ -191,6 +199,7 @@ def get_tag_local_state(tag):
 
 @traced_rpc_method("info")
 def update_tags(updates):
+    check_item_count(updates)
     # TODO VERIFY `updates' HERE
     return _scheduler.tagRef._modify_tags_unsafe(updates).get() # TODO timeout
 

@@ -14,6 +14,7 @@ from google.protobuf.internal.decoder import _DecodeVarint32
 from google.protobuf.internal.encoder import _EncodeVarint as EncodeVarint
 
 from future import Promise, CheckAllFuturesSucceed
+from common import split_in_groups
 from profile import ProfiledThread
 import cloud_tags_pb2
 from rem_logging import logger as logging
@@ -183,40 +184,6 @@ class ProtobufConnection(object):
 
     def __del__(self):
         self.close()
-
-
-def split_in_groups_lazy(iterable, size):
-    it = iter(iterable)
-    last = False
-
-    while True:
-        group = []
-        try:
-            for _ in xrange(size):
-                group.append(next(it))
-        except StopIteration:
-            last = True
-
-        if group:
-            yield group
-
-        if last:
-            return
-
-
-def split_in_groups(iterable, size):
-    items = list(iterable)
-
-    group_idx = 0
-    while True:
-        start_idx = group_idx * size
-
-        if start_idx > len(items) - 1:
-            return
-
-        yield items[start_idx:start_idx + size]
-
-        group_idx += 1
 
 
 class _FakePromise(object):
