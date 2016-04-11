@@ -489,6 +489,8 @@ class Client(object):
         if len(update) > 2 and update[2] is not None:
             item.Comment = update[2]
 
+    # If this function will split updates into buckets, consider that
+    # updates may contains updates of the same tag
     def update(self, updates):
         if not isinstance(updates, list):
             updates = set(updates)
