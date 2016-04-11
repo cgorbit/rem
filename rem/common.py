@@ -640,6 +640,9 @@ def split_in_groups(iterable, size):
     else:
         items = list(iterable)
 
+    if not items:
+        return
+
     if len(items) <= size:
         yield items
         return
