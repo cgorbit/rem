@@ -65,6 +65,7 @@ class Context(object):
         self.tags_db_file = config.get("store", "tags_db_file")
         self.recent_tags_file = config.get("store", "recent_tags_file")
         self.remote_tags_db_file = config.safe_get("store", "remote_tags_db_file")
+        self.fix_bin_links_at_startup = config.safe_getboolean("store", "fix_bin_links_at_startup", True)
         self.thread_pool_size = config.getint("run", "poolsize")
         self.xmlrpc_pool_size = config.safe_getint("run", "xmlrpc_poolsize", 1)
         self.readonly_xmlrpc_pool_size = config.safe_getint("run", "readonly_xmlrpc_pool_size", 1)

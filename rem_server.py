@@ -784,8 +784,8 @@ def run_server(ctx):
     logged(
         sched.cleanup_bin_storage_fs)
 
-    logged(
-        sched.cleanup_packet_storage_fs)
+    #logged(
+        #sched.cleanup_packet_storage_fs)
 
     start_daemon(ctx, sched)[1]()
 

@@ -484,7 +484,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             self.__setstate__(sdict)
 
-            self.UpdateContext(None, fix_bin_files=not restore_tags_only)
+            self.UpdateContext(
+                None,
+                fix_bin_files=not(restore_tags_only or not self.context.fix_bin_links_at_startup)
+            )
+
             self.tagRef.PreInit()
 
             tagStorage = self.tagRef
