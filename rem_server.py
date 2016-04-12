@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 from __future__ import with_statement
+
 import os
 import re
 import select
@@ -26,6 +27,9 @@ import rem.fork_locking
 from rem.rem_logging import logger as logging
 import rem.rem_logging as rem_logging
 from rem.context import Context
+import rem.subprocsrv as subprocsrv
+import rem.subprocsrv_fallback
+import rem.job
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -794,6 +798,31 @@ def init_logging(ctx):
     rem_logging.reinit_logger(ctx)
 
 
+def create_process_runners(ctx):
+    pgrpguard_binary = ctx.pgrpguard_binary
+
+    runner = None
+
+    if ctx.subprocsrv_runner_count:
+        runner = subprocsrv.create_runner(
+            pool_size=ctx.subprocsrv_runner_count,
+            pgrpguard_binary=ctx.pgrpguard_binary
+        )
+
+    ctx._subprocsrv_runner = runner
+
+    ctx.run_job = rem.job.create_job_runner(runner, ctx.pgrpguard_binary)
+
+    def create_aux_runner():
+        ordinal_runner = rem.subprocsrv_fallback.Runner()
+
+        return rem.subprocsrv_fallback.RunnerWithFallback(runner, ordinal_runner) \
+            if runner \
+            else ordinal_runner
+
+    ctx.aux_runner = create_aux_runner()
+
+
 def main():
     opts = parse_arguments()
 
@@ -806,6 +835,9 @@ def main():
 
     init_logging(ctx)
 
+    create_process_runners(ctx)
+    rem.common.set_proc_runner(ctx.aux_runner)
+
     if opts.mode == "start":
         run_server(ctx)
 
@@ -817,6 +849,9 @@ def main():
 
     else:
         raise RuntimeError("Unknown exec mode '%s'" % opts.mode)
+
+    if ctx._subprocsrv_runner:
+        ctx._subprocsrv_runner.stop()
 
     logging.debug("rem-server\texit_main")
 

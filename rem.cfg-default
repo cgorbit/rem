@@ -58,7 +58,7 @@ readonly_xmlrpc_poolsize = 10
 # REM (нужен для установки необходимых переменных окружения)
 setup_script = %(project_dir)s/setup_env.sh
 # set-user-ID обёртка для гарантированного убийства запускаемых групп процессов (от супер-пользователя)
-#process_wrapper = pgrpguard
+#pgrpguard_binary = pgrpguard
 
 [server]
 #порт, слушаемый сервером (для общения с клиентами, посылающими задачи)

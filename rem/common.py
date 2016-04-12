@@ -13,12 +13,13 @@ import xmlrpclib
 from Queue import Queue as StdQueue
 from Queue import PriorityQueue as StdPriorityQueue
 import heapq
-import subprocess
+import atexit
 
 import fork_locking
 from heap import PriorityQueue
 import osspec
 from rem_logging import logger as logging
+from subprocess import CalledProcessError, MAXFD
 
 class RpcUserError(Exception):
     def __init__(self, exc):
@@ -573,17 +574,15 @@ def should_execute_maker(max_tries=20, penalty_factor=5, *exception_list):
 
 @should_execute_maker(20, 5, Exception)
 def send_email(emails, subject, message):
-    sender = subprocess.Popen(["sendmail"] + map(str, emails), stdin=subprocess.PIPE)
-    print >> sender.stdin, \
+    global proc_runner
+    body = \
         """Subject: %(subject)s
 To: %(email-list)s
 
 %(message)s
 .""" % {"subject": subject, "email-list": ", ".join(emails), "message": message}
-    sender.stdin.close()
-    sender.communicate()
-    return sender.poll()
-
+    sender = proc_runner.Popen(["sendmail"] + map(str, emails), stdin_content=body)
+    return sender.wait()
 
 def parse_network_address(addr):
     try:
@@ -658,4 +657,60 @@ def split_in_groups(iterable, size):
 
         group_idx += 1
 
+
+def check_process_retcode(retcode, cmd):
+    if retcode:
+        if isinstance(cmd, list):
+            cmd = ' '.join(cmd)
+        raise CalledProcessError(retcode, cmd)
+
+
+def check_process_call(call, args, kwargs):
+    retcode = call(*args, **kwargs)
+    if retcode:
+        cmd = kwargs.get("args")
+        if cmd is None:
+            cmd = args[0]
+        check_process_retcode(retcode, cmd)
+    return 0
+
+
+proc_runner = None
+
+def set_proc_runner(runner):
+    global proc_runner
+    proc_runner = runner
+
+def _unset_proc_runner():
+    global proc_runner
+    proc_runner = None
+
+atexit.register(_unset_proc_runner)
+
+
+_inf = float('inf')
+_MAX_WAIT_DELAY = 2.0
+
+def wait(f, timeout=None, deadline=None):
+    if timeout is not None:
+        deadline = time.time() + timeout
+
+    delay = 0.005
+
+    while True:
+        res = f()
+        if res is not None:
+            return res
+
+        if deadline is not None:
+            remaining = deadline - time.time()
+            if remaining <= 0.0:
+                break
+        else:
+            remaining = _inf
+
+        delay = min(delay * 2, remaining, _MAX_WAIT_DELAY)
+        time.sleep(delay)
+
+    return None
 

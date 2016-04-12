@@ -223,7 +223,7 @@ class JobPacketImpl(object):
         #       2. another running jobs' branches will not be continue to run
         #          until stopWaiting()
 
-        if runner.returncode == 0 and not runner.is_cancelled():
+        if runner.returncode_robust == 0 and not runner.is_cancelled():
             self.done.add(job.id)
 
             if self.job_done_indicator.get(job.id):

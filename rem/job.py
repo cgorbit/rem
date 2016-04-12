@@ -9,12 +9,71 @@ from common import FuncRunner, Unpickable, safeint, nullobject, zeroint, get_Non
 import osspec
 import packet
 import constants
-import process_proxy
+import job_process
 import pgrpguard
 from rem_logging import logger as logging
+import subprocsrv
 
 DUMMY_COMMAND_CREATOR = None
 _DEFAULT_STDERR_SUMMAY_LEN = 2000
+
+
+# XXX #1
+def _RunnerWithFallbackFunctor(self, main, fallback):
+    broken = [False]
+
+    def impl(*args, **kwargs):
+        if [broken]:
+            return fallback(*args, **kwargs)
+
+        try:
+            return main(*args, **kwargs)
+
+        except subprocsrv.ServiceUnavailable:
+            broken = True
+            return fallback(*args, **kwargs)
+
+    return impl
+
+# XXX #2
+class _RunnerWithFallbackFunctor(object):
+    def __init__(self, main, fallback):
+        self._main = main
+        self._fallback = fallback
+        self._broken = False
+
+    def __call__(self, *args, **kwargs):
+        if self._broken:
+            return self._fallback(*args, **kwargs)
+
+        try:
+            return self._main(*args, **kwargs)
+
+        except subprocsrv.ServiceUnavailable:
+            self._broken = True
+            return self._fallback(*args, **kwargs)
+
+
+def create_job_runner(runner, pgrpguard_binary):
+    def subprocsrv_backend(*args, **kwargs):
+        if pgrpguard_binary is not None:
+            kwargs['use_pgrpguard'] = True
+        return job_process.SubprocsrvProcess(runner, *args, **kwargs)
+
+    def ordinal_backend(*args, **kwargs):
+        kwargs['close_fds'] = True
+
+        if pgrpguard_binary is None:
+            return job_process.DefaultProcess(*args, **kwargs)
+
+        else:
+            kwargs['wrapper_binary'] = pgrpguard_binary
+            return job_process.PgrpguardProcess(*args, **kwargs)
+
+    return _RunnerWithFallbackFunctor(subprocsrv_backend, ordinal_backend) \
+        if runner \
+        else ordinal_backend
+
 
 class IResult(Unpickable(type=str,
                          code=safeint,
@@ -71,8 +130,10 @@ class TimeOutExceededResult(IResult):
         ts = datetime.datetime.fromtimestamp(time.time())
         IResult.__init__(self, "Timeout exceeded", 1, "Job %s timelimit exceeded at %s" % (jobId, ts.strftime(self.time_format)))
 
+
 class PackedExecuteResult(object): # for old backups
     pass
+
 
 class Job(Unpickable(err=nullobject,
                      results=list,
@@ -105,6 +166,9 @@ class Job(Unpickable(err=nullobject,
     def __repr__(self):
         return "<Job(id: %s; packet: %s)>" % (self.id, self.packetRef.id)
 
+    def full_id(self):
+        return "%s.%s" % (self.packetRef.id, self.id)
+
     def __getstate__(self):
         return self.__dict__.copy()
 
@@ -124,13 +188,8 @@ class Job(Unpickable(err=nullobject,
 
     @staticmethod
     def start_process(*args, **kwargs):
-        wrapper = packet.PacketCustomLogic.SchedCtx.process_wrapper
-
-        if wrapper is None:
-            return process_proxy.ProcessProxy(*args, **kwargs)
-        else:
-            kwargs['wrapper_binary'] = wrapper
-            return process_proxy.ProcessGroupGuardProxy(*args, **kwargs)
+        ctx = packet.PacketCustomLogic.SchedCtx # XXX
+        return ctx.run_job(*args, **kwargs)
 
     def last_result(self):
         return self.results[-1] if self.results else None
@@ -217,10 +276,9 @@ class JobRunner(object):
         try:
             process = job.start_process(
                 argv,
-                stdout=stdout.fileno(),
-                stdin=stdin.fileno(),
-                stderr=stderr.fileno(),
-                close_fds=True,
+                stdout=stdout,
+                stdin=stdin,
+                stderr=stderr,
                 cwd=job.get_working_directory(),
             )
 
@@ -310,7 +368,7 @@ class JobRunner(object):
                                     self._stderr_summary)
             )
 
-        if self.returncode != 0 and job.tries >= job.maxTryCount:
+        if self.returncode_robust != 0 and job.tries >= job.maxTryCount:
             logging.info("Job's %s result: TriesExceededResult", job.id)
             append_result(TriesExceededResult(job.tries))
 
@@ -347,7 +405,8 @@ class JobRunner(object):
         return self._cancelled
 
     @property
-    def returncode(self):
+    # Will not throw
+    def returncode_robust(self):
         if not self._finish_time:
             return None
         return self._process.returncode
