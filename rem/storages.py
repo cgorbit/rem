@@ -11,7 +11,7 @@ import tempfile
 import re
 import shutil
 
-from common import Unpickable, TimedMap, PickableLock, cleanup_directory, BinaryFile
+from common import Unpickable, TimedMap, PickableLock, cleanup_directory, BinaryFile, split_in_groups
 import common as rem_common
 from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor, ETagEvent
 from journal import TagLogger
