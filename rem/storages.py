@@ -136,14 +136,12 @@ class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=st
     def cleanup_fs(self):
         cleanup_directory(self.binDirectory, set(self.files.keys()))
 
-    def _fix_files_on_update_context(self, context):
-        for file in self.files.itervalues():
-            file.FixLinks()
-
-        if self.binDirectory != context.binary_directory:
+    def _move_files(self, new_binary_directory):
+        assert self.binDirectory != new_binary_directory
+        if True:
             badFiles = set()
             for checksum, file in self.files.iteritems():
-                estimated_path = os.path.join(context.binary_directory, checksum)
+                estimated_path = os.path.join(new_binary_directory, checksum)
                 if not os.path.isfile(estimated_path):
                     #if os.path.isfile(file.path):
                     if False:
@@ -160,9 +158,14 @@ class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=st
                     logging.warning("binstorage\tnonexisted file %s cleaning attempt", checksum)
                 logging.warning("can't recover %d files; %d files left in storage", len(badFiles), len(self.files))
 
-    def UpdateContext(self, context, fix_files=True):
-        if fix_files:
-            self._fix_files_on_update_context(context)
+    def UpdateContext(self, context):
+        if self.binDirectory != context.binary_directory:
+            self._move_files(context.binary_directory)
+
+        if context.fix_bin_links_at_startup:
+            for file in self.files.itervalues():
+                file.FixLinks()
+
         self.binDirectory = context.binary_directory
         self.lifeTime = context.binary_lifetime
 

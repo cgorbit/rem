@@ -493,7 +493,7 @@ class Client(object):
     # updates may contains updates of the same tag
     def update(self, updates):
         if not isinstance(updates, list):
-            updates = set(updates)
+            updates = list(updates)
 
         if not updates:
             return READY_ACK_FUTURE

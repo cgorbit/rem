@@ -5,6 +5,9 @@ import bsddb3
 from ConfigParser import ConfigParser
 import cPickle
 from collections import deque
+import tempfile
+import os
+import shutil
 
 from xmlrpc import ServerProxy as XMLRPCServerProxy, XMLRPCMethodNotSupported, SimpleXMLRPCServer
 from common import Unpickable, PickableLock, TimedSet, traced_rpc_method

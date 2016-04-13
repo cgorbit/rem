@@ -200,13 +200,13 @@ class Scheduler(Unpickable(lock=PickableRLock,
         if context.use_memory_profiler:
             self.initProfiler()
 
-    def UpdateContext(self, context=None, fix_bin_files=True):
+    def UpdateContext(self, context=None):
         if context is not None:
             self.context = context
             self.poolSize = context.thread_pool_size
             self.initBackupSystem(context)
             context.registerScheduler(self)
-        self.binStorage.UpdateContext(self.context, fix_files=fix_bin_files)
+        self.binStorage.UpdateContext(self.context)
         self.tagRef.UpdateContext(self.context)
         PacketCustomLogic.UpdateContext(self.context)
         self.connManager.UpdateContext(self.context)
@@ -484,10 +484,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             self.__setstate__(sdict)
 
-            self.UpdateContext(
-                None,
-                fix_bin_files=not(restore_tags_only or not self.context.fix_bin_links_at_startup)
-            )
+            self.UpdateContext(None)
 
             self.tagRef.PreInit()
 

@@ -842,6 +842,7 @@ def main():
         run_server(ctx)
 
     elif opts.mode == "convert-on-disk-tags":
+        ctx.fix_bin_links_at_startup = False
         Scheduler.convert_on_disk_tags_to_cloud(ctx, yt_writer_count=opts.yt_writer_count)
 
     elif opts.mode == "test":
