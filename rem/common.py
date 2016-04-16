@@ -333,12 +333,12 @@ class TimedMap(PriorityQueue):
             obj.add(key, value)
         return obj
 
-    def add(self, obj, value, tm=None):
-        if obj not in self:
-            PriorityQueue.add(self, obj, (tm or time.time(), value))
+    def add(self, key, value, t=None):
+        if key not in self:
+            PriorityQueue.add(self, key, (t or time.time(), value))
 
-    def remove(self, obj):
-        return self.pop(obj)
+    def remove(self, key):
+        return self.pop(key)
 
 
 class PickableStdPriorityQueue(Unpickable(_object=StdPriorityQueue)):

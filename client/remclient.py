@@ -377,7 +377,7 @@ class JobPacketInfo(object):
                 self.proxy.pck_reset(self.pck_id, suspend_packet) # v2
             if files:
                 self.AddFiles(files)
-            if not suspend:
+            if not suspend and suspend_client:
                 self.proxy.pck_resume(self.pck_id)
         else:
             self.proxy.pck_reset(self.pck_id) # v1

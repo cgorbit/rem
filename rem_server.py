@@ -239,14 +239,14 @@ def queue_status(queue_name):
 def queue_list(queue_name, filter, name_regex=None, prefix=None):
     name_regex = name_regex and re.compile(name_regex)
     q = _scheduler.rpc_get_queue(queue_name, create=False)
-    return [pck.id for pck in q.ListPackets(filter=filter, name_regex=name_regex, prefix=prefix)]
+    return [pck.id for pck in q.rpc_list_packets(filter=filter, name_regex=name_regex, prefix=prefix)]
 
 
 @readonly_method
 @traced_rpc_method()
 def queue_list_updated(queue_name, last_modified, filter=None):
     q = _scheduler.rpc_get_queue(queue_name, create=False)
-    return [pck.id for pck in q.ListPackets(last_modified=last_modified, filter=filter)]
+    return [pck.id for pck in q.rpc_list_packets(last_modified=last_modified, filter=filter)]
 
 
 @traced_rpc_method("info")

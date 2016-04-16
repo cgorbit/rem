@@ -191,7 +191,7 @@ class Queue(Unpickable(pending=PackSet.create,
     def GetWorkingPackets(self):
         return set(job.packetRef for job in self.working)
 
-    def FilterPackets(self, filter=None):
+    def _filter_packets(self, filter=None):
         filter = filter or "all"
         pf, parg = {"errored": (list, self.errored), "suspended": (list, self.suspended),
                     "pending": (list, self.pending), "worked": (list, self.worked),
@@ -200,17 +200,18 @@ class Queue(Unpickable(pending=PackSet.create,
         for pck in pf(parg):
             yield pck
 
-    def ListPackets(self, filter=None, name_regex=None, prefix=None, last_modified=None):
-        packets = []
-        for pck in self.FilterPackets(filter):
-            if name_regex and not name_regex.match(pck.name):
-                continue
-            if prefix and not pck.name.startswith(prefix):
-                continue
-            if last_modified and (not pck.History() or pck.History()[-1][1] < last_modified):
-                continue
-            packets.append(pck)
-        return packets
+    def rpc_list_packets(self, filter=None, name_regex=None, prefix=None, last_modified=None):
+        with self.lock:
+            packets = []
+            for pck in self._filter_packets(filter):
+                if name_regex and not name_regex.match(pck.name):
+                    continue
+                if prefix and not pck.name.startswith(prefix):
+                    continue
+                if last_modified and (not pck.History() or pck.History()[-1][1] < last_modified):
+                    continue
+                packets.append(pck)
+            return packets
 
     def Resume(self):
         self.isSuspended = False

@@ -92,9 +92,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
 
     def GetPacket(self, id):
         with self.lock:
-            idx = self.packets.revIndex.get(id, None)
-            if idx is not None:
-                return self.packets.values[idx][1]
+            return self.packets.get(id)[1]
 
     def PickPacket(self, id):
         with self.lock:
@@ -103,7 +101,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
                 return pck[1][1]
 
     def ids(self):
-        return self.packets.revIndex.keys()
+        return self.packets.keys()
 
 
 class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=str)):

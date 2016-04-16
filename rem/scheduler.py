@@ -213,10 +213,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.HasScheduledTask = fork_locking.Condition(self.lock)
         self.schedWatcher.UpdateContext(self.context)
 
-    def OnWaitingStart(self, ref):
-        if isinstance(ref, JobPacket):
-            self.ScheduleTaskD(ref.waitingDeadline, ref.stopWaiting)
-
     def initBackupSystem(self, context):
         self.backupPeriod = context.backup_period
         self.backupDirectory = context.backup_directory
