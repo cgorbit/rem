@@ -258,13 +258,13 @@ class PacketBase(Unpickable(
 
         has_active_jobs = bool(self.active_jobs_cache)
 
-        if .wait_dep_tags:
+        if self.wait_dep_tags:
             return ReprState.SUSPENDED
 
-        elif .has_active_jobs:
-            if .dont_run_new_jobs or self.failed_jobs:
+        elif self.has_active_jobs:
+            if self.dont_run_new_jobs or self.failed_jobs:
                 return ReprState.WORKABLE
-            elif .jobs_to_run:
+            elif self.jobs_to_run:
                 return ReprState.PENDING
             else:
                 return ReprState.WORKABLE
@@ -272,13 +272,13 @@ class PacketBase(Unpickable(
         elif self.failed_jobs:
             raise AssertionError("Unreachable") # reachable only on [not .has_active_jobs]
 
-        elif .dont_run_new_jobs:
+        elif self.dont_run_new_jobs:
             return ReprState.SUSPENDED
 
-        elif .jobs_to_run:
+        elif self.jobs_to_run:
             return ReprState.PENDING
 
-        elif .jobs_to_retry:
+        elif self.jobs_to_retry:
             return ReprState.WAITING
 
         else:
