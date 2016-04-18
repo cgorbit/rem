@@ -199,6 +199,7 @@ class PacketBase(Unpickable(
                            wait_dep_tags=set,
                            bin_links=dict,
                            state=(str, ReprState.ERROR),
+                           dont_run_new_jobs=bool,
                            history=list,
                            notify_emails=list,
                            kill_all_jobs_on_error=(bool, True),
@@ -248,6 +249,11 @@ class PacketBase(Unpickable(
         elif state == ImplState.HISTORIED:
             return ReprState.HISTORIED
 
+        elif state == ImplState.SUCCESSFULL:
+            return ReprState.SUCCESSFULL
+
+        assert state == ImplState.ACTIVE
+
         # XXX PacketFlag.USER_SUSPEND -> means -> .dont_run_new_jobs
         # XXX PacketFlag.RCVR_ERROR   -> means -> ._impl_state == BROKEN
 
@@ -262,7 +268,7 @@ class PacketBase(Unpickable(
         if self.wait_dep_tags:
             return ReprState.SUSPENDED
 
-        elif self.has_active_jobs:
+        elif has_active_jobs:
             if self.dont_run_new_jobs or self.failed_jobs:
                 return ReprState.WORKABLE
             elif self.jobs_to_run:
@@ -271,7 +277,7 @@ class PacketBase(Unpickable(
                 return ReprState.WORKABLE
 
         elif self.failed_jobs:
-            raise AssertionError("Unreachable") # reachable only on [not .has_active_jobs]
+            raise AssertionError("Unreachable") # reachable only on [not has_active_jobs]
 
         elif self.dont_run_new_jobs:
             return ReprState.SUSPENDED
@@ -283,7 +289,7 @@ class PacketBase(Unpickable(
             return ReprState.WAITING
 
         else:
-            raise AssertionError("Unreachable")
+            raise AssertionError("Unreachable: %s" % self)
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
@@ -301,7 +307,8 @@ class PacketBase(Unpickable(
         sdict.pop('active_jobs_cache', None)
 
         sdict['jobs_to_retry'] = {
-            job_id: deadline for job_id, cancel, deadline in sdict['jobs_to_retry'].values()
+            #job_id: deadline for job_id, cancel, deadline in sdict['jobs_to_retry'].values()
+            stop_id: (job_id, None, deadline) for stop_id, (job_id, cancel, deadline) in sdict['jobs_to_retry'].values()
         }
 
         return sdict
@@ -336,9 +343,13 @@ class PacketBase(Unpickable(
                     self.job_done_tag[jid] = tagStorage.AcquireTag(cur_val)
 
     def vivify_jobs_waiting_stoppers(self):
-        jobs_to_retry, self.jobs_to_retry = self.jobs_to_retry, {}
-        for job_id, deadline in jobs_to_retry:
-            self._register_stop_waiting(job_id, deadline)
+        with self.lock:
+            jobs_to_retry, self.jobs_to_retry = self.jobs_to_retry, {}
+            #for job_id, deadline in jobs_to_retry.items():
+                #self._register_stop_waiting(job_id, deadline)
+            for stop_id, (job_id, cancel, deadline) in jobs_to_retry.items():
+                assert cancel is None
+                self._register_stop_waiting(job_id, deadline)
 
     def update_tag_deps(self, tagStorage):
         with self.lock:
@@ -494,7 +505,7 @@ class PacketBase(Unpickable(
             self.failed_jobs.add(job.id)
 
             # Чтобы не вводить в заблуждение GetJobToRun
-            self._update_repr_state()
+            #self._update_repr_state() # XXX assert in _calc_repr_state
 
             if self.kill_all_jobs_on_error:
                 self._kill_jobs_drop_results()
@@ -643,6 +654,9 @@ class PacketBase(Unpickable(
     def _is_SUSPENDED(self): # TODO
         return self._impl_state == ImplState.ACTIVE \
             and self.dont_run_new_jobs and not self.active_jobs_cache
+
+    def is_broken(self):
+        return self._impl_state == ImplState.BROKEN
 
     def rpc_remove(self):
         with self.lock:

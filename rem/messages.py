@@ -34,9 +34,7 @@ class PacketExecutionError(IMessageHelper):
         self.ctx = ctx
 
     def subject(self):
-        from packet import PacketFlag
-
-        reason = "packet recovering error" if self.pck.CheckFlag(PacketFlag.RCVR_ERROR) \
+        reason = "packet recovering error" if self.pck.is_broken() \
             else "packet execution error"
         return "[REM@%(sname)s] Task '%(pname)s': %(reason)s" % {"pname": self.pck.name, "reason": reason,
                                                                  "sname": self.ctx.network_name}

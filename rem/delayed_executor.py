@@ -11,7 +11,7 @@ class DelayedExecutor(object):
         self._queue = PriorityQueue()
         self._next_id = 1
         self._should_stop = False
-        self._loop_thread = ProfiledThread(target=self._the_loop)
+        self._loop_thread = ProfiledThread(target=self._the_loop, name_prefix='DelayedExecutor')
         self._loop_thread.start()
 
     def _cancel(self, id):

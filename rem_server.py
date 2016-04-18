@@ -793,8 +793,13 @@ def run_server(ctx):
         #sched.cleanup_packet_storage_fs)
 
     delayed_executor.start()
-    start_daemon(ctx, sched)[1]()
-    delayed_executor.stop()
+    try:
+        start_daemon(ctx, sched)[1]()
+    finally:
+        try:
+            delayed_executor.stop()
+        except:
+            pass
 
 
 def init_logging(ctx):
