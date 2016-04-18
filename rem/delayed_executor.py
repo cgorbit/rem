@@ -16,7 +16,7 @@ class DelayedExecutor(object):
 
     def _cancel(self, id):
         with self._lock:
-            if id not in self._queue: # because of race with _the_loop
+            if id not in self._queue: # because of user-space-race with _the_loop
                 return
             is_front = self._queue.front()[0] == id
             self._queue.pop_by_key(id)
@@ -77,3 +77,21 @@ class DelayedExecutor(object):
                 logging.exception("Failed to execute %s" % callback)
 
             del callback
+
+
+_instance = None
+
+
+def start():
+    global _instance
+    _instance = DelayedExecutor()
+
+
+def add(callback, deadline=None, timeout=None):
+    global _instance
+    _instance.add(callback, deadline, timeout)
+
+
+def stop():
+    global _instance
+    _instance.stop()

@@ -82,7 +82,7 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck = JobPacket(packet_name, priority, _context, notify_emails,
                     wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
-                    kill_all_jobs_on_error=kill_all_jobs_on_error, isResetable=resetable,
+                    kill_all_jobs_on_error=kill_all_jobs_on_error, is_resetable=resetable,
                     notify_on_reset=notify_on_reset,
                     notify_on_skipped_reset=notify_on_skipped_reset)
     _scheduler.RegisterNewPacket(pck, wait_tags)
@@ -314,11 +314,11 @@ def pck_reset(pck_id, suspend=False, reset_tag=False, reset_message=None):
         raise MakeNonExistedPacketException(pck_id)
 
     if reset_tag:
-        tag = pck.done_indicator
+        tag = pck.done_tag
         if tag:
             tag.Reset(reset_message)
 
-    pck.Reset(suspend=suspend)
+    pck.rpc_reset(suspend=suspend)
 
 
 @traced_rpc_method()
@@ -791,7 +791,9 @@ def run_server(ctx):
     #logged(
         #sched.cleanup_packet_storage_fs)
 
+    delayed_executor.start()
     start_daemon(ctx, sched)[1]()
+    delayed_executor.stop()
 
 
 def init_logging(ctx):

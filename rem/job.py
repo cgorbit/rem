@@ -184,7 +184,7 @@ class Job(Unpickable(err=nullobject,
     def _notify_long_execution(self, working_time):
         self.cached_working_time = working_time
         logging.warning("Packet's '%s' job '%s' execution takes too long time", self.packetRef.name, self.id)
-        self.packetRef.SendJobLongExecutionNotification(self)
+        self.packetRef.send_job_long_execution_notification(self)
 
     @staticmethod
     def start_process(*args, **kwargs):

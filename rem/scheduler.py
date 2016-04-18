@@ -190,6 +190,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
     BackupFilenameMatchRe = re.compile("sched-(\d+).dump$")
     UnsuccessfulBackupFilenameMatchRe = re.compile("sched-\d*.dump.tmp$")
     SerializableFields = ["qRef", "tagRef", "binStorage", "tempStorage", "connManager"]
+    BackupFormatVersion = 2
 
     def __init__(self, context):
         getattr(super(Scheduler, self), "__init__")()
@@ -392,6 +393,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         sdict = {k: getattr(self, k) for k in self.SerializableFields}
         sdict['qRef'] = sdict['qRef'].copy()
+        sdict['format_version'] = self.BackupFormatVersion
 
         p = pickle.Pickler(out, 2)
         p.dump(sdict)
@@ -456,6 +458,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         finally:
             common.ObjectRegistrator_ = FakeObjectRegistrator()
 
+        format_version = sdict.pop('format_version', 1) # TODO Use
+
         sdict = {k: sdict[k] for k in cls.SerializableFields + ['schedWatcher'] if k in sdict}
 
         objects_registrator.LogStats()
@@ -489,7 +493,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             tagStorage.vivify_tags_from_backup(registrator.tags)
 
             for pck in registrator.packets: # ATW each packet exists in register in 2 copies
-                pck.VivifyDoneTagsIfNeed(tagStorage)
+                pck.vivify_done_tags_if_need(tagStorage)
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
@@ -660,7 +664,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         q.AddCallbackListener(self)
 
         for pck in list(q.ListAllPackets()):
-            pck.UpdateTagDependencies(self.tagRef)
+            pck.update_tag_deps(self.tagRef)
             pck.try_recover_after_backup_loading(ctx)
             q.relocatePacket(pck) # j.i.c force?
 
