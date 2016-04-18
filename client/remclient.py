@@ -370,14 +370,14 @@ class JobPacketInfo(object):
     def Restart(self, suspend=False, files=None, reset_tag=False, reset_message=None):
         """рестарт выполнения (перезапустит все job'ы, в том числе выполняющиеся и уже выполненные"""
         if suspend or files or reset_tag:
-            suspend_packet = suspend or files
+            suspend_temporary = suspend or files
             if reset_tag:
                 self.proxy.pck_reset(self.pck_id, suspend_packet, reset_tag, reset_message) # v3
             else:
                 self.proxy.pck_reset(self.pck_id, suspend_packet) # v2
             if files:
                 self.AddFiles(files)
-            if not suspend and suspend_client:
+            if not suspend and suspend_temporary:
                 self.proxy.pck_resume(self.pck_id)
         else:
             self.proxy.pck_reset(self.pck_id) # v1

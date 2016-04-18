@@ -19,15 +19,23 @@ class T05(unittest.TestCase):
         j0 = pck.AddJob("sleep 10")
         j1 = pck.AddJob("echo done", parents=[j0])
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
+
         pckInfo = self.connector.PacketInfo(pck.id)
         self.assertEqual(pckInfo.state, "SUSPENDED")
+
         self.connector.Tag(tagname).Set()
         WaitForExecution(pckInfo, "WORKABLE")
+
         self.connector.Tag(tagname).Unset()
         pckInfo.Suspend()
+        WaitForExecution(pckInfo, "SUSPENDED")
+
         self.connector.Tag(tagname).Set()
+        time.sleep(2)
+
         pckInfo.update()
         self.assertEqual(pckInfo.state, "SUSPENDED")
+
         pckInfo.Delete()
 
     def testWrongStatus(self):

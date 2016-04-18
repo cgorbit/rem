@@ -92,7 +92,9 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
 
     def GetPacket(self, id):
         with self.lock:
-            return self.packets.get(id)[1]
+            descr = self.packets.get(id)
+            if descr:
+                return descr[1]
 
     def PickPacket(self, id):
         with self.lock:

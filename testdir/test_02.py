@@ -202,19 +202,35 @@ class T02(unittest.TestCase):
     def testMovePacket(self):
         pckname = "moving-packet-%d" % self.timestamp
         pck = self.connector.Packet(pckname, self.timestamp)
-        pck.AddJob("sleep 2", tries=1)
+        pck.AddJob("sleep 5", tries=1)
+
         fakePck = self.connector.Packet(pckname + "-fake", self.timestamp)
+
         queue1 = TestingQueue.Get()
         queue2 = LmtTestQueue.Get()
+
         self.connector.Queue(queue1).AddPacket(pck)
         self.connector.Queue(queue2).AddPacket(fakePck)
+
         logging.info('Packet id: %s', pck.id)
+
         pckInfo = self.connector.PacketInfo(pck.id)
+
         pckInfo.Suspend()
+
+        try:
+            pckInfo.MoveToQueue(queue1, queue2)
+        except xmlrpclib.Fault as e:
+            self.assertTrue("Can't move packets with running jobs" in str(e))
+
+        pckInfo.Stop()
+
         pckInfo.MoveToQueue(queue1, queue2)
         pckInfo.MoveToQueue(queue2, queue2)
         pckInfo.MoveToQueue(queue2, queue1)
+
         pckInfo.Resume()
+
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
 
     def testMoveErroredPacket(self):

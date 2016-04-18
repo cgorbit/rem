@@ -458,7 +458,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         finally:
             common.ObjectRegistrator_ = FakeObjectRegistrator()
 
-        format_version = sdict.pop('format_version', 1) # TODO Use
+        format_version = sdict.pop('format_version', 1)
 
         sdict = {k: sdict[k] for k in cls.SerializableFields + ['schedWatcher'] if k in sdict}
 
@@ -466,6 +466,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         # TODO ATW each packet exists in register in 2 copies
         registrator.packets = list(set(registrator.packets))
+
+        cls._convert_backup(format_version, sdict, registrator)
 
         return sdict, registrator
 
@@ -497,7 +499,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             for pck in registrator.packets:
                 pck.vivify_done_tags_if_need(tagStorage)
-                pck.vivify_jobs_waiting_stoppers()
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
@@ -510,7 +511,18 @@ class Scheduler(Unpickable(lock=PickableRLock,
             # No vivifying of tempStorage packets
 
             self.schedWatcher.Clear() # remove tasks from Queue.relocatePacket
-            self.FillSchedWatcher(prevWatcher)
+            #self.FillSchedWatcher(prevWatcher)
+
+    @classmethod
+    def _convert_backup(cls, sdict_version, sdict, registrator):
+        for from_version in range(sdict_version, cls.BackupFormatVersion):
+            getattr(cls, '_convert_backup_to_v%d' % (from_version + 1))(sdict, registrator)
+
+    @classmethod
+    def _convert_backup_to_v2(cls, sdict, registrator):
+        for pck in registrator.packets:
+            pck.convert_to_v2()
+            pck.__class__ = LocalPacket
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):
@@ -571,6 +583,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         )
 
     def FillSchedWatcher(self, prev_watcher=None):
+        assert False
+
         def list_packets_in_queues(state):
             return [
                 pck for q in self.qRef.itervalues()
@@ -612,7 +626,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             return packets
 
-    # TODO
         for pck in produce_packets_to_wait():
             self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
 
@@ -703,6 +716,10 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.schedWatcher.AddTaskT(timeout, fn, *args, **kws)
 
     def Start(self):
+        for q in self.qRef.itervalues():
+            for pck in list(q.ListAllPackets()):
+                pck.vivify_jobs_waiting_stoppers()
+
         self._mailer = Mailer(self.context.mailer_thread_count)
         logging.debug("after_mailer_start")
 
