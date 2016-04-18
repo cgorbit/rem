@@ -47,7 +47,7 @@ class ImplState(object):
     #WAITING_JOBS_CANCELLATION = '_WAITING_JOBS_CANCELLATION' # actual for sandbox task reset
     HISTORIED   = '_HISTORIED'
 
-    allowed {
+    allowed = {
         UNINITIALIZED: [BROKEN, ACTIVE, HISTORIED],
         ACTIVE:        [BROKEN, SUCCESSFULL, ERROR], # + HISTORIED (see _can_change_state)
         SUCCESSFULL:   [BROKEN, ACTIVE, HISTORIED],
@@ -197,7 +197,7 @@ class PacketBase(Unpickable(
                            all_dep_tags=set,
                            wait_dep_tags=set,
                            bin_links=dict,
-                           _repr_state=(str, PacketState.ERROR),
+                           _repr_state=(str, ReprState.ERROR),
                            history=list,
                            notify_emails=list,
                            kill_all_jobs_on_error=(bool, True),
@@ -216,7 +216,7 @@ class PacketBase(Unpickable(
                  notify_on_reset=False, notify_on_skipped_reset=True):
         super(PacketBase, self).__init__()
         self.name = name
-        #self._repr_state = PacketState.NONINITIALIZED
+        #self._repr_state = ReprState.NONINITIALIZED
         #self.history.append((self._repr_state, time.time()))
         self.id = None
         self.directory = None
@@ -696,7 +696,7 @@ class PacketBase(Unpickable(
 # TODO TODO
 # TODO TODO
 # TODO TODO
-        #elif self._impl_state == PacketState.NONINITIALIZED: # XXX FIXME TODO
+        #elif self._impl_state == ReprState.NONINITIALIZED: # XXX FIXME TODO
             #self._recover_noninitialized(ctx) # XXX FIXME TODO
 
         if self.directory:
@@ -955,13 +955,13 @@ class PacketBase(Unpickable(
         wait_time = 0
 
         for ((state, start_time), (_, end_time)) in zip(history, history[1:] + [("", time.time())]):
-            if state in (PacketState.SUSPENDED, PacketState.WAITING):
+            if state in (ReprState.SUSPENDED, ReprState.WAITING):
                 wait_time += end_time - start_time
 
         result_tag = self.done_tag.name if self.done_tag else None
 
         waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
-            if self._repr_state == PacketState.WAITING else None
+            if self._repr_state == ReprState.WAITING else None
 
         all_tags = list(self.all_dep_tags)
 
@@ -988,9 +988,9 @@ class PacketBase(Unpickable(
     # XXX XXX WTF XXX XXX
         # FIXME WHY? no: HISTORIED, NONINITIALIZED, CREATED
         #if self._impl_state not in [ImplState.HISTORIED, ImplState.UNINITIALIZED]:
-        if self._repr_state in (PacketState.ERROR, PacketState.SUSPENDED,
-                          PacketState.WORKABLE, PacketState.PENDING,
-                          PacketState.SUCCESSFULL, PacketState.WAITING):
+        if self._repr_state in (ReprState.ERROR, ReprState.SUSPENDED,
+                          ReprState.WORKABLE, ReprState.PENDING,
+                          ReprState.SUCCESSFULL, ReprState.WAITING):
             status["jobs"] = []
             for jid, job in self.jobs.iteritems():
                 result = job.last_result()
@@ -1006,7 +1006,7 @@ class PacketBase(Unpickable(
 
                 wait_jobs = []
                 #if self.active_jobs_cache:
-                if self._repr_state == PacketState.WORKABLE:
+                if self._repr_state == ReprState.WORKABLE:
                     wait_jobs = map(str, self.wait_job_deps.get(jid, []))
 
                 parents = map(str, job.parents or [])
