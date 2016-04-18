@@ -428,7 +428,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         import packet
         import cPickle as pickle
 
-        class PacketsRegistrator(object):
+        class Registrator(object):
             def __init__(self):
                 self.packets = deque()
                 self.tags = deque()
@@ -442,11 +442,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
             def LogStats(self):
                 pass
 
-        packets_registrator = PacketsRegistrator()
+        registrator = Registrator()
 
         common.ObjectRegistrator_ = objects_registrator \
             = common.ObjectRegistratorsChain([
-                packets_registrator,
+                registrator,
                 additional_objects_registrator
             ])
 
@@ -464,7 +464,10 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         objects_registrator.LogStats()
 
-        return sdict, packets_registrator
+        # TODO ATW each packet exists in register in 2 copies
+        registrator.packets = list(set(registrator.packets))
+
+        return sdict, registrator
 
     @classmethod
     def DeserializeFile(cls, filename, registrator=FakeObjectRegistrator()):
@@ -492,8 +495,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             tagStorage.vivify_tags_from_backup(registrator.tags)
 
-            for pck in registrator.packets: # ATW each packet exists in register in 2 copies
+            for pck in registrator.packets:
                 pck.vivify_done_tags_if_need(tagStorage)
+                pck.vivify_jobs_waiting_stoppers()
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
@@ -608,6 +612,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             return packets
 
+    # TODO
         for pck in produce_packets_to_wait():
             self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
 

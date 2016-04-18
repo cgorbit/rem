@@ -30,6 +30,7 @@ from rem.context import Context
 import rem.subprocsrv as subprocsrv
 import rem.subprocsrv_fallback
 import rem.job
+import rem.delayed_executor as delayed_executor
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):

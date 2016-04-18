@@ -171,6 +171,17 @@ def always(ctor):
         return ctor()
     return always
 
+#                                     ---jobs_to_retry--
+#                                     |                 \
+#                                     |                  |
+#                                     |                  |
+# jobs_graph -> wait_job_deps -> jobs_to_run -> active_jobs_cache
+#                     ^                                  |
+#                     |                                  |- failed_jobs
+#                     |                                  |
+#                     |                                  `- succeed_jobs
+#                     |                                          |
+#                     \-----------------------------------------/
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,
@@ -180,7 +191,7 @@ class PacketBase(Unpickable(
                            succeed_jobs=set,
                            failed_jobs=set,
                            jobs_to_run=set,
-                           jobs_to_retry=set,
+                           jobs_to_retry=dict,
                            _active_jobs=always(_ActiveJobs),
                            job_done_tag=dict,
                            all_dep_tags=set,
@@ -259,7 +270,7 @@ class PacketBase(Unpickable(
                 return ReprState.WORKABLE
 
         elif self.failed_jobs:
-            raise AssertionError("Unreachable")
+            raise AssertionError("Unreachable") # reachable only on [not .has_active_jobs]
 
         elif .dont_run_new_jobs:
             return ReprState.SUSPENDED
@@ -288,7 +299,9 @@ class PacketBase(Unpickable(
         sdict.pop('_active_jobs', None)
         sdict.pop('active_jobs_cache', None)
 
-        # TODO Remove callback from .jobs_to_retry
+        sdict['jobs_to_retry'] = {
+            job_id: deadline for job_id, cancel, deadline in sdict['jobs_to_retry'].values()
+        }
 
         return sdict
 
@@ -320,6 +333,11 @@ class PacketBase(Unpickable(
             for jid, cur_val in self.job_done_tag.iteritems():
                 if isinstance(cur_val, str):
                     self.job_done_tag[jid] = tagStorage.AcquireTag(cur_val)
+
+    def vivify_jobs_waiting_stoppers(self):
+        jobs_to_retry, self.jobs_to_retry = self.jobs_to_retry, {}
+        for job_id, deadline in jobs_to_retry:
+            self._register_stop_waiting(job_id, deadline)
 
     def update_tag_deps(self, tagStorage):
         with self.lock:
@@ -688,7 +706,11 @@ class PacketBase(Unpickable(
             if os.path.isdir(directory):
                 shutil.rmtree(directory, onerror=None)
 
+    # FIXME
+        self.failed_jobs.clear() # TODO Better
+        self.active_jobs_cache.clear() # TODO Better
         self._init_job_deps_graph()
+
         self._update_repr_state()
 
     def try_recover_after_backup_loading(self, ctx):
@@ -866,6 +888,8 @@ class PacketBase(Unpickable(
         if not self.wait_job_deps[job.id]:
             self.jobs_to_run.add(job.id)
 
+    # Modify:   wait_job_deps, jobs_to_run
+    # Consider: jobs_to_retry, succeed_jobs
     def _init_job_deps_graph(self):
         def visit(startJID):
             st = [[startJID, 0]]
@@ -889,7 +913,8 @@ class PacketBase(Unpickable(
                     finished.add(jid)
 
         with self.lock:
-            assert not self._active_jobs, "_init_job_deps_graph called when _active_jobs is not empty"
+            assert not self._active_jobs and not self.active_jobs_cache, "Has active jobs"
+            assert not self.failed_jobs, "Has failed jobs"
 
             discovered = set()
             finished = set()
@@ -900,7 +925,12 @@ class PacketBase(Unpickable(
                 if jid not in discovered and jid not in self.succeed_jobs:
                     visit(jid)
 
-            self.jobs_to_run = set(jid for jid in discovered if not self.wait_job_deps[jid])
+            jobs_to_retry = set(descr[0] for descr in self.jobs_to_retry.values())
+
+            self.jobs_to_run = set(
+                jid for jid in discovered
+                    if not self.wait_job_deps[jid] and jid not in jobs_to_retry
+            )
 
     # FIXME Diese Funktion ist Wunderwaffe
     def _resume(self, resume_workable=False, silent_noop=False):
@@ -1027,6 +1057,8 @@ class PacketBase(Unpickable(
 
                 if self._impl_state == ImplState.ACTIVE:
                     # Repeat legacy bullshit behaviour # FIXME DONT DO THIS ANYMORE?
+                    self.jobs_to_run.update(self.failed_jobs)
+                    self.failed_jobs.clear()
                     for job in self.jobs.values():
                         job.tries = 0
 
@@ -1045,17 +1077,28 @@ class PacketBase(Unpickable(
         except:
             logging.exception('Close stream error')
 
+    # jobs
+    # jobs_graph        = edges
+    # wait_job_deps     = waitJobs
+    # jobs_to_run       = leafs
+    # active_jobs_cache = as_in_queue_working
+    # succeed_jobs      = done
+    # + jobs_to_retry
+    # + failed_jobs
+    #
     def _reset_jobs(self):
         self._kill_jobs_drop_results()
+        assert not self.active_jobs_cache, "Has active jobs"
 
-        self.succeed_jobs.clear()
         for job in self.jobs.values():
             job.results = []
             job.tries = 0
 
-        self._init_job_deps_graph()
+        self.succeed_jobs.clear()
+        self.failed_jobs.clear()
+        self.jobs_to_retry.clear()
 
-        ... # TODO Other self.*jobs*
+        self._init_job_deps_graph()
 
         self._clean_state = True # FIXME
 
@@ -1077,14 +1120,22 @@ class PacketBase(Unpickable(
         if not self._clean_state:
             self._reset_jobs()
 
-        try:
-            self._create_place_if_need(self._get_scheduler_ctx())
-        except ...:
-            logging...
+        if not self._try_create_place_if_need():
             self._change_state(ImplState.BROKEN)
             return
 
         self._change_state(ImplState.ACTIVE)
+
+    def _try_create_place_if_need(self):
+        try:
+            self._create_place_if_need(self._get_scheduler_ctx())
+            return True
+        except Exception: # TODO
+            try:
+                logging.exception("Failed to create place")
+            except:
+                pass
+            return False
 
     def rpc_reset(self, suspend=False):
         with self.lock:
