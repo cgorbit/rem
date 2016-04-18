@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import with_statement
 import tempfile
 import os
@@ -197,7 +198,7 @@ class PacketBase(Unpickable(
                            all_dep_tags=set,
                            wait_dep_tags=set,
                            bin_links=dict,
-                           _repr_state=(str, ReprState.ERROR),
+                           state=(str, ReprState.ERROR),
                            history=list,
                            notify_emails=list,
                            kill_all_jobs_on_error=(bool, True),
@@ -216,8 +217,8 @@ class PacketBase(Unpickable(
                  notify_on_reset=False, notify_on_skipped_reset=True):
         super(PacketBase, self).__init__()
         self.name = name
-        #self._repr_state = ReprState.NONINITIALIZED
-        #self.history.append((self._repr_state, time.time()))
+        #self.state = ReprState.NONINITIALIZED
+        #self.history.append((self.state, time.time()))
         self.id = None
         self.directory = None
         self.streams = {} # TODO Remove this bullshit
@@ -248,7 +249,7 @@ class PacketBase(Unpickable(
             return ReprState.HISTORIED
 
         # XXX PacketFlag.USER_SUSPEND -> means -> .dont_run_new_jobs
-        # XXX PacketFlag.RCVR_ERROR   -> means -> .state == BROKEN
+        # XXX PacketFlag.RCVR_ERROR   -> means -> ._impl_state == BROKEN
 
         #type(.wait_dep_tags) == set # XXX FIXME We can push() Unset-tags on _reset()
         #type(.jobs_to_run) == set # contains non-WAITING jobs even on .dont_run_new_jobs
@@ -306,12 +307,12 @@ class PacketBase(Unpickable(
         return sdict
 
     def _create_place_if_need(self, context):
-        #logging.info("packet init: %r %s", self, self._repr_state) # FIXME
+        #logging.info("packet init: %r %s", self, self.state) # FIXME
         if self.directory is None:
             self._create_place(context)
 
     def __repr__(self):
-        return "<%s(id: %s; name: %s; state: %s)>" % (type(self).__name__, self.id, self.name, self._repr_state)
+        return "<%s(id: %s; name: %s; state: %s)>" % (type(self).__name__, self.id, self.name, self.state)
 
     def _set_waiting_tags(self, wait_tags):
         for tag in wait_tags:
@@ -408,7 +409,7 @@ class PacketBase(Unpickable(
 # TODO XXX TODO sandbox, active_jobs_cache instead of _active_jobs
 # TODO XXX TODO
             if self._has_active_jobs(): # FIXME Like an assert
-                logging.error("_release_place of %s in %s with active jobs" % (self.id, self._repr_state))
+                logging.error("_release_place of %s in %s with active jobs" % (self.id, self.state))
             self._kill_jobs_drop_results() # TODO INDEFINITE_TIME
 
             self._release_links()
@@ -528,7 +529,7 @@ class PacketBase(Unpickable(
         with self.lock:
             descr = self.jobs_to_retry.pop(stop_id, None)
 
-            if descrs None: # cancelled
+            if descr is None: # cancelled
                 return
 
             job_id = descr[0]
@@ -628,10 +629,10 @@ class PacketBase(Unpickable(
     def _update_repr_state(self):
         new = self._calc_repr_state()
 
-        if new == self._repr_state:
+        if new == self.state:
             return
 
-        self._repr_state = new
+        self.state = new
         self.history.append((new, time.time()))
         logging.debug("packet %s\tnew state %r", self.name, new)
 
@@ -649,7 +650,7 @@ class PacketBase(Unpickable(
             if self._impl_state == new_state:
                 return
             if not self._can_change_state(new_state):
-                raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
+                raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self.state))
             self._change_state(new_state)
 
     def RemoveAsOld(self):
@@ -826,7 +827,7 @@ class PacketBase(Unpickable(
 
     def _kill_jobs(self):
         if self._can_run_jobs_right_now():
-            logging.error("_kill_jobs on %s in %s" % (self.id, self._repr_state)) # TODO better message
+            logging.error("_kill_jobs on %s in %s" % (self.id, self.state)) # TODO better message
 
         active = self._active_jobs
 
@@ -961,12 +962,12 @@ class PacketBase(Unpickable(
         result_tag = self.done_tag.name if self.done_tag else None
 
         waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
-            if self._repr_state == ReprState.WAITING else None
+            if self.state == ReprState.WAITING else None
 
         all_tags = list(self.all_dep_tags)
 
         status = dict(name=self.name,
-                      state=self._repr_state,
+                      state=self.state,
                       wait=list(self.wait_dep_tags),
                       all_tags=all_tags,
                       result_tag=result_tag,
@@ -988,7 +989,7 @@ class PacketBase(Unpickable(
     # XXX XXX WTF XXX XXX
         # FIXME WHY? no: HISTORIED, NONINITIALIZED, CREATED
         #if self._impl_state not in [ImplState.HISTORIED, ImplState.UNINITIALIZED]:
-        if self._repr_state in (ReprState.ERROR, ReprState.SUSPENDED,
+        if self.state in (ReprState.ERROR, ReprState.SUSPENDED,
                           ReprState.WORKABLE, ReprState.PENDING,
                           ReprState.SUCCESSFULL, ReprState.WAITING):
             status["jobs"] = []
@@ -1006,7 +1007,7 @@ class PacketBase(Unpickable(
 
                 wait_jobs = []
                 #if self.active_jobs_cache:
-                if self._repr_state == ReprState.WORKABLE:
+                if self.state == ReprState.WORKABLE:
                     wait_jobs = map(str, self.wait_job_deps.get(jid, []))
 
                 parents = map(str, job.parents or [])
@@ -1221,7 +1222,7 @@ class PacketBase(Unpickable(
 
 
 class LocalPacket(PacketBase):
-    INCORRECT = -1
+    INCORRECT = object()
 
     def _has_active_jobs(self):
         return bool(self._active_jobs)

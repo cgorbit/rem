@@ -4,7 +4,7 @@ import time
 
 from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
 from callbacks import CallbackHolder, ICallbackAcceptor
-from packet import JobPacket, PacketCustomLogic, PacketState
+from packet import LocalPacket, PacketCustomLogic, ReprState as PacketState
 from rem_logging import logger as logging
 
 
@@ -66,10 +66,8 @@ class Queue(Unpickable(pending=PackSet.create,
             self.FireEvent("task_pending")
 
     def OnChange(self, ref):
-        if isinstance(ref, JobPacket):
+        if isinstance(ref, LocalPacket):
             self.relocatePacket(ref)
-            if ref.state == PacketState.WAITING:
-                self.FireEvent("waiting_start", ref)
 
     def UpdateContext(self, context):
         self.successForgetTm = context.success_lifetime
@@ -109,23 +107,6 @@ class Queue(Unpickable(pending=PackSet.create,
                 ret = queue
         return ret
 
-    def movePacketOld(self, pck, dest_queue):
-        src_queue = None
-        for qname in self.VIEW_BY_ORDER:
-            queue = getattr(self, qname, {})
-            if pck in queue:
-                if src_queue is not None:
-                    logging.warning("packet %r is in several queues", pck)
-                src_queue = queue
-        if src_queue != dest_queue:
-            with self.lock:
-                if src_queue is not None:
-                    src_queue.remove(pck)
-                if dest_queue is not None:
-                    dest_queue.add(pck)
-            if pck.state == PacketState.PENDING:
-                self.FireEvent("task_pending")
-
     def movePacket(self, pck, dst_queue):
         with self.lock:
             src_queue = self._find_packet_queue(pck)
@@ -141,12 +122,6 @@ class Queue(Unpickable(pending=PackSet.create,
 
         if pck.state == PacketState.PENDING:
             self.FireEvent("task_pending")
-
-    #def OnPacketReinitRequest(self, code):
-        #self.FireEvent('packet_reinit_request', code)
-
-    #def OnPendingPacket(self, ref):
-        #self.FireEvent("task_pending")
 
     def IsAlive(self):
         return not self.isSuspended
@@ -180,7 +155,7 @@ class Queue(Unpickable(pending=PackSet.create,
             # .GetJobToRun not under lock to prevent deadlock
             job = pck.GetJobToRun()
 
-            if job == JobPacket.INCORRECT:
+            if job is LocalPacket.INCORRECT:
                 continue
 
             return job

@@ -15,7 +15,7 @@ from common import Unpickable, TimedMap, PickableLock, cleanup_directory, Binary
 import common as rem_common
 from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor, ETagEvent
 from journal import TagLogger
-from packet import PacketState, JobPacket
+from packet import ReprState as PacketState, PacketBase
 from Queue import Queue
 import fork_locking
 from future import Promise, READY_FUTURE, CheckAllFuturesSucceed
@@ -1176,7 +1176,7 @@ class PacketNamesStorage(ICallbackAcceptor):
                 self.names.remove(pck_name)
 
     def OnChange(self, packet_ref):
-        if isinstance(packet_ref, JobPacket) and packet_ref.state == PacketState.HISTORIED:
+        if isinstance(packet_ref, PacketBase) and packet_ref.state == PacketState.HISTORIED:
             self.Delete(packet_ref.name)
 
     def OnJobDone(self, job_ref):

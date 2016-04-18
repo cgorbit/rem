@@ -18,7 +18,7 @@ from job import FuncJob, FuncRunner
 from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject
 from rem import PacketCustomLogic
 from connmanager import ConnectionManager
-from packet import JobPacket, PacketState, PacketFlag
+from packet import LocalPacket, ReprState as PacketState
 from queue import Queue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
@@ -339,7 +339,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             os.makedirs(self.backupDirectory)
 
         self.forgetOldItems()
-        gc.collect() # for JobPacket -> Job -> JobPacket cyclic references
+        gc.collect() # for Packet -> Job -> Packet cyclic references
 
         start_time = time.time()
 
@@ -434,7 +434,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 self.tags = deque()
 
             def register(self, obj, state):
-                if isinstance(obj, packet.JobPacket):
+                if isinstance(obj, packet.PacketBase):
                     self.packets.append(obj)
                 elif isinstance(obj, TagBase):
                     self.tags.append(obj)
@@ -599,7 +599,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             prev_deadlines = {
                 task.object.id: deadline or now
-                    for deadline, task in list_schedwatcher_tasks(JobPacket, 'stopWaiting')
+                    for deadline, task in list_schedwatcher_tasks(LocalPacket, 'stopWaiting')
             }
 
             if prev_watcher:

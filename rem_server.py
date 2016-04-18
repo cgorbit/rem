@@ -17,7 +17,7 @@ import argparse
 
 from rem import constants, osspec
 from rem import traced_rpc_method
-from rem import CheckEmailAddress, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
+from rem import CheckEmailAddress, LocalPacket, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
 from rem import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
@@ -81,7 +81,7 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
         for email in notify_emails:
             rpc_assert(CheckEmailAddress(email), "incorrect e-mail: " + email)
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
-    pck = JobPacket(packet_name, priority, _context, notify_emails,
+    pck = LocalPacket(packet_name, priority, _context, notify_emails,
                     wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
                     kill_all_jobs_on_error=kill_all_jobs_on_error, is_resetable=resetable,
                     notify_on_reset=notify_on_reset,
