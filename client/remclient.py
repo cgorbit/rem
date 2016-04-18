@@ -372,9 +372,9 @@ class JobPacketInfo(object):
         if suspend or files or reset_tag:
             suspend_temporary = suspend or files
             if reset_tag:
-                self.proxy.pck_reset(self.pck_id, suspend_packet, reset_tag, reset_message) # v3
+                self.proxy.pck_reset(self.pck_id, suspend_temporary, reset_tag, reset_message) # v3
             else:
-                self.proxy.pck_reset(self.pck_id, suspend_packet) # v2
+                self.proxy.pck_reset(self.pck_id, suspend_temporary) # v2
             if files:
                 self.AddFiles(files)
             if not suspend and suspend_temporary:
