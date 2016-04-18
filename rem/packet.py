@@ -305,7 +305,8 @@ class PacketBase(Unpickable(
 
         sdict['jobs_to_retry'] = {
             #job_id: deadline for job_id, cancel, deadline in sdict['jobs_to_retry'].values()
-            stop_id: (job_id, None, deadline) for stop_id, (job_id, cancel, deadline) in sdict['jobs_to_retry'].items()
+            stop_id: (job_id, None, deadline)
+                for stop_id, (job_id, cancel, deadline) in sdict['jobs_to_retry'].items()
         }
 
         return sdict
@@ -1246,7 +1247,6 @@ class LocalPacket(PacketBase):
         return bool(self._active_jobs)
 
     def _can_run_jobs_right_now(self):
-        # XXX TODO XXX Too complicated
         return self._impl_state == ImplState.ACTIVE and self.jobs_to_run \
                     and not (self.dont_run_new_jobs or self.failed_jobs)
 
