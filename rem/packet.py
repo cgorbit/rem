@@ -41,6 +41,7 @@ class ReprState(object):
 
 class ImplState(object):
     UNINITIALIZED = '_UNINITIALIZED' # jobs, files and queue not set
+    WAIT_TAGS   = '_WAIT_TAGS'
     ACTIVE      = '_ACTIVE'
     SUCCESSFULL = '_SUCCESSFULL'
     ERROR       = '_ERROR'
@@ -49,10 +50,11 @@ class ImplState(object):
     HISTORIED   = '_HISTORIED'
 
     allowed = {
-        UNINITIALIZED: [BROKEN, ACTIVE, HISTORIED],
-        ACTIVE:        [BROKEN, SUCCESSFULL, ERROR], # + HISTORIED (see _can_change_state)
-        SUCCESSFULL:   [BROKEN, ACTIVE, HISTORIED],
-        ERROR:         [BROKEN, ACTIVE, HISTORIED],
+        UNINITIALIZED: [BROKEN, WAIT_TAGS, ACTIVE, HISTORIED],
+        WAIT_TAGS:     [BROKEN, ACTIVE, HISTORIED], # + SUCCESSFULL
+        ACTIVE:        [BROKEN, WAIT_TAGS, SUCCESSFULL, ERROR], # + HISTORIED (see _can_change_state)
+        SUCCESSFULL:   [BROKEN, ACTIVE, HISTORIED, WAIT_TAGS],
+        ERROR:         [BROKEN, ACTIVE, HISTORIED, WAIT_TAGS],
         BROKEN:        [HISTORIED],
         HISTORIED:     [],
     }
@@ -182,17 +184,21 @@ def always(ctor):
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,
-                           jobs=dict,
-                           jobs_graph=dict,
-                           wait_job_deps=dict,
-                           succeed_jobs=set,
-                           failed_jobs=set,
-                           jobs_to_run=set,
-                           jobs_to_retry=dict,
-                           _active_jobs=always(_ActiveJobs),
-                           job_done_tag=dict,
+
                            all_dep_tags=set,
                            wait_dep_tags=set,
+
+                           jobs=dict,
+                           jobs_graph=dict,
+                           job_done_tag=dict,
+
+                                wait_job_deps=dict,
+                                succeed_jobs=set,
+                                failed_jobs=set,
+                                jobs_to_run=set,
+                                jobs_to_retry=dict,
+                                _active_jobs=always(_ActiveJobs),
+
                            bin_links=dict,
                            state=(str, ReprState.ERROR),
                            _impl_state=(str, ImplState.BROKEN),
@@ -249,20 +255,18 @@ class PacketBase(Unpickable(
         elif state == ImplState.SUCCESSFULL:
             return ReprState.SUCCESSFULL
 
+        elif state == ImplState.WAIT_TAGS:
+            return ReprState.SUSPENDED
+
         assert state == ImplState.ACTIVE
 
         # XXX PacketFlag.USER_SUSPEND -> means -> .dont_run_new_jobs
         # XXX PacketFlag.RCVR_ERROR   -> means -> ._impl_state == BROKEN
 
-        #type(.wait_dep_tags) == set # XXX FIXME We can push() Unset-tags on _reset()
-        #type(.jobs_to_run) == set # contains non-WAITING jobs even on .dont_run_new_jobs
-        #type(.jobs_to_retry) == dict
-        #type(.dont_run_new_jobs) == bool
-        #type(.failed_jobs) == set # kill_all_jobs_on_error == False
-
         has_active_jobs = bool(self.active_jobs_cache)
 
-        if self.wait_dep_tags:
+        if False:
+        #if self.wait_dep_tags:
             return ReprState.SUSPENDED
 
         elif has_active_jobs:
@@ -332,10 +336,10 @@ class PacketBase(Unpickable(
             self.wait_dep_tags.remove(tagname)
 
             if not self.wait_dep_tags:
-               # TODO NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL
-               if self._impl_state == ImplState.ACTIVE and not self.jobs:
-                   self._change_state(ImplState.SUCCESSFULL)
-               self._update_repr_state()
+                if self._impl_state == ImplState.WAIT_TAGS:
+                    self._activate()
+                else:
+                    self._update_repr_state()
 
     def vivify_done_tags_if_need(self, tagStorage):
         with self.lock:
@@ -532,13 +536,12 @@ class PacketBase(Unpickable(
         self.jobs_to_retry[stop_id] = (job_id, cancel, deadline)
 
     def _cancel_all_wait_stoppers(self):
-        with self.lock:
-            for job_id, cancel, deadline in self.jobs_to_retry.values():
-                if cancel:
-                    cancel()
-                self.jobs_to_run.add(job_id)
+        for job_id, cancel, deadline in self.jobs_to_retry.values():
+            if cancel:
+                cancel()
+            self.jobs_to_run.add(job_id)
 
-            self.jobs_to_retry.clear()
+        self.jobs_to_retry.clear()
 
     def _stop_waiting(self, stop_id):
         with self.lock:
@@ -608,13 +611,41 @@ class PacketBase(Unpickable(
             self._create_output(job.id, "err")
         )
 
+    #def _is_SUSPENDED(self): # TODO
+        #return self._impl_state == ImplState.WAIT_TAGS \
+               #or self._impl_state == ImplState.ACTIVE \
+                  #and self.dont_run_new_jobs and not self.active_jobs_cache
+
     def _can_change_state(self, dst):
         src = self._impl_state
 
         if src == ImplState.ACTIVE and dst == ImplState.HISTORIED:
-            return self._is_SUSPENDED()
+            return self.dont_run_new_jobs and not self.active_jobs_cache
+
+        elif src == ImplState.UNINITIALIZED and dst == ImplState.SUCCESSFULL:
+            return not self.jobs and not self.wait_dep_tags
+
+        elif src == ImplState.WAIT_TAGS and dst == ImplState.SUCCESSFULL:
+            return not self.jobs
 
         return dst in ImplState.allowed[src]
+
+    def _almost_activate(self):
+        if self.wait_dep_tags:
+            self._change_state(ImplState.WAIT_TAGS)
+        else:
+            self._activate()
+
+    def _activate(self):
+        assert not self.wait_dep_tags
+        assert self._impl_state != ImplState.ACTIVE
+
+        if not self.jobs: # FIXME and not self.dont_run_new_jobs:
+            state = ImplState.SUCCESSFULL
+        else:
+            state = ImplState.ACTIVE
+
+        self._change_state(state)
 
     def _change_state(self, state):
         with self.lock:
@@ -624,10 +655,6 @@ class PacketBase(Unpickable(
 
             assert self._can_change_state(state), \
                 "packet %s\tincorrect state change request %r => %r" % (self.name, self._impl_state, state)
-
-            # TODO NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL
-            if state == ImplState.ACTIVE and not self.jobs and not self.wait_dep_tags:
-                state = ImplState.SUCCESSFULL
 
             self._impl_state = state
             self._update_repr_state()
@@ -655,10 +682,6 @@ class PacketBase(Unpickable(
         # TODO logging.debug("packet %s\twaiting for %s sec", self.name, delay)
 
         self.FireEvent("change") # queue.relocatePacket
-
-    def _is_SUSPENDED(self): # TODO
-        return self._impl_state == ImplState.ACTIVE \
-            and self.dont_run_new_jobs and not self.active_jobs_cache
 
     def is_broken(self):
         return self._impl_state == ImplState.BROKEN
@@ -1081,7 +1104,7 @@ class PacketBase(Unpickable(
                     for job in self.jobs.values():
                         job.tries = 0
 
-                    # TODO NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL
+                    # FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
                     self._update_repr_state()
 
     def _close_streams(self):
@@ -1109,6 +1132,8 @@ class PacketBase(Unpickable(
     def _reset_jobs(self):
         self._kill_jobs_drop_results()
         assert not self.active_jobs_cache, "Has active jobs"
+
+        self._cancel_all_wait_stoppers()
 
         for job in self.jobs.values():
             job.results = []
@@ -1144,7 +1169,7 @@ class PacketBase(Unpickable(
             self._change_state(ImplState.BROKEN)
             return
 
-        self._change_state(ImplState.ACTIVE)
+        self._almost_activate()
 
     def _try_create_place_if_need(self):
         try:
@@ -1237,7 +1262,7 @@ class PacketBase(Unpickable(
         with self.lock:
             assert self._impl_state == ImplState.UNINITIALIZED
             self._move_to_queue(None, queue)
-            self._change_state(ImplState.ACTIVE)
+            self._almost_activate()
 
 
 class LocalPacket(PacketBase):
@@ -1316,7 +1341,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         ReprState.NONINITIALIZED:   ImplState.ACTIVE,
         ReprState.WORKABLE:         ImplState.ACTIVE,
         ReprState.PENDING:          ImplState.ACTIVE,
-        ReprState.SUSPENDED:        ImplState.ACTIVE,
+        #ReprState.SUSPENDED:
         ReprState.WAITING:          ImplState.ACTIVE,
         ReprState.ERROR:            ImplState.ERROR,
         ReprState.SUCCESSFULL:      ImplState.SUCCESSFULL,
@@ -1355,7 +1380,10 @@ class JobPacket(Unpickable(lock=PickableRLock,
         has_recovery_error = bool(self.flags & self.PacketFlag.RCVR_ERROR)
         pckd.pop('flags')
 
-        self._impl_state = self.StateMap[self.state]
+        if self.state == ReprState.SUSPENDED:
+            self._impl_state = ImplState.WAIT_TAGS if self.wait_dep_tags else ImplState.ACTIVE
+        else:
+            self._impl_state = self.StateMap[self.state]
 
         if self._impl_state == ImplState.ERROR and has_recovery_error:
             self._impl_state = ImplState.BROKEN
