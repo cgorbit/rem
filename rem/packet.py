@@ -91,7 +91,7 @@ def always(ctor):
         return ctor()
     return always
 
-class _JobGraphOps(object):
+class _LocalPacketJobGraphOps(object):
     def __init__(self, pck):
         self.pck = pck
 
@@ -165,12 +165,7 @@ class PacketBase(Unpickable(
 
         self._set_waiting_tags(wait_tags)
 
-        self._jobs_executor = job_graph.JobGraphExecutor(
-            _JobGraphOps(self), # TODO Cyclic reference
-            self.id,
-            self.directory,
-            kill_all_jobs_on_error,
-        )
+        self._jobs_executor = self._create_job_graph_executor(kill_all_jobs_on_error)
 
         self._impl_state = ImplState.UNINITIALIZED
         self._update_repr_state()
@@ -452,7 +447,7 @@ class PacketBase(Unpickable(
 
         # TODO logging.debug("packet %s\twaiting for %s sec", self.name, delay)
 
-        self.FireEvent("change") # queue.relocatePacket
+        self._on_repr_state_change()
 
     def is_broken(self):
         return self._impl_state == ImplState.BROKEN
@@ -847,8 +842,19 @@ class PacketBase(Unpickable(
 class LocalPacket(PacketBase):
     INCORRECT = object()
 
-    def _has_active_jobs(self):
-        return bool(self._active_jobs)
+    def _create_job_graph_executor(self, kill_all_jobs_on_error):
+        return job_graph.JobGraphExecutor(
+            _LocalPacketJobGraphOps(self), # TODO Cyclic reference
+            self.id,
+            self.directory,
+            kill_all_jobs_on_error,
+        )
+
+    def _on_repr_state_change(self):
+        self.FireEvent("change") # queue.relocatePacket
+
+    #def _has_active_jobs(self):
+        #return bool(self._active_jobs)
 
     def _can_run_jobs_right_now(self):
         return self._impl_state == ImplState.ACTIVE \
@@ -866,7 +872,11 @@ class LocalPacket(PacketBase):
 
 
 class SandboxPacket(PacketBase):
-    pass
+    def _create_job_graph_executor(self, kill_all_jobs_on_error):
+        raise NotImplementedError()
+
+    def _on_repr_state_change(self):
+        pass
 
 
 # For loading legacy backups
