@@ -152,8 +152,8 @@ class Queue(Unpickable(pending=PackSet.create,
 
                 pck, prior = self.pending.peak()
 
-            # .GetJobToRun not under lock to prevent deadlock
-            job = pck.GetJobToRun()
+            # .get_job_to_run not under lock to prevent deadlock
+            job = pck.get_job_to_run()
 
             if job is LocalPacket.INCORRECT:
                 continue

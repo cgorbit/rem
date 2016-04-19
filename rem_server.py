@@ -101,8 +101,8 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
     if pck is not None:
         if isinstance(shell, unicode):
             shell = shell.encode('utf-8')
-        parents = [pck.jobs[int(jid)] for jid in parents]
-        pipe_parents = [pck.jobs[int(jid)] for jid in pipe_parents]
+        parents = map(int, parents)
+        pipe_parents = map(int, pipe_parents)
         job = pck.rpc_add_job(shell, parents, pipe_parents,
                               set_tag and _scheduler.tagRef.AcquireTag(set_tag),
                               tries, max_err_len, retry_delay, pipe_fail,
