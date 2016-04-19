@@ -55,7 +55,7 @@ class Packet(object):
         json.dump(self.__get_sbx_state__(), out, indent=3)
 
     def deserialize(self, in_, *args, **kwargs):
-        self.__set_sbx_state__(json.loads(in_), *args, **kwargs)
+        self.__set_sbx_state__(json.load(in_), *args, **kwargs)
 
 
 class _ExecutorOps(object):

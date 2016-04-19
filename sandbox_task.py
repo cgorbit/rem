@@ -88,7 +88,11 @@ if __name__ == '__main__':
     from cStringIO import StringIO
     out = StringIO()
     sbx_pck.serialize(out)
-    print out.getvalue()
+    serialized = out.getvalue()
+
+    print serialized
+
+    sbx_pck.deserialize(StringIO(serialized))
 
     #delayed_executor.start()
     #pass
