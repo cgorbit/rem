@@ -89,6 +89,7 @@ class JobGraphExecutor(Unpickable(
                             jobs_graph=dict,
 
                         # XXX TODO XXX directory and pck_id can be changed in PacketBase
+                        # XXX TODO XXX directory and pck_id can be changed in sandbox.Packet
                             directory=str,
                             pck_id=str,
 
@@ -107,8 +108,10 @@ class JobGraphExecutor(Unpickable(
 
                             dont_run_new_jobs=bool,
                       ) ):
-    def __init__(self, ops, pck_id, directory, kill_all_jobs_on_error):
+    def __init__(self, ops, jobs, jobs_graph, pck_id, directory, kill_all_jobs_on_error):
         super(JobGraphExecutor, self).__init__()
+        self.jobs = jobs
+        self.jobs_graph = jobs_graph
         self._clean_state = True
         self._ops = ops
         self.directory = directory
@@ -247,7 +250,7 @@ class JobGraphExecutor(Unpickable(
         if runner.returncode_robust == 0 and not runner.is_cancelled():
             self.succeed_jobs.add(job.id)
 
-            self._ops.job_don_successfully(job.id)
+            self._ops.job_done_successfully(job.id)
 
             for nid in self.jobs_graph[job.id]:
                 self.wait_job_deps[nid].remove(job.id)
@@ -311,28 +314,28 @@ class JobGraphExecutor(Unpickable(
 
     # add_job() -- это излишняя функциональность для JobGraphExecutor
     # TODO Move back to PacketBase, create JobGraphExecutor only on first ACTIVATE
-    def add_job(self, job):
-        for dep_id in job.parents:
-            if dep_id not in self.jobs:
-                raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.pck_id)))
+    #def add_job(self, job):
+        #for dep_id in job.parents:
+            #if dep_id not in self.jobs:
+                #raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.pck_id)))
 
-        self.jobs[job.id] = job
-        self._add_job_to_graph(job)
+        #self.jobs[job.id] = job
+        #self._add_job_to_graph(job)
 
-    def _add_job_to_graph(self, job):
-        # wait_job_deps[child] -> parents
-        # jobs_graph[parent]   -> children (constant between calls to Add)
+    #def _add_job_to_graph(self, job):
+        ## wait_job_deps[child] -> parents
+        ## jobs_graph[parent]   -> children (constant between calls to Add)
 
-        parents = job.parents
+        #parents = job.parents
 
-        self.jobs_graph[job.id] = []
-        for p in parents:
-            self.jobs_graph[p].append(job.id)
+        #self.jobs_graph[job.id] = []
+        #for p in parents:
+            #self.jobs_graph[p].append(job.id)
 
-        self.wait_job_deps[job.id] = [jid for jid in parents if jid not in self.succeed_jobs]
+        #self.wait_job_deps[job.id] = [jid for jid in parents if jid not in self.succeed_jobs]
 
-        if not self.wait_job_deps[job.id]:
-            self.jobs_to_run.add(job.id)
+        #if not self.wait_job_deps[job.id]:
+            #self.jobs_to_run.add(job.id)
 
     # Modify:   wait_job_deps, jobs_to_run
     # Consider: jobs_to_retry, succeed_jobs
@@ -520,3 +523,7 @@ class JobGraphExecutor(Unpickable(
         for stop_id, (job_id, cancel, deadline) in jobs_to_retry.items():
             assert cancel is None
             self._register_stop_waiting(job_id, deadline)
+
+# TODO XXX FIXME
+    def stop_any_activity(self):
+        self._kill_jobs_drop_results()

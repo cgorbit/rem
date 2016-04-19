@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from __future__ import with_statement
 import os
 import time
@@ -135,8 +136,7 @@ class PackedExecuteResult(object): # for old backups
     pass
 
 
-class Job(Unpickable(err=nullobject,
-                     results=list,
+class Job(Unpickable(results=list,
                      tries=int,
                      pipe_fail=bool,
                      description=str,
@@ -146,28 +146,37 @@ class Job(Unpickable(err=nullobject,
                      output_to_status=bool)):
     ERR_PENALTY_FACTOR = 6
 
-    def __init__(self, shell, parents, pipe_parents, packetRef, maxTryCount, max_err_len=None,
+    def __init__(self, shell, parents, pipe_parents, pck, maxTryCount, max_err_len=None,
                  retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
         super(Job, self).__init__()
+        self.pck = pck
+        self.id = id(self)
         self.maxTryCount = maxTryCount
         self.shell = shell
         self.parents = parents
         self.inputs = pipe_parents
-        self.id = id(self)
         self.max_err_len = max_err_len
         self.retry_delay = retry_delay
         self.pipe_fail = pipe_fail
         self.description = description
         self.notify_timeout = notify_timeout
         self.max_working_time = max_working_time
-        self.packetRef = packetRef
         self.output_to_status = output_to_status
 
+    def __get_sbx_state__(self):
+        sdict = self.__dict__.copy()
+        sdict.pop('pck')
+        return sdict
+
+    def __set_sbx_state__(self, sdict, pck):
+        self.__dict__.update(sdict)
+        self.pck = pck
+
     def __repr__(self):
-        return "<Job(id: %s; packet: %s)>" % (self.id, self.packetRef.id)
+        return "<Job(id: %s; packet: %s)>" % (self.id, self.pck.id)
 
     def full_id(self):
-        return "%s.%s" % (self.packetRef.id, self.id)
+        return "%s.%s" % (self.pck.id, self.id)
 
     def __getstate__(self):
         return self.__dict__.copy()
@@ -183,22 +192,20 @@ class Job(Unpickable(err=nullobject,
 
     def _notify_long_execution(self, working_time):
         self.cached_working_time = working_time
-        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.packetRef.name, self.id)
-        self.packetRef.send_job_long_execution_notification(self)
+        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, self.id)
+        self.pck.send_job_long_execution_notification(self)
 
-    @staticmethod
-    def start_process(*args, **kwargs):
-        ctx = packet.PacketCustomLogic.SchedCtx # XXX
-        return ctx.run_job(*args, **kwargs)
+    def start_process(self, *args, **kwargs):
+        return self.pck.start_process(args, kwargs) # для sandbox
 
     def last_result(self):
         return self.results[-1] if self.results else None
 
     def _create_file_handles(self):
-        return self.packetRef._create_job_file_handles(self)
+        return self.pck._create_job_file_handles(self)
 
     def get_working_directory(self):
-        return self.packetRef.directory
+        return self.pck.get_working_directory()
 
     def produce_legacy_stderr_output(self, filename):
         return self._produce_legacy_stderr_output(filename, self.max_err_len or _DEFAULT_STDERR_SUMMAY_LEN)
@@ -228,7 +235,7 @@ class Job(Unpickable(err=nullobject,
         return ret
 
     def on_done(self, runner):
-        self.packetRef.on_job_done(runner)
+        self.pck.on_job_done(runner)
 
 
 class JobRunner(object):
@@ -415,9 +422,9 @@ class JobRunner(object):
     def job(self):
         return self._job
 
-    @property
-    def pck(self):
-        return self._job.packetRef
+    #@property
+    #def pck(self):
+        #return self._job.pck
 
     def __repr__(self):
         return '<JobRunner for %s>' % repr(self._job)
