@@ -269,3 +269,14 @@ class _AllFutureSucceedChecker(FutureCombinerBase):
 def CheckAllFuturesSucceed(futures):
     return _AllFutureSucceedChecker(futures).to_future()
 
+
+def wrap_future(future, code):
+    ret = Promise()
+
+    def wrap(f):
+        ret.run_and_set(lambda : code(f))
+
+    future.subscribe(wrap)
+
+    return ret.to_future()
+

@@ -169,7 +169,6 @@ class PacketRunner(object):
 
         print self._graph_executor.__dict__
         print self._graph_executor.calc_repr_state()
-        print self._graph_executor.can_run_jobs_right_now()
 
         while not self._finished:
             with self._lock:

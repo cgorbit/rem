@@ -724,6 +724,9 @@ class _Popen(object):
     def returncode(self):
         return self._exit_status.get_nonblock(None)
 
+    def get_returncode_future(self):
+        return self._exit_status
+
     def poll(self):
         return self.wait(timeout=0)
 

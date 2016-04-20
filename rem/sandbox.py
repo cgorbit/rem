@@ -118,7 +118,14 @@ class Sandbox(object):
             self._update()
 
         def start(self):
-            self._make_call('PUT', 'task/%d' % self.id, {'status': 'ENQUEUING'}, succ_code=204, raw_result=True)
+            res = self._make_call(
+                'PUT',
+                'batch/tasks/start',
+                [self.id],
+            )[0]
+
+            if res['status'] == 'ERROR':
+                raise RuntimeError(res['message'])
 
     def Task(self, id):
         return self.TaskProxy(self, self._make_call('GET', '/task/%d' % id))
@@ -132,6 +139,15 @@ class Sandbox(object):
         if kwargs:
             task.update(**kwargs)
         return task
+
+    def list_task_statuses(self, ids):
+        #url = '/task?limit=%d&' % len(ids)
+        #url += '&'.join('id=%d' % id for id in ids)
+
+        url = '/task?limit=%d&id=%s' % (len(ids), ','.join(map(str, ids)))
+
+        resp = self._make_call('GET', url)
+        return {t['id']: t['status'] for t in resp['items']}
 
     def upload_resource(self, type, name, protocol, remote_file_name, ttl=None, arch=None, **kwargs):
         context = {
