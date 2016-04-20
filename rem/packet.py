@@ -140,7 +140,7 @@ class PacketBase(Unpickable(
 
         self._set_waiting_tags(wait_tags)
 
-        self._jobs_executor = None
+        self._graph_executor = None
 
         self._impl_state = ImplState.UNINITIALIZED
         self._update_repr_state()
@@ -168,7 +168,7 @@ class PacketBase(Unpickable(
         # XXX PacketFlag.USER_SUSPEND -> means -> .dont_run_new_jobs
         # XXX PacketFlag.RCVR_ERROR   -> means -> ._impl_state == BROKEN
 
-        return self._jobs_executor.calc_repr_state()
+        return self._graph_executor.calc_repr_state()
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
@@ -289,7 +289,7 @@ class PacketBase(Unpickable(
             #if self._has_active_jobs(): # FIXME Like an assert
                 #logging.error("_release_place of %s in %s with active jobs" % (self.id, self.state))
 
-            self._jobs_executor.stop_any_activity() # TODO INDEFINITE_TIME
+            self._graph_executor.stop_any_activity() # TODO INDEFINITE_TIME
 
             self._release_links()
 
@@ -302,8 +302,8 @@ class PacketBase(Unpickable(
             self.directory = None
 
     def _create_place(self, context):
-        #if hasattr(self, '_jobs_executor'):
-            #assert not self._jobs_executor.streams
+        #if hasattr(self, '_graph_executor'):
+            #assert not self._graph_executor.streams
 
         if self.directory:
             raise RuntimeError("can't create duplicate working directory")
@@ -359,14 +359,14 @@ class PacketBase(Unpickable(
 
         if src == ImplState.ACTIVE and dst == ImplState.HISTORIED:
     # TODO BETTER
-            return self._jobs_executor.dont_run_new_jobs \
-                   and not self._jobs_executor.has_running_jobs()
+            return self._graph_executor.dont_run_new_jobs \
+                   and not self._graph_executor.has_running_jobs()
 
         elif src == ImplState.UNINITIALIZED and dst == ImplState.SUCCESSFULL:
-            return not self._jobs_executor.jobs and not self.wait_dep_tags
+            return not self._graph_executor.jobs and not self.wait_dep_tags
 
         elif src == ImplState.WAIT_TAGS and dst == ImplState.SUCCESSFULL:
-            return not self._jobs_executor.jobs
+            return not self._graph_executor.jobs
 
         return dst in ImplState.allowed[src]
 
@@ -380,7 +380,7 @@ class PacketBase(Unpickable(
         assert not self.wait_dep_tags
         assert self._impl_state != ImplState.ACTIVE
 
-        if not self._jobs_executor.jobs: # FIXME and not self._jobs_executor.dont_run_new_jobs:
+        if not self._graph_executor.jobs: # FIXME and not self._graph_executor.dont_run_new_jobs:
             state = ImplState.SUCCESSFULL
         else:
             state = ImplState.ACTIVE
@@ -489,7 +489,7 @@ class PacketBase(Unpickable(
             if os.path.isdir(directory):
                 shutil.rmtree(directory, onerror=None)
 
-        self._jobs_executor.recover_after_backup_loading()
+        self._graph_executor.recover_after_backup_loading()
 
         self._update_repr_state()
 
@@ -649,7 +649,7 @@ class PacketBase(Unpickable(
         extra_flags = set()
         if self._impl_state == ImplState.BROKEN:
             extra_flags.add("can't-be-recovered")
-        if self._jobs_executor.dont_run_new_jobs:
+        if self._graph_executor.dont_run_new_jobs:
             extra_flags.add("manually-suspended")
         if extra_flags:
             status["extra_flags"] = ";".join(extra_flags)
@@ -660,7 +660,7 @@ class PacketBase(Unpickable(
         if self.state in (ReprState.ERROR, ReprState.SUSPENDED,
                           ReprState.WORKABLE, ReprState.PENDING,
                           ReprState.SUCCESSFULL, ReprState.WAITING):
-            status["jobs"] = self._jobs_executor.produce_status()
+            status["jobs"] = self._graph_executor.produce_status()
 
         return status
 
@@ -676,12 +676,12 @@ class PacketBase(Unpickable(
                     RuntimeError(
                         "Can't suspend ERROR'ed packet %s with RCVR_ERROR flag set" % self.id))
 
-            self._jobs_executor.suspend(kill_jobs)
+            self._graph_executor.suspend(kill_jobs)
 
     def rpc_resume(self):
         with self.lock:
-            self._jobs_executor.reset_tries() # Repeat legacy bullshit behaviour
-            self._jobs_executor.resume()
+            self._graph_executor.reset_tries() # Repeat legacy bullshit behaviour
+            self._graph_executor.resume()
 
     def _reset(self, tag_op):
         def update_tags():
@@ -689,16 +689,16 @@ class PacketBase(Unpickable(
                 tag_op(tag, is_done)
 
         # XXX force call to _change_state for packets without jobs
-        #if self._clean_state and self._jobs_executor.jobs:
+        #if self._clean_state and self._graph_executor.jobs:
             #update_tags()
             #return
 
-        # if not(self._jobs_executor.jobs) we will first reset, then set (by _create_place_if_need)
+        # if not(self._graph_executor.jobs) we will first reset, then set (by _create_place_if_need)
 
         # TODO Test that job_done_tag are reset
         update_tags()
 
-        self._jobs_executor.reset()
+        self._graph_executor.reset()
 
         if not self._try_create_place_if_need():
             self._change_state(ImplState.BROKEN)
@@ -720,12 +720,12 @@ class PacketBase(Unpickable(
     def rpc_reset(self, suspend=False):
         with self.lock:
             if suspend:
-                self._jobs_executor.suspend(kill_jobs=False)
+                self._graph_executor.suspend(kill_jobs=False)
 
             self._reset(lambda tag, _: tag.Unset())
 
             if not suspend:
-                self._jobs_executor.resume()
+                self._graph_executor.resume()
 
     def _get_scheduler_ctx(self):
         return PacketCustomLogic.SchedCtx
@@ -806,7 +806,7 @@ class PacketBase(Unpickable(
             assert self._impl_state == ImplState.UNINITIALIZED
             self._move_to_queue(None, queue)
 
-            self._jobs_executor = self._create_job_graph_executor()
+            self._graph_executor = self._create_job_graph_executor()
             self._try_activate()
 
 
@@ -865,41 +865,41 @@ class LocalPacket(PacketBase):
 
     def _can_run_jobs_right_now(self):
         return self._impl_state == ImplState.ACTIVE \
-            and self._jobs_executor.can_run_jobs_right_now()
+            and self._graph_executor.can_run_jobs_right_now()
 
     def get_job_to_run(self):
         with self.lock:
             if not self._can_run_jobs_right_now():
                 return self.INCORRECT
 
-            runner = self._jobs_executor.get_job_to_run()
+            runner = self._graph_executor.get_job_to_run()
             self._update_repr_state() # FIXME in JobGraphExecutor
 
             return runner
 
     def vivify_jobs_waiting_stoppers(self):
         with self.lock:
-            self._jobs_executor.vivify_jobs_waiting_stoppers()
+            self._graph_executor.vivify_jobs_waiting_stoppers()
 
     # Called in queue under packet lock
     def _get_working_jobs(self):
-        return self._jobs_executor.get_working_jobs()
+        return self._graph_executor.get_working_jobs()
 
     def on_job_done(self, runner):
-        self._jobs_executor.on_job_done(runner)
+        self._graph_executor.on_job_done(runner)
 
         with self.lock:
-            self._jobs_executor.apply_jobs_results()
+            self._graph_executor.apply_jobs_results()
 
     def _create_job_file_handles(self, job):
-        return self._jobs_executor.create_job_file_handles(job)
+        return self._graph_executor.create_job_file_handles(job)
 
     def _stop_waiting(self, stop_id):
         with self.lock:
-            self._jobs_executor.stop_waiting(stop_id)
+            self._graph_executor.stop_waiting(stop_id)
 
     def _check_can_move_beetwen_queues(self):
-        if self._jobs_executor.has_running_jobs():
+        if self._graph_executor.has_running_jobs():
             raise as_rpc_user_error(
                 from_rpc, RuntimeError("Can't move packets with running jobs"))
 
@@ -992,7 +992,7 @@ class SandboxPacket(PacketBase):
 
     def process_incoming(self):
         with self.lock:
-            self._jobs_executor.process_incoming()
+            self._graph_executor.process_incoming()
 
     def _apply_sandbox_message(self, msg):
         self._messages.append(msg)

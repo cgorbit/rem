@@ -66,7 +66,7 @@ class _ExecutorOps(object):
         self.runner._update_repr_state()
 
     def stop_waiting(self, stop_id):
-        self.runner._jobs_executor._stop_waiting(stop_id)
+        self.runner._graph_executor._stop_waiting(stop_id)
 
     def del_working(self, job):
         pass
@@ -103,7 +103,7 @@ class PacketRunner(object):
         self._lock = threading.RLock()
         self._job_finished = threading.Condition(self._lock)
         self._proc_runner = None
-        self._jobs_executor = None
+        self._graph_executor = None
 
     def get_working_directory(self):
         return self._directory + '/work'
@@ -119,19 +119,19 @@ class PacketRunner(object):
                 #pass
 
     def _start_one_another_job(self):
-        runner = self._jobs_executor.get_job_to_run()
+        runner = self._graph_executor.get_job_to_run()
         t = ProfiledThread(target=runner.run)
         t.start()
 
     def run(self):
         self._proc_runner = rem.job.create_job_runner(None, None)
 
-        self._jobs_executor = \
+        self._graph_executor = \
             self._pck._create_job_graph_executor(self, self.get_working_directory())
 
         while not self._finished:
             with self._lock:
-                while self._jobs_executor.can_run_jobs_right_now():
+                while self._graph_executor.can_run_jobs_right_now():
                     self._start_one_another_job()
 
                 self._job_finished.wait()
@@ -139,7 +139,7 @@ class PacketRunner(object):
     def _calc_repr_state(self):
         if self._finished:
             return ReprState.ERROR if self.failed else ReprState.SUCCESSFULL
-        return self._jobs_executor.calc_repr_state()
+        return self._graph_executor.calc_repr_state()
 
 # OPS for JobGraphExecutor's OPS
     def _update_repr_state(self):
@@ -150,7 +150,7 @@ class PacketRunner(object):
 
     def _stop_waiting(self, stop_id):
         with self.lock:
-            self._jobs_executor.stop_waiting(stop_id)
+            self._graph_executor.stop_waiting(stop_id)
 
 # OPS for rem.job.Job
     def start_process(self, args, kwargs):
@@ -160,11 +160,11 @@ class PacketRunner(object):
         raise NotImplementedError()
 
     def _create_job_file_handles(self):
-        return self._jobs_executor.create_job_file_handles(job)
+        return self._graph_executor.create_job_file_handles(job)
 
     def on_job_done(self, runner):
-        self._jobs_executor.on_job_done(runner)
+        self._graph_executor.on_job_done(runner)
 
         with self.lock:
-            self._jobs_executor.apply_jobs_results()
+            self._graph_executor.apply_jobs_results()
 
