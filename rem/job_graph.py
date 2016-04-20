@@ -90,6 +90,7 @@ class JobGraphExecutor(Unpickable(
 
                         # XXX TODO XXX directory and pck_id can be changed in PacketBase
                         # XXX TODO XXX directory and pck_id can be changed in sandbox.Packet
+                        # XXX TODO XXX directory __________ can be changed in sandbox_packet.Packet
                             directory=str,
                             pck_id=str,
 
@@ -116,6 +117,7 @@ class JobGraphExecutor(Unpickable(
         self._ops = ops
         self.directory = directory
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
+        self._init_job_deps_graph()
 
     def __getstate__(self):
         sdict = self.__dict__.copy()
@@ -193,6 +195,8 @@ class JobGraphExecutor(Unpickable(
         if not had_to_run:
             self._ops.update_repr_state() # TODO BACK_REFERENCE
 
+        self._notify_can_run_jobs_if_need()
+
     # TODO Don't store filehandles in self, only filenames
     def _stream_file(self, jid, type):
         stream = self.streams.get((type, jid), None)
@@ -246,6 +250,10 @@ class JobGraphExecutor(Unpickable(
             self._create_output(job.id, "err")
         )
 
+    def _notify_can_run_jobs_if_need(self):
+        if self.can_run_jobs_right_now():
+            self._ops.on_can_run_jobs()
+
     def _apply_job_result(self, job, runner):
         if runner.returncode_robust == 0 and not runner.is_cancelled():
             self.succeed_jobs.add(job.id)
@@ -269,6 +277,8 @@ class JobGraphExecutor(Unpickable(
 
             if self.kill_all_jobs_on_error:
                 self._kill_jobs_drop_results()
+
+        self._notify_can_run_jobs_if_need()
 
     # TODO Check conditions again
         if len(self.succeed_jobs) == len(self.jobs):
@@ -382,6 +392,8 @@ class JobGraphExecutor(Unpickable(
                     if not self.wait_job_deps[jid] and jid not in jobs_to_retry
             )
 
+            self._notify_can_run_jobs_if_need()
+
     # jobs
     # jobs_graph        = edges
     # wait_job_deps     = waitJobs
@@ -459,20 +471,25 @@ class JobGraphExecutor(Unpickable(
             self._kill_jobs_drop_results()
             self._ops.update_repr_state() # maybe from PENDING to WORKABLE
 
+        self._notify_can_run_jobs_if_need()
+
     def reset_tries(self):
         self.jobs_to_run.update(self.failed_jobs)
         self.failed_jobs.clear()
         for job in self.jobs.values():
             job.tries = 0
+        self._notify_can_run_jobs_if_need()
 
     def resume(self):
         self.dont_run_new_jobs = False
         # FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
         self._ops.update_repr_state()
+        self._notify_can_run_jobs_if_need()
 
     def reset(self):
         if not self._clean_state:
             self._do_reset()
+        self._notify_can_run_jobs_if_need()
 
     def on_job_done(self, runner):
         self._active_jobs.on_done(runner)

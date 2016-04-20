@@ -4,6 +4,7 @@ import threading
 
 import rem.job
 import rem.job_graph
+from rem.profile import ProfiledThread
 #import rem.packet # XXX don't import
 import rem.subprocsrv
 from rem.packet_common import ReprState
@@ -50,12 +51,35 @@ class Packet(object):
     def __set_sbx_state__(self, sdict):
         self.__dict__.clear()
         self.__dict__.update(sdict)
+        self.jobs_graph = {
+            int(id): val
+                for id, val in self.jobs_graph.items()
+        }
+        self.jobs = {
+            int(id): rem.job.Job.from_sbx_state(job, self)
+                for id, job in self.jobs.items()
+        }
+        return self
 
-    def serialize(self, out):
+    @classmethod
+    def from_sbx_state(cls, sdict):
+        self = cls.__new__(cls)
+        self.__set_sbx_state__(sdict)
+        return self
+
+    def dump_json(self, out):
         json.dump(self.__get_sbx_state__(), out, indent=3)
 
-    def deserialize(self, in_, *args, **kwargs):
-        self.__set_sbx_state__(json.load(in_), *args, **kwargs)
+    def dumps_json(self):
+        return json.dumps(self.__get_sbx_state__(), indent=3)
+
+    @classmethod
+    def loads_json(cls, s):
+        return cls.from_sbx_state(json.loads(s))
+
+    @classmethod
+    def load_json(cls, in_):
+        return cls.from_sbx_state(json.load(in_))
 
 
 class _ExecutorOps(object):
@@ -66,7 +90,7 @@ class _ExecutorOps(object):
         self.runner._update_repr_state()
 
     def stop_waiting(self, stop_id):
-        self.runner._graph_executor._stop_waiting(stop_id)
+        self.runner._stop_waiting(stop_id)
 
     def del_working(self, job):
         pass
@@ -76,22 +100,27 @@ class _ExecutorOps(object):
 
     def set_successfull_state(self):
         r = self.runner
-        with r._lock:
-            r._finished = True
-            r._job_finished.notify()
+        r._finished = True
+        r._job_finished.notify()
+        logging.debug('+++ set_successfull_state')
 
     def set_errored_state(self):
         r = self.runner
-        with r._lock:
-            r._failed = True
-            r._finished = True
-            r._job_finished.notify()
+        r._failed = True
+        r._finished = True
+        r._job_finished.notify()
+        logging.debug('+++ set_errored_state')
 
     def job_done_successfully(self, job_id):
         pass # TODO Notify rem_server for job_done_tag
+        self.runner._job_finished.notify()
+        logging.debug('+++ job_done_successfully')
 
     def create_job_runner(self, job):
         return rem.job.JobRunner(job)
+
+    def on_can_run_jobs(self):
+        self.runner._job_finished.notify()
 
 
 class PacketRunner(object):
@@ -108,6 +137,9 @@ class PacketRunner(object):
     def get_working_directory(self):
         return self._directory + '/work'
 
+    def get_io_directory(self):
+        return self._directory + '/io'
+
     #def run(self):
         #runner_srv = rem.subprocsrv.create_runner()
         #try:
@@ -119,15 +151,25 @@ class PacketRunner(object):
                 #pass
 
     def _start_one_another_job(self):
+        logging.debug('+ Packet._start_one_another_job')
         runner = self._graph_executor.get_job_to_run()
         t = ProfiledThread(target=runner.run)
         t.start()
 
     def run(self):
+        logging.debug('+ Packet.run')
         self._proc_runner = rem.job.create_job_runner(None, None)
 
-        self._graph_executor = \
-            self._pck._create_job_graph_executor(self, self.get_working_directory())
+        with self._lock:
+            self._graph_executor = \
+                self._pck._create_job_graph_executor(self, self.get_io_directory())
+
+        for job in self._pck.jobs.values():
+            job.pck = self
+
+        print self._graph_executor.__dict__
+        print self._graph_executor.calc_repr_state()
+        print self._graph_executor.can_run_jobs_right_now()
 
         while not self._finished:
             with self._lock:
@@ -135,6 +177,7 @@ class PacketRunner(object):
                     self._start_one_another_job()
 
                 self._job_finished.wait()
+        logging.debug('+ exiting Packet.run')
 
     def _calc_repr_state(self):
         if self._finished:
@@ -144,12 +187,12 @@ class PacketRunner(object):
 # OPS for JobGraphExecutor's OPS
     def _update_repr_state(self):
         new_state = self._calc_repr_state()
-        if new_state != self.new_state:
-            self.state = new_state
+        if new_state != self._pck.state:
+            self._pck.state = new_state
             logging.info("new state %s" % new_state)
 
     def _stop_waiting(self, stop_id):
-        with self.lock:
+        with self._lock:
             self._graph_executor.stop_waiting(stop_id)
 
 # OPS for rem.job.Job
@@ -159,12 +202,12 @@ class PacketRunner(object):
     def send_job_long_execution_notification(self):
         raise NotImplementedError()
 
-    def _create_job_file_handles(self):
+    def _create_job_file_handles(self, job):
         return self._graph_executor.create_job_file_handles(job)
 
     def on_job_done(self, runner):
         self._graph_executor.on_job_done(runner)
 
-        with self.lock:
+        with self._lock:
             self._graph_executor.apply_jobs_results()
 

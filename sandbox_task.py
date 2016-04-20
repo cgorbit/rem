@@ -1,5 +1,8 @@
 #! /usr/bin/env python
 
+import os
+import sys
+
 import rem.job as job
 import rem.packet as packet
 import rem.delayed_executor as delayed_executor
@@ -8,6 +11,7 @@ import rem.sandbox_packet
 import rem.context
 import rem.scheduler
 import rem.constants as constants
+import rem.rem_logging as rem_logging
 
 import hashlib
 def calc_checksum(path):
@@ -21,7 +25,15 @@ def calc_checksum(path):
             cs_calc.update(buff)
         return cs_calc.hexdigest()
 
-if __name__ == '__main__':
+from pprint import pprint
+
+def main():
+    if len(sys.argv) > 1:
+        pck = rem.sandbox_packet.Packet.loads_json(sys.stdin.read())
+        #print pck
+        pprint(pck.jobs.items()[0][1].__dict__)
+        return
+
     ctx = rem.context.Context('/home/trofimenkov/rem/rem.cfg')
     sched = rem.scheduler.Scheduler(ctx)
 
@@ -73,27 +85,39 @@ if __name__ == '__main__':
         notify_on_skipped_reset=True,
     )
 
-    pck_add_job(pck, './true', tries=1)
-    #pck_add_job(pck, './false', tries=1)
-    pck_add_job(pck, 'sleep 4', tries=3)
-    pck_add_job(pck, 'sleep 8', tries=3)
+    j001 = pck_add_job(pck, 'echo 001; sleep 1', tries=1)
+    j002 = pck_add_job(pck, 'echo 002; sleep 1', tries=3, parents=[j001])
+    j003 = pck_add_job(pck, 'echo 003; sleep 1', tries=3, parents=[j002])
 
     pck_add_binary(pck, 'true', '/bin/true')
 
     sbx_pck = pck.create_sandbox_packet()
 
-    from pprint import pprint
-    pprint(sbx_pck.__dict__)
-    print
-    from cStringIO import StringIO
-    out = StringIO()
-    sbx_pck.serialize(out)
-    serialized = out.getvalue()
+    if True:
+        print >>sys.stderr, os.getpid()
+        rem_logging.reinit_logger(ctx)
+        runner = rem.sandbox_packet.PacketRunner(sbx_pck, '/home/trofimenkov/tmp/sbx-XJ23klfd')
+        runner.run()
+        return
 
+    #print '+ __dict__:'
+    #pprint(sbx_pck.__dict__)
+    #print
+
+    serialized = sbx_pck.dumps_json()
+
+    #print '+ SERIALIZED:'
     print serialized
 
-    sbx_pck.deserialize(StringIO(serialized))
+    pck_copy = sbx_pck.loads_json(serialized)
 
-    #delayed_executor.start()
-    #pass
-    #delayed_executor.stop()
+    #print id(sbx_pck), type(sbx_pck)
+    #print id(pck_copy), type(pck_copy)
+
+
+if __name__ == '__main__':
+    delayed_executor.start()
+    try:
+        main()
+    finally:
+        delayed_executor.stop()

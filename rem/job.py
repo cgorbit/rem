@@ -171,9 +171,16 @@ class Job(Unpickable(results=list,
     def __set_sbx_state__(self, sdict, pck):
         self.__dict__.update(sdict)
         self.pck = pck
+        return self
 
-    def __repr__(self):
-        return "<Job(id: %s; packet: %s)>" % (self.id, self.pck.id)
+    @classmethod
+    def from_sbx_state(cls, pck, sdict):
+        self = cls.__new__(cls)
+        self.pck = pck
+        return self
+
+    #def __repr__(self):
+        #return "<Job(id: %s; packet: %s)>" % (self.id, self.pck.id)
 
     def full_id(self):
         return "%s.%s" % (self.pck.id, self.id)

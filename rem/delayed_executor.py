@@ -3,6 +3,7 @@ import threading
 
 from heap import PriorityQueue
 from profile import ProfiledThread
+from rem_logging import logger as logging
 
 class DelayedExecutor(object):
     def __init__(self):
@@ -84,6 +85,8 @@ _instance = None
 
 def start():
     global _instance
+    if _instance:
+        raise RuntimeError()
     _instance = DelayedExecutor()
 
 
@@ -94,4 +97,6 @@ def add(callback, deadline=None, timeout=None):
 
 def stop():
     global _instance
-    _instance.stop()
+    if _instance:
+        _instance.stop()
+        _instance = None
