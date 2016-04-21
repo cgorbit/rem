@@ -55,10 +55,11 @@ class _ProxyObject(object):
 
 
 class Sandbox(object):
-    def __init__(self, url, oauth_token, debug=False):
+    def __init__(self, url, oauth_token, debug=False, timeout=None):
         self.url = url
         self.oauth_token = oauth_token
         self.debug = debug
+        self.timeout = timeout
 
     def _make_call(self, method, path, data=None, raw_result=False, succ_code=200):
         if self.debug:
@@ -73,7 +74,8 @@ class Sandbox(object):
             self.url + path,
             data=json.dumps(data),
             headers=headers,
-            verify=False
+            verify=False,
+            timeout=self.timeout
         )
 
         if self.debug:

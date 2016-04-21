@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import errno
 
 import threading
 from collections import deque
@@ -9,10 +10,12 @@ from tempfile import NamedTemporaryFile
 from rem.rem_logging import logger as logging
 from rem.profile import ProfiledThread
 from future import Promise, wrap_future
+import rem.delayed_executor as delayed_executor
 
 def sky_share(subproc, filename):
     with NamedTemporaryFile('w') as out:
-        p = subproc.Popen(['sky', 'share', filename], stdout=out.name)
+        # TODO collect STDERR
+        p = subproc.Popen(['sky', 'share', filename], stdout=out.name, stderr='/dev/null')
 
         if p.wait():
             raise RuntimeError("sky share failed with exit status: %d" % p.returncode)
@@ -30,7 +33,8 @@ def sky_share_future(subproc, filename):
     out = NamedTemporaryFile('w')
 
     try:
-        p = subproc.Popen(['sky', 'share', filename], stdout=out.name)
+        # TODO collect STDERR
+        p = subproc.Popen(['sky', 'share', filename], stdout=out.name, stderr='/dev/null')
     except:
         try:
             raise
@@ -63,6 +67,9 @@ def sky_share_future(subproc, filename):
     return wrap_future(p.get_returncode_future(), finalize)
 
 
+def _enoent(msg):
+    return OSError(errno.ENOENT, msg)
+
 class Sharer(object):
     def __init__(self, subproc, sandbox, task_owner, task_priority, default_ttl=None):
         self.subproc = subproc
@@ -73,21 +80,26 @@ class Sharer(object):
         self.lock = threading.Lock()
         self.next_job_id = 1
         self.running = {}
+        self.jobs_to_retry = {}
         self.share_queue = deque()
         self.share_queue_not_empty = threading.Condition(self.lock)
         self.upload_queue = deque()
         self.upload_queue_not_empty = threading.Condition(self.lock)
-        self.wait_queue = deque()
-        self.wait_queue_not_empty = threading.Condition(self.lock)
+        self.wait1_queue = deque()
+        self.wait1_queue_not_empty = threading.Condition(self.lock)
+        self.wait2_queue = deque()
+        self.wait2_queue_not_empty = threading.Condition(self.lock)
         self.should_stop = False
 
         self.share_thread  = ProfiledThread(target=self._share_loop, name_prefix='ResShare')
         self.upload_thread = ProfiledThread(target=self._upload_loop, name_prefix='ResUpload')
-        self.sandbox_wait_thread   = ProfiledThread(target=self._sandbox_wait_loop, name_prefix='ResWait')
+        self.sandbox_wait1_thread = ProfiledThread(target=self._sandbox_wait1_loop, name_prefix='ResWait1')
+        self.sandbox_wait2_thread = ProfiledThread(target=self._sandbox_wait2_loop, name_prefix='ResWait2')
 
         self.share_thread.start()
         self.upload_thread.start()
-        self.sandbox_wait_thread.start()
+        self.sandbox_wait1_thread.start()
+        self.sandbox_wait2_thread.start()
 
     def stop(self):
         raise NotImplementedError()
@@ -108,6 +120,40 @@ class Sharer(object):
         def __str__(self):
             return 'Job(%d, %s, %s)' % (self.id, self.filename, self.resource_type)
 
+    class Action(object):
+        SHARE_FILE         = 1
+        CREATE_UPLOAD_TASK = 2
+        WAIT_UPLOAD_TASK   = 3
+        FETCH_RESOURCE_ID  = 4
+
+    def _initiate_retry_inner(self, job_id, action):
+        if action == self.Action.SHARE_FILE:
+            queue, condvar = self.share_queue, self.share_queue_not_empty
+
+        elif action == self.Action.CREATE_UPLOAD_TASK:
+            queue, condvar = self.upload_queue, self.upload_queue_not_empty
+
+        else:
+            raise RuntimeError()
+
+        queue.append(self.running[job_id])
+        condvar.notify()
+
+    def _initiate_retry(self, job_id):
+        with self.lock:
+            action = self.jobs_to_retry.pop(job_id, None)
+            if action is None:
+                return
+
+            self._initiate_retry_inner(job_id, action)
+
+    def _schedule_retry(self, job, action, delay):
+        if delay:
+            self.jobs_to_retry[job.id] = action
+            delayed_executor.add(lambda id=job.id: self._initiate_retry(id), timeout=delay)
+        else:
+            self._initiate_retry_inner(job.id, action)
+
     def share(self, *args, **kwargs):
         job = self.Job(*args, **kwargs)
 
@@ -123,22 +169,38 @@ class Sharer(object):
 
         return job.promise.to_future()
 
+    def _set_promise(self, job, val=None, err=None):
+        with self.lock:
+            self.running.pop(job.id)
+        job.promise.set(val, err)
+
     def _share_loop(self):
-        in_progress = [0]
+        in_progress = set()
+
+        def schedule_retry(job):
+            self._schedule_retry(job, self.Action.SHARE_FILE, delay=10.0)
 
         def _finished(job_id, f):
             job = self.running[job_id]
+            in_progress.remove(job)
 
             try:
                 torrent_id = f.get()
-            except:
-                logging.exception('sky share for %s faled' % job)
-                raise # NotImplementedError #2
-            else:
-                logging.debug('sky share sucessfully done for %s' % job)
+            #except ???Error as e: # TODO
+                #pass
+            except Exception as e:
+                if os.path.exists(job.filename):
+                    logging.warning('sky share for %s faled: %s' % (job, e))
+                    schedule_retry(job)
+                else:
+                    self._set_promise(job, None,
+                        OSError(errno.ENOENT,
+                                'Failed to share file %s: %s' % (job.filename, e)))
+                return
+
+            logging.debug('sky share sucessfully done for %s' % job)
 
             with self.lock:
-                in_progress[0] -= 1
                 job.torrent_id = torrent_id
                 self.upload_queue.append(job)
                 self.upload_queue_not_empty.notify()
@@ -152,21 +214,19 @@ class Sharer(object):
                     return
 
                 job = self.share_queue.popleft()
-                in_progress[0] += 1
+                in_progress.add(job)
 
             logging.debug('Run sky share for %s' % job)
 
             try:
                 torrent_id = sky_share_future(self.subproc, job.filename)
             except:
-                logging.exception('sky share for %s faled' % job)
-                raise # NotImplementedError #1
+                in_progress.remove(job)
+                schedule_retry(job)
+                del job
+                continue
 
-            try:
-                torrent_id.subscribe(lambda f, job_id=job.id: _finished(job_id, f))
-            except:
-                logging.exception('sky share for %s faled' % job)
-                raise # NotImplementedError #2
+            torrent_id.subscribe(lambda f, job_id=job.id: _finished(job_id, f))
 
             del torrent_id
             del job
@@ -184,6 +244,24 @@ class Sharer(object):
             notifications=[],
         )
 
+    def _try_create_upload_task(self, job):
+
+        # TODO raise on non-recoverabl errors
+
+        try:
+            task = self._create_resource_upload_task(job)
+        except Exception as e:
+            logging.warning('Failed to create upload task %s to Sandbox: %s' % (job, e))
+            return
+
+        try:
+            task.start()
+        except Exception as e:
+            logging.warning('Failed to start upload task %s to Sandbox: %s' % (job, e))
+            return
+
+        return task
+
     # FIXME Run several _upload_loop workers?
     def _upload_loop(self):
         while not self.should_stop:
@@ -199,37 +277,33 @@ class Sharer(object):
             logging.debug('Uploading to Sandbox %s' % job)
 
             try:
-                sbx_task = self._create_resource_upload_task(job)
+                task = self._try_create_upload_task(job)
             except Exception as e:
-                logging.exception('Failed to create upload task %s to Sandbox' % job)
-                raise # NotImplementedError #3
+                self._set_promise(job, None, e)
+                continue
 
-            try:
-                sbx_task.start()
-            except Exception as e:
-                logging.exception('Failed to start upload task %s to Sandbox' % job)
-                raise # NotImplementedError #3
+            if not task:
+                self._schedule_retry(job, self.Action.CREATE_UPLOAD_TASK, delay=10.0)
+                continue
 
-            # TODO Check sbx_task
-
-            job.upload_task_id = sbx_task.id
+            job.upload_task_id = task.id
             logging.debug('upload_task_id=%d for %s' % (job.upload_task_id, job))
 
             with self.lock:
-                self.wait_queue.append(job)
-                self.wait_queue_not_empty.notify()
+                self.wait1_queue.append(job)
+                self.wait1_queue_not_empty.notify()
 
-            del sbx_task
+            del task
             del job
 
-    def _sandbox_wait_loop(self):
+    def _sandbox_wait1_loop(self):
         poll_interval = 3.0
         in_progress = {}
 
         noop_sandbox_statuses = {
             'DRAFT',
             'ENQUEUING', 'ENQUEUED', 'PREPARING', 'EXECUTING', 'TEMPORARY',
-            'FINISHING', 'STOPPING', ' WAIT_RES', 'WAIT_TASK', 'WAIT_TIME',
+            'FINISHING', 'STOPPING', 'WAIT_RES', 'WAIT_TASK', 'WAIT_TIME',
         }
 
         next_poll_time = 0.0
@@ -240,15 +314,15 @@ class Sharer(object):
                 if in_progress:
                     timeout = max(0.0, time.time() - next_poll_time)
 
-                if (timeout is None or timeout) and not(self.should_stop or self.wait_queue):
-                    self.wait_queue_not_empty.wait(timeout)
+                if (timeout is None or timeout) and not(self.should_stop or self.wait1_queue):
+                    self.wait1_queue_not_empty.wait(timeout)
 
                 if self.should_stop: # TODO
                     return
 
                 job = None
-                if self.wait_queue:
-                    job = self.wait_queue.popleft()
+                if self.wait1_queue:
+                    job = self.wait1_queue.popleft()
                     in_progress[job.upload_task_id] = job
                     del job
 
@@ -256,12 +330,14 @@ class Sharer(object):
                     continue
 
             try:
-                statuses = self.sandbox.list_task_statuses(in_progress.keys()) # FIXME Better?
-            except:
-                logging.exception("Failed to get sandbox tasks' statuses")
+                statuses = self.sandbox.list_task_statuses(in_progress.keys())
+            except Exception as e:
+                logging.warning("Failed to get sandbox tasks' statuses: %s" % e)
                 continue
 
-            logging.debug("Task statuses: %s" % statuses)
+            logging.debug("Task statuses: %s" % statuses) # TODO Comment out
+
+            next_poll_time = max(next_poll_time + poll_interval, time.time())
 
             done = []
             for task_id, status in statuses.iteritems():
@@ -269,29 +345,68 @@ class Sharer(object):
                     job = in_progress.pop(task_id)
                     done.append(job)
                     logging.debug('Upload task=%d in SUCCESS for %s' % (task_id, job))
+
                 elif status in noop_sandbox_statuses:
                     pass
+
                 elif status == 'FAILURE':
-                    raise NotImplementedError("task %d status %s" % (task_id, status))
-                else: # TODO
-                    raise NotImplementedError("task %d status %s" % (task_id, status))
+                    job = in_progress.pop(task_id)
+                    logging.warning("Task %d in FAILURE. Will create new task" % task_id)
+                    self._schedule_retry(job, self.Action.CREATE_UPLOAD_TASK, delay=5.0)
 
-            # FIXME Use threads (for example _lookup_ids_loop) or multithreaded Sandbox
-            for job in done:
-                try:
-                    task = self.sandbox.Task(job.upload_task_id)
-                except:
-                    raise # NotImplementedError() #5
-
-                try:
-                    resource_id = task.release['resources'][0]['resource_id']
-                except:
-                    raise # NotImplementedError() #6
-
-                job.promise.set(resource_id)
+                else:
+                    job = in_progress.pop(task_id)
+                    logger.error("Unknown task status %s for task=%d, %s" % (status, task_id, job))
+                    self._set_promise(job, None,
+                        RuntimeError("Unknown task status %s for task_id=%d" % (status, task_id)))
 
             with self.lock:
-                for job in done:
-                    self.running.pop(job.id)
+                self.wait2_queue.extend(done)
+                self.wait2_queue_not_empty.notify()
 
-            next_poll_time = max(next_poll_time + poll_interval, time.time())
+    def _try_fetch_upload_task_resource_id(self, job):
+        try:
+            ans = self.sandbox.list_task_resources(job.upload_task_id)
+        except Exception as e:
+            logging.warning("Failed to list resources of task %d: %s" % (task_id, e))
+            return
+
+        resource_id = None
+        for res in ans['items']:
+            if res['type'] == job.resource_type:
+                resource_id = res['id']
+
+        if not resource_id:
+            raise RuntimeError("Resource of type %s not found in task %d resources" \
+                % (job.resource_type, job.upload_task_id))
+
+        return resource_id
+
+    # FIXME Use threads: several _sandbox_wait2_loop's or multithreaded Sandbox
+    def _sandbox_wait2_loop(self):
+        while not self.should_stop:
+            with self.lock:
+                while not(self.should_stop or self.wait2_queue):
+                    self.wait2_queue_not_empty.wait()
+
+                if self.should_stop: # TODO
+                    return
+
+                job = self.wait2_queue.popleft()
+
+            try:
+                resource_id = self._try_fetch_upload_task_resource_id(job)
+            except Exception as e:
+                logging.warning("Failed to get resource %s from task %d: %s" \
+                    % (job.resource_type, job.upload_task_id, e))
+                self._set_promise(job, None, e)
+                del job
+                continue
+
+            if not resource_id:
+                self._schedule_retry(job, self.Action.FETCH_RESOURCE_ID, delay=3.0)
+            else:
+                logging.debug('Done with %s, resource_id = %d' % (job, resource_id))
+                self._set_promise(job, resource_id)
+
+            del job
