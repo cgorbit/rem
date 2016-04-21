@@ -140,6 +140,9 @@ class Sandbox(object):
             task.update(**kwargs)
         return task
 
+    def list_task_resources(self, id):
+        return self._make_call('GET', '/task/%d/resources' % id)
+
     def list_task_statuses(self, ids):
         #url = '/task?limit=%d&' % len(ids)
         #url += '&'.join('id=%d' % id for id in ids)
@@ -149,7 +152,7 @@ class Sandbox(object):
         resp = self._make_call('GET', url)
         return {t['id']: t['status'] for t in resp['items']}
 
-    def upload_resource(self, type, name, protocol, remote_file_name, ttl=None, arch=None, **kwargs):
+    def create_resource_upload_task(self, type, name, protocol, remote_file_name, ttl=None, arch=None, **kwargs):
         context = {
             'created_resource_name': name,
             'remote_file_protocol': protocol,
