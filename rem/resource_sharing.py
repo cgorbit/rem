@@ -67,9 +67,6 @@ def sky_share_future(subproc, filename):
     return wrap_future(p.get_returncode_future(), finalize)
 
 
-def _enoent(msg):
-    return OSError(errno.ENOENT, msg)
-
 class Sharer(object):
     def __init__(self, subproc, sandbox, task_owner, task_priority, default_ttl=None):
         self.subproc = subproc
