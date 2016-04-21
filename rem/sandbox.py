@@ -157,7 +157,7 @@ class Sandbox(object):
             'created_resource_name': name,
             'remote_file_protocol': protocol,
             'remote_file_name': remote_file_name,
-            'resource_type': 'CLOUD_TAGS_NIRVANA_BERNSTEIN_BINARY',
+            'resource_type': type,
         }
 
         if ttl is not None:
