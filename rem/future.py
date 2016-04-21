@@ -5,41 +5,79 @@ import threading
 class NotReadyError(RuntimeError):
     pass
 
+class AlreadySet(RuntimeError):
+    pass
+
+class AlreadyCancelled(RuntimeError):
+    pass
+
 
 class _FutureState(object):
     def __init__(self):
         self._val = None
         self._exc = None
         self._ready_callbacks = []
+        self._cancel_callbacks = []
         self._is_set = False
+        self._is_cancelled = False
         self._lock = threading.Lock()
-        self._set_event = threading.Condition(self._lock)
+        self._change_event = threading.Condition(self._lock)
 
     def set(self, val=None, exc=None):
         to_run = []
 
         with self._lock:
             if self._is_set:
-                raise RuntimeError("Future state already set")
+                raise AlreadySet("Future state already set")
+            if self._is_cancelled:
+                raise AlreadyCancelled("Future state is cancelled")
             self._is_set = True
             self._val = val
             self._exc = exc
             to_run, self._ready_callbacks = self._ready_callbacks, to_run
-            self._set_event.notify_all()
+            self._change_event.notify_all()
 
-        self._run(to_run)
+        self._run_ready(to_run)
 
-    def _run(self, to_run):
-        future = Future(self) # sorry
+    def cancel(self):
+        to_run = []
+
+        with self._lock:
+            if self._is_set:
+                raise AlreadySet("Future state is set")
+            if self._is_cancelled:
+                raise AlreadyCancelled("Future state already cancelled")
+            self._is_cancelled = True
+            to_run, self._cancel_callbacks = self._cancel_callbacks, to_run
+            self._change_event.notify_all()
+
+        self._run_cancelled(to_run)
+
+    def _run_ready(self, to_run):
+        future = Future(self)
         for f in to_run:
-            f(future)
+            try:
+                f(future)
+            except:
+                pass
+
+    def _run_cancelled(self, to_run):
+        for f in to_run:
+            try:
+                f()
+            except:
+                pass
 
     def _repr_inter(self):
         is_set = self._is_set
+        is_cancelled = self._is_cancelled
 
-        ret = '%sset' % (
-            '' if is_set else 'not '
-        )
+        if is_set:
+            ret = 'set'
+        elif is_cancelled:
+            ret = 'cancelled'
+        else:
+            ret = 'not set'
 
         if is_set:
             ret += ' to '
@@ -64,21 +102,37 @@ class _FutureState(object):
             else:
                 self._ready_callbacks.append(code)
         if to_run:
-            self._run(to_run)
+            self._run_ready(to_run)
+
+    def on_cancel(self, code):
+        to_run = []
+        with self._lock:
+            if self._is_cancelled:
+                to_run.append(code)
+            else:
+                self._cancel_callbacks.append(code)
+        if to_run:
+            self._run_cancelled(to_run)
 
     def wait(self, timeout=None):
         if self._is_set:
             return True
 
         with self._lock:
-            if not self._is_set:
-                self._set_event.wait(timeout)
+            if not self._is_set and not self._is_cancelled:
+                self._change_event.wait(timeout)
 
-        return self._is_set
+            if self._is_cancelled:
+                raise AlreadyCancelled()
+
+            ret = self._is_set
+
+        return ret
 
     def get_raw(self, timeout=None):
         if not self.wait(timeout):
             raise NotReadyError()
+
         return (self._val, self._exc)
 
     def get_exception(self, timeout=None):
@@ -87,6 +141,7 @@ class _FutureState(object):
     def get(self, timeout=None):
         if not self.wait(timeout):
             raise NotReadyError()
+
         if self._exc:
             if isinstance(self._exc, tuple):
                 raise self._exc[0], self._exc[1], self._exc[2]
@@ -139,11 +194,15 @@ class Future(object):
     def subscribe(self, code):
         self._state.subscribe(code)
 
+    def cancel(self):
+        self._state.cancel()
+
     def is_success(self):
         return self._state.is_success()
 
     def __repr__(self):
         return _repr(self)
+
 
 class Promise(object):
     def __init__(self):
@@ -153,8 +212,17 @@ class Promise(object):
         self._state.set(val, exc)
         return self
 
+    def set_error(self, exc):
+        self.set(None, exc)
+
     def is_set(self):
         return self._state.is_set()
+
+    def is_cancelled(self):
+        return self._state.is_cancelled()
+
+    def on_cancel(self, code):
+        self._state.on_cancel(code)
 
     def to_future(self):
         return Future(self._state)
