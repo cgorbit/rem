@@ -13,7 +13,7 @@ from future import Promise, wrap_future
 import rem.delayed_executor as delayed_executor
 
 
-def sky_share_future(subproc, filename):
+def sky_share(subproc, filename):
     out = NamedTemporaryFile('w')
 
     dirname, basename = os.path.split(filename)
@@ -233,7 +233,7 @@ class Sharer(object):
 
             try:
                 with Timing('sky_share_future %d' % job.id): # ~4ms (we wait pid from subprocsrv)
-                    torrent_id = sky_share_future(self.subproc, job.filename)
+                    torrent_id = sky_share(self.subproc, job.filename)
             except:
                 in_progress.remove(job)
                 schedule_retry(job)
