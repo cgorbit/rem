@@ -12,29 +12,19 @@ from rem.profile import ProfiledThread
 from future import Promise, wrap_future
 import rem.delayed_executor as delayed_executor
 
-def sky_share(subproc, filename):
-    with NamedTemporaryFile('w') as out:
-        # TODO collect STDERR
-        p = subproc.Popen(['sky', 'share', filename], stdout=out.name, stderr='/dev/null')
-
-        if p.wait():
-            raise RuntimeError("sky share failed with exit status: %d" % p.returncode)
-
-        with open(out.name) as in_:
-            id = in_.readline().rstrip('\n')
-
-    if not id.startswith('rbtorrent:'):
-        raise RuntimeError('Malformed output of sky share: %s' % id[:100])
-
-    return id
-
 
 def sky_share_future(subproc, filename):
     out = NamedTemporaryFile('w')
 
+    dirname, basename = os.path.split(filename)
+
+    # FIXME collect STDERR
     try:
-        # TODO collect STDERR
-        p = subproc.Popen(['sky', 'share', filename], stdout=out.name, stderr='/dev/null')
+        p = subproc.Popen(
+            ['sky', 'share', '-d', dirname, basename],
+            stdout=out.name,
+            stderr='/dev/null'
+        )
     except:
         try:
             raise
