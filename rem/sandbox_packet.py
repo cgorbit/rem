@@ -111,7 +111,7 @@ class Packet(object):
         self._proc_runner = rem.job.create_job_runner(None, None)
 
         print >>sys.stderr, self._graph_executor.__dict__
-        print >>sys.stderr, self._graph_executor.calc_repr_state()
+        print >>sys.stderr, self._graph_executor.get_repr_state()
 
         self._main_thread = ProfiledThread(target=self._main_loop, name_prefix='Packet')
         self._main_thread.start()
@@ -155,7 +155,7 @@ class Packet(object):
     def _calc_repr_state(self):
         if self._finished:
             return ReprState.ERROR if self.failed else ReprState.SUCCESSFULL
-        return self._graph_executor.calc_repr_state()
+        return self._graph_executor.get_repr_state()
 
 # OPS for JobGraphExecutor's OPS
     def _update_repr_state_if_need(self):

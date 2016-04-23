@@ -15,7 +15,10 @@ import rem.scheduler
 import rem.constants as constants
 import rem.rem_logging as rem_logging
 
+import cPickle as pickle
 import hashlib
+
+
 def calc_checksum(path):
     BUF_SIZE = 256 * 1024
     with open(path, "r") as reader:
@@ -37,93 +40,87 @@ def main():
         return
 
     ctx = rem.context.Context('/home/trofimenkov/rem/rem.cfg')
-    sched = rem.scheduler.Scheduler(ctx)
 
-    def pck_add_job(pck, shell, parents=None, pipe_parents=None, set_tag=None, tries=5,
-                    max_err_len=None, retry_delay=None, pipe_fail=False,
-                    description="", notify_timeout=constants.NOTIFICATION_TIMEOUT,
-                    max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT,
-                    output_to_status=False):
+    if False:
+        sched = rem.scheduler.Scheduler(ctx)
 
-        if parents is None:
-            parents = []
+        def pck_add_job(pck, shell, parents=None, pipe_parents=None, set_tag=None, tries=5,
+                        max_err_len=None, retry_delay=None, pipe_fail=False,
+                        description="", notify_timeout=constants.NOTIFICATION_TIMEOUT,
+                        max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT,
+                        output_to_status=False):
 
-        if pipe_parents is None:
-            pipe_parents = []
+            if parents is None:
+                parents = []
 
-        job = pck.rpc_add_job(shell, parents, pipe_parents,
-                              set_tag and sched.tagRef.AcquireTag(set_tag),
-                              tries, max_err_len, retry_delay, pipe_fail,
-                              description, notify_timeout, max_working_time,
-                              output_to_status)
-        return job.id
+            if pipe_parents is None:
+                pipe_parents = []
 
-    def save_binary(raw):
-        sched.binStorage.CreateFile(raw)
+            job = pck.rpc_add_job(
+                shell, parents, pipe_parents,
+                set_tag and sched.tagRef.AcquireTag(set_tag),
+                tries, max_err_len, retry_delay, pipe_fail,
+                description, notify_timeout, max_working_time,
+                output_to_status)
 
-    def pck_add_binary(pck, name, fullpath):
-        checksum = calc_checksum(fullpath)
+            return job.id
 
-        file = sched.binStorage.GetFileByHash(checksum)
-        if not file:
-            with open(fullpath) as in_:
-                save_binary(in_.read())
-        file = sched.binStorage.GetFileByHash(checksum)
-        assert bool(file)
+        def save_binary(raw):
+            sched.binStorage.CreateFile(raw)
 
-        pck.rpc_add_binary(name, file)
+        def pck_add_binary(pck, name, fullpath):
+            checksum = calc_checksum(fullpath)
+
+            file = sched.binStorage.GetFileByHash(checksum)
+            if not file:
+                with open(fullpath) as in_:
+                    save_binary(in_.read())
+            file = sched.binStorage.GetFileByHash(checksum)
+            assert bool(file)
+
+            pck.rpc_add_binary(name, file)
 
 
-    pck = packet.SandboxPacket(
-        'test_sandbox_packet_name_001',
-        priority=0,
-        context=ctx,
-        notify_emails=[],
-        wait_tags=[],
-        set_tag=None,
-        kill_all_jobs_on_error=True,
-        is_resetable=True,
-        notify_on_reset=True,
-        notify_on_skipped_reset=True,
-    )
+        pck = packet.SandboxPacket(
+            'test_sandbox_packet_name_001',
+            priority=0,
+            context=ctx,
+            notify_emails=[],
+            wait_tags=[],
+            set_tag=None,
+            kill_all_jobs_on_error=True,
+            is_resetable=True,
+            notify_on_reset=True,
+            notify_on_skipped_reset=True,
+        )
 
-    j001 = pck_add_job(pck, 'echo 001; sleep 1', tries=1)
-    j002 = pck_add_job(pck, 'echo 002; sleep 1', tries=3, parents=[j001])
-    j003 = pck_add_job(pck, 'echo 003; sleep 1', tries=3, parents=[j002])
+        j001 = pck_add_job(pck, 'echo 001; sleep 1', tries=1)
+        j002 = pck_add_job(pck, 'echo 002; wc; sleep 1', tries=3, pipe_parents=[j001])
+        j003 = pck_add_job(pck, 'echo 003; sleep 1', tries=3, parents=[j002])
 
-    pck_add_binary(pck, 'true', '/bin/true')
+        pck_add_binary(pck, 'true', '/bin/true')
 
-    sbx_pck = pck.create_sandbox_packet()
+        sbx_pck = pck.create_sandbox_packet()
 
-    import cPickle as pickle
-    serialized = base64.b64encode(pickle.dumps(sbx_pck, 2))
+        serialized = base64.b64encode(pickle.dumps(sbx_pck, 2))
+        #print serialized
+        #return 0
+
+    if True:
+        serialized = 'gAJjcmVtLnNhbmRib3hfcGFja2V0ClBhY2tldApxASmBcQJ9cQMoVQlfZmluaXNoZWRxBIlVD19ncmFwaF9leGVjdXRvcnEFY3JlbS5qb2JfZ3JhcGgKSm9iR3JhcGhFeGVjdXRvcgpxBimBcQd9cQgoVQRqb2JzcQl9cQooShDa2QJjcmVtLmpvYgpKb2IKcQspgXEMfXENKFULbWF4VHJ5Q291bnRxDksBVRBtYXhfd29ya2luZ190aW1lcQ9KAHUSAFUFc2hlbGxxEFURZWNobyAwMDE7IHNsZWVwIDFxEVULZGVzY3JpcHRpb25xElUAVQZpbnB1dHNxE11xFFUQb3V0cHV0X3RvX3N0YXR1c3EViVUHcmVzdWx0c3EWXXEXVQV0cmllc3EYSwBVC3JldHJ5X2RlbGF5cRlOVQZwY2tfaWRxGlUKcGNrLU1NdEc4ZXEbVQJpZHEcShDa2QJVCXBpcGVfZmFpbHEdiVULbWF4X2Vycl9sZW5xHk5VDHdvcmtpbmdfdGltZXEfSwBVB3BhcmVudHNxIF1xIVUObm90aWZ5X3RpbWVvdXRxIkqAOgkAdWJKUNrZAmgLKYFxI31xJChoDksDaA9KAHUSAGgQVRVlY2hvIDAwMjsgd2M7IHNsZWVwIDFxJWgSVQBoE11xJkoQ2tkCYWgViWgWXXEnaBhLAGgZTmgaaBtoHEpQ2tkCaB2JaB5OaB9LAGggXXEoShDa2QJhaCJKgDoJAHViSpDa2QJoCymBcSl9cSooaA5LA2gPSgB1EgBoEFURZWNobyAwMDM7IHNsZWVwIDFxK2gSVQBoE11xLGgViWgWXXEtaBhLAGgZTmgaaBtoHEqQ2tkCaB2JaB5OaB9LAGggXXEuSlDa2QJhaCJKgDoJAHVidVUNd2FpdF9qb2JfZGVwc3EvfXEwKEoQ2tkCY19fYnVpbHRpbl9fCnNldApxMV2FUnEySlDa2QJoMV1xM0oQ2tkCYYVScTRKkNrZAmgxXXE1SlDa2QJhhVJxNnVVC2pvYnNfdG9fcnVucTdoMV1xOEoQ2tkCYYVScTlVDWpvYnNfdG9fcmV0cnlxOn1oGlUAVQxzdWNjZWVkX2pvYnNxO2gxXYVScTxVFmtpbGxfYWxsX2pvYnNfb25fZXJyb3JxPYhVDF9jbGVhbl9zdGF0ZXE+iFULZmFpbGVkX2pvYnNxP2gxXYVScUBVCmpvYnNfZ3JhcGhxQX1xQihKENrZAl1xQ0pQ2tkCYUpQ2tkCXXFESpDa2QJhSpDa2QJddVURZG9udF9ydW5fbmV3X2pvYnNxRYlVDmNyZWF0ZWRfaW5wdXRzcUZoMV2FUnFHVQRfb3BzcUhjcmVtLnNhbmRib3hfcGFja2V0Cl9FeGVjdXRvck9wcwpxSSmBcUp9cUtVA3Bja3FMaAJzYnViVQdfZmFpbGVkcU2JVQRuYW1lcU5VIF9UT0RPX3BhY2tldF9uYW1lX2Zvcl9wY2stTU10RzhlcU9VCnJlcHJfc3RhdGVxUFUHQ1JFQVRFRHFRaBxoG1UHaGlzdG9yeXFSXXFTaFFHQdXG5P3uFQGGcVRhdWIu'
 
     sbx_pck1 = pickle.loads(base64.b64decode(serialized))
 
-    print sbx_pck1.__dict__
+    #print sbx_pck1.__dict__
 
     if True:
         print >>sys.stderr, os.getpid()
         rem_logging.reinit_logger(ctx)
 
-        sbx_pck.start('/home/trofimenkov/tmp/sbx-XJ23klfd')
-        sbx_pck.join()
+        sbx_pck1.start('/home/trofimenkov/tmp/sbx-XJ23klfd')
+        sbx_pck1.join()
 
         return 0
-
-    #print '+ __dict__:'
-    #pprint(sbx_pck.__dict__)
-    #print
-
-    #serialized = sbx_pck.dumps_json()
-
-    #print '+ SERIALIZED:'
-    #print serialized
-
-    #pck_copy = sbx_pck.loads_json(serialized)
-
-    #print id(sbx_pck), type(sbx_pck)
-    #print id(pck_copy), type(pck_copy)
 
 
 if __name__ == '__main__':

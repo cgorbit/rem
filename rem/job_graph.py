@@ -129,7 +129,7 @@ class JobGraphExecutor(Unpickable(
 
         return sdict
 
-    def calc_repr_state(self):
+    def get_repr_state(self):
         has_active_jobs = bool(self.active_jobs_cache)
 
         if False:
@@ -411,7 +411,7 @@ class JobGraphExecutor(Unpickable(
 
         self._clean_state = True # FIXME
 
-    def produce_status(self):
+    def produce_detailed_status(self):
         ret = []
 
         for jid, job in self.jobs.iteritems():
@@ -462,20 +462,25 @@ class JobGraphExecutor(Unpickable(
 
         self._notify_can_run_jobs_if_need()
 
-    def reset_tries(self):
+    def _reset_tries(self):
         self.jobs_to_run.update(self.failed_jobs)
         self.failed_jobs.clear()
         for job in self.jobs.values():
             job.tries = 0
         self._notify_can_run_jobs_if_need()
 
-    def resume(self):
+    def resume(self, reset_tries=False):
+        if reset_tries:
+            self._reset_tries()
         self.dont_run_new_jobs = False
         # FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
         self._ops.update_repr_state()
         self._notify_can_run_jobs_if_need()
 
-    def reset(self):
+    def drop(self):
+        pass
+
+    def restart(self):
         if not self._clean_state:
             self._do_reset()
         self._notify_can_run_jobs_if_need()
@@ -531,5 +536,5 @@ class JobGraphExecutor(Unpickable(
             self._register_stop_waiting(job_id, deadline)
 
 # TODO XXX FIXME
-    def stop_any_activity(self):
+    def drop(self):
         self._kill_jobs_drop_results()
