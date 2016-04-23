@@ -146,11 +146,11 @@ class Job(Unpickable(results=list,
                      output_to_status=bool)):
     ERR_PENALTY_FACTOR = 6
 
-    def __init__(self, shell, parents, pipe_parents, pck, maxTryCount, max_err_len=None,
+    def __init__(self, shell, parents, pipe_parents, pck_id, maxTryCount, max_err_len=None,
                  retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
         super(Job, self).__init__()
-        self.pck = pck
         self.id = id(self)
+        self.pck_id = pck_id
         self.maxTryCount = maxTryCount
         self.shell = shell
         self.parents = parents
@@ -163,27 +163,27 @@ class Job(Unpickable(results=list,
         self.max_working_time = max_working_time
         self.output_to_status = output_to_status
 
-    def __get_sbx_state__(self):
-        sdict = self.__dict__.copy()
-        sdict.pop('pck')
-        return sdict
+    #def __get_sbx_state__(self):
+        #sdict = self.__dict__.copy()
+        #sdict.pop('pck')
+        #return sdict
 
-    def __set_sbx_state__(self, sdict, pck):
-        self.__dict__.update(sdict)
-        self.pck = pck
-        return self
+    #def __set_sbx_state__(self, sdict, pck):
+        #self.__dict__.update(sdict)
+        #self.pck = pck
+        #return self
 
-    @classmethod
-    def from_sbx_state(cls, pck, sdict):
-        self = cls.__new__(cls)
-        self.pck = pck
-        return self
+    #@classmethod
+    #def from_sbx_state(cls, pck, sdict):
+        #self = cls.__new__(cls)
+        #self.pck = pck
+        #return self
 
-    #def __repr__(self):
-        #return "<Job(id: %s; packet: %s)>" % (self.id, self.pck.id)
+    def __repr__(self):
+        return "<Job(id: %s; packet: %s)>" % (self.id, self.pck_id)
 
     def full_id(self):
-        return "%s.%s" % (self.pck.id, self.id)
+        return "%s.%s" % (self.pck_id, self.id)
 
     def __getstate__(self):
         return self.__dict__.copy()
@@ -197,22 +197,8 @@ class Job(Unpickable(results=list,
         return DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
                     else self.__make_run_args()
 
-    def _notify_long_execution(self, working_time):
-        self.cached_working_time = working_time
-        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, self.id)
-        self.pck.send_job_long_execution_notification(self)
-
-    def start_process(self, *args, **kwargs):
-        return self.pck.start_process(args, kwargs) # для sandbox
-
     def last_result(self):
         return self.results[-1] if self.results else None
-
-    def _create_file_handles(self):
-        return self.pck._create_job_file_handles(self)
-
-    def get_working_directory(self):
-        return self.pck.get_working_directory()
 
     def produce_legacy_stderr_output(self, filename):
         return self._produce_legacy_stderr_output(filename, self.max_err_len or _DEFAULT_STDERR_SUMMAY_LEN)
@@ -241,12 +227,10 @@ class Job(Unpickable(results=list,
             ret += '\n' + stream.read()
         return ret
 
-    def on_done(self, runner):
-        self.pck.on_job_done(runner)
-
 
 class JobRunner(object):
-    def __init__(self, job):
+    def __init__(self, ops, job):
+        self._ops = ops
         self._job = job
         self._cancelled = False
 
@@ -271,7 +255,8 @@ class JobRunner(object):
             code = process.wait(deadline=start_time + job.notify_timeout)
 
             if code is None:
-                job._notify_long_execution(time.time() - start_time)
+                job.cached_working_time = time.time() - start_time
+                self._ops.notify_long_execution(job)
             else:
                 return code
 
@@ -285,15 +270,16 @@ class JobRunner(object):
 
     def _run_process_inner(self, argv, stdin, stdout, stderr):
         job = self._job
+        ops = self._ops
         self._start_time = time.time()
 
         try:
-            process = job.start_process(
+            process = ops.start_process(
                 argv,
                 stdout=stdout,
                 stdin=stdin,
                 stderr=stderr,
-                cwd=job.get_working_directory(),
+                cwd=ops.get_working_directory(),
             )
 
         except pgrpguard.Error as e:
@@ -302,6 +288,7 @@ class JobRunner(object):
 
         except Exception as e:
             self._process_start_error = e
+            logging.debug("Failed to start %s: %s" % (job, e))
             return False
 
         self._process = process
@@ -341,7 +328,7 @@ class JobRunner(object):
         argv = job.make_run_args()
 
         try:
-            stdin, stdout, stderr = job._create_file_handles()
+            stdin, stdout, stderr = self._ops.create_file_handles(job)
         except Exception as e:
             self._environment_error = e
             return
@@ -407,7 +394,7 @@ class JobRunner(object):
             self._append_results()
 
         finally:
-            job.on_done(self)
+            self._ops.on_job_done(self)
 
     def cancel(self):
         self._cancelled = True

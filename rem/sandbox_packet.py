@@ -1,3 +1,4 @@
+import sys
 import time
 import json
 import threading
@@ -10,87 +11,22 @@ import rem.subprocsrv
 from rem.packet_common import ReprState
 from rem_logging import logger as logging
 
-class Resources(object):
-    def __init__(self):
-        self.added_files = [] # (id, digest, filename)
-        self.python = None
-        self.packet_executor = None
-
-
-class Packet(object):
-    def __init__(self, pck_id, rem_server, jobs, jobs_graph, kill_all_jobs_on_error):
-        self.id = pck_id
-        self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
-        self.rem_server = rem_server # FIXME rem_server in deserialize?
-        self.kill_all_jobs_on_error = kill_all_jobs_on_error
-        self.jobs = jobs
-        self.jobs_graph = jobs_graph
-        self.history = []
-        self.state = ReprState.CREATED
-
-    def _create_job_graph_executor(self, runner, directory):
-        return rem.job_graph.JobGraphExecutor(
-            _ExecutorOps(runner),
-            self.jobs,
-            self.jobs_graph,
-            self.id,
-            directory,
-            self.kill_all_jobs_on_error,
-        )
-
-    def __get_sbx_state__(self):
-        sdict = self.__dict__.copy()
-
-        sdict['jobs'] = {
-            id: job.__get_sbx_state__()
-                for id, job in sdict['jobs'].items()
-        }
-
-        return sdict
-
-    def __set_sbx_state__(self, sdict):
-        self.__dict__.clear()
-        self.__dict__.update(sdict)
-        self.jobs_graph = {
-            int(id): val
-                for id, val in self.jobs_graph.items()
-        }
-        self.jobs = {
-            int(id): rem.job.Job.from_sbx_state(job, self)
-                for id, job in self.jobs.items()
-        }
-        return self
-
-    @classmethod
-    def from_sbx_state(cls, sdict):
-        self = cls.__new__(cls)
-        self.__set_sbx_state__(sdict)
-        return self
-
-    def dump_json(self, out):
-        json.dump(self.__get_sbx_state__(), out, indent=3)
-
-    def dumps_json(self):
-        return json.dumps(self.__get_sbx_state__(), indent=3)
-
-    @classmethod
-    def loads_json(cls, s):
-        return cls.from_sbx_state(json.loads(s))
-
-    @classmethod
-    def load_json(cls, in_):
-        return cls.from_sbx_state(json.load(in_))
+#class Resources(object):
+    #def __init__(self):
+        #self.added_files = [] # (id, digest, filename)
+        #self.python = None
+        #self.packet_executor = None
 
 
 class _ExecutorOps(object):
-    def __init__(self, runner):
-        self.runner = runner
+    def __init__(self, pck):
+        self.pck = pck
 
     def update_repr_state(self):
-        self.runner._update_repr_state()
+        self.pck._update_repr_state_if_need()
 
     def stop_waiting(self, stop_id):
-        self.runner._stop_waiting(stop_id)
+        self.pck._stop_waiting(stop_id)
 
     def del_working(self, job):
         pass
@@ -98,14 +34,17 @@ class _ExecutorOps(object):
     def add_working(self, job):
         pass
 
+    def get_io_directory(self):
+        return self.pck.get_io_directory()
+
     def set_successfull_state(self):
-        r = self.runner
+        r = self.pck
         r._finished = True
         r._job_finished.notify()
         logging.debug('+++ set_successfull_state')
 
     def set_errored_state(self):
-        r = self.runner
+        r = self.pck
         r._failed = True
         r._finished = True
         r._job_finished.notify()
@@ -113,26 +52,72 @@ class _ExecutorOps(object):
 
     def job_done_successfully(self, job_id):
         pass # TODO Notify rem_server for job_done_tag
-        self.runner._job_finished.notify()
+        self.pck._job_finished.notify()
         logging.debug('+++ job_done_successfully')
 
     def create_job_runner(self, job):
-        return rem.job.JobRunner(job)
+        return rem.job.JobRunner(self.pck, job) # brain damage
 
     def on_can_run_jobs(self):
-        self.runner._job_finished.notify()
+        self.pck._job_finished.notify()
 
 
-class PacketRunner(object):
-    def __init__(self, pck, directory):
-        self._pck = pck
-        self._directory = directory
+class Packet(object):
+    def __init__(self, pck_id, jobs, jobs_graph, kill_all_jobs_on_error):
+        self.id = pck_id
+        self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
+        self.history = []
         self._finished = False
         self._failed = False
+        #self._init_non_persistent()
+
+        self._graph_executor = rem.job_graph.JobGraphExecutor(
+            _ExecutorOps(self),
+            jobs,
+            jobs_graph,
+            self.id,
+            kill_all_jobs_on_error,
+        )
+
+        self.update_repr_state(ReprState.CREATED)
+
+    def update_repr_state(self, state):
+        self.repr_state = state
+        self.history.append((state, time.time()))
+        logging.info("new state %s" % state)
+
+    def _init_non_persistent(self):
         self._lock = threading.RLock()
         self._job_finished = threading.Condition(self._lock)
+        self._main_thread = None
         self._proc_runner = None
-        self._graph_executor = None
+
+    def __getstate__(self):
+        sdict = self.__dict__.copy()
+        sdict.pop('_lock', None)
+        sdict.pop('_job_finished', None)
+        sdict.pop('_directory', None)
+        sdict.pop('_main_thread', None)
+        sdict.pop('_proc_runner', None)
+        return sdict
+
+    def __setstate__(self, sdict):
+        self.__dict__.update(sdict)
+        #self._init_non_persistent()
+
+    def start(self, directory):
+        self._directory = directory
+        self._init_non_persistent()
+        self._proc_runner = rem.job.create_job_runner(None, None)
+
+        print >>sys.stderr, self._graph_executor.__dict__
+        print >>sys.stderr, self._graph_executor.calc_repr_state()
+
+        self._main_thread = ProfiledThread(target=self._main_loop, name_prefix='Packet')
+        self._main_thread.start()
+
+    def join(self):
+        self._main_thread.join()
 
     def get_working_directory(self):
         return self._directory + '/work'
@@ -152,23 +137,12 @@ class PacketRunner(object):
 
     def _start_one_another_job(self):
         logging.debug('+ Packet._start_one_another_job')
-        runner = self._graph_executor.get_job_to_run()
-        t = ProfiledThread(target=runner.run)
+        job_runner = self._graph_executor.get_job_to_run()
+        t = ProfiledThread(target=job_runner.run, name_prefix='Job')
         t.start()
 
-    def run(self):
+    def _main_loop(self):
         logging.debug('+ Packet.run')
-        self._proc_runner = rem.job.create_job_runner(None, None)
-
-        with self._lock:
-            self._graph_executor = \
-                self._pck._create_job_graph_executor(self, self.get_io_directory())
-
-        for job in self._pck.jobs.values():
-            job.pck = self
-
-        print self._graph_executor.__dict__
-        print self._graph_executor.calc_repr_state()
 
         while not self._finished:
             with self._lock:
@@ -184,18 +158,17 @@ class PacketRunner(object):
         return self._graph_executor.calc_repr_state()
 
 # OPS for JobGraphExecutor's OPS
-    def _update_repr_state(self):
+    def _update_repr_state_if_need(self):
         new_state = self._calc_repr_state()
-        if new_state != self._pck.state:
-            self._pck.state = new_state
-            logging.info("new state %s" % new_state)
+        if new_state != self.repr_state:
+            self.update_repr_state(new_state)
 
     def _stop_waiting(self, stop_id):
         with self._lock:
             self._graph_executor.stop_waiting(stop_id)
 
 # OPS for rem.job.Job
-    def start_process(self, args, kwargs):
+    def start_process(self, *args, **kwargs):
         return self._proc_runner(*args, **kwargs)
 
     def send_job_long_execution_notification(self):
@@ -204,9 +177,59 @@ class PacketRunner(object):
     def _create_job_file_handles(self, job):
         return self._graph_executor.create_job_file_handles(job)
 
-    def on_job_done(self, runner):
-        self._graph_executor.on_job_done(runner)
+    def on_job_done(self, job_runner):
+        self._graph_executor.on_job_done(job_runner)
 
         with self._lock:
             self._graph_executor.apply_jobs_results()
+
+    def create_file_handles(self, job):
+        return self._graph_executor.create_job_file_handles(job)
+
+
+
+
+    #def __get_sbx_state__(self):
+        #sdict = self.__dict__.copy()
+
+        #sdict['jobs'] = {
+            #id: job.__get_sbx_state__()
+                #for id, job in sdict['jobs'].items()
+        #}
+
+        #return sdict
+
+    #def __set_sbx_state__(self, sdict):
+        #self.__dict__.clear()
+        #self.__dict__.update(sdict)
+        #self.jobs_graph = {
+            #int(id): val
+                #for id, val in self.jobs_graph.items()
+        #}
+        #self.jobs = {
+            #int(id): rem.job.Job.from_sbx_state(job, self)
+                #for id, job in self.jobs.items()
+        #}
+        #return self
+
+    #@classmethod
+    #def from_sbx_state(cls, sdict):
+        #self = cls.__new__(cls)
+        #self.__set_sbx_state__(sdict)
+        #return self
+
+    #def dump_json(self, out):
+        #json.dump(self.__get_sbx_state__(), out, indent=3)
+
+    #def dumps_json(self):
+        #return json.dumps(self.__get_sbx_state__(), indent=3)
+
+    #@classmethod
+    #def loads_json(cls, s):
+        #return cls.from_sbx_state(json.loads(s))
+
+    #@classmethod
+    #def load_json(cls, in_):
+        #return cls.from_sbx_state(json.load(in_))
+
 

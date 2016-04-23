@@ -74,14 +74,14 @@ class Timing(object):
 
 
 # XXX TODO Need to go Sandbox async
+# XXX TODO Need vivification-code
 
 class Sharer(object):
-    def __init__(self, subproc, sandbox, task_owner, task_priority, default_ttl=None):
+    def __init__(self, subproc, sandbox, task_owner, task_priority):
         self.subproc = subproc
         self.sandbox = sandbox
         self.task_owner = task_owner
         self.task_priority = task_priority
-        self.default_ttl = default_ttl
         self.lock = threading.Lock()
         self.next_job_id = 1
         self.running = {}
@@ -96,18 +96,41 @@ class Sharer(object):
         self.wait2_queue_not_empty = threading.Condition(self.lock)
         self.should_stop = False
 
-        self.share_thread  = ProfiledThread(target=self._share_loop, name_prefix='ResShare')
-        self.upload_thread = ProfiledThread(target=self._upload_loop, name_prefix='ResUpload')
-        self.sandbox_wait1_thread = ProfiledThread(target=self._sandbox_wait1_loop, name_prefix='ResWait1')
-        self.sandbox_wait2_thread = ProfiledThread(target=self._sandbox_wait2_loop, name_prefix='ResWait2')
-
-        self.share_thread.start()
-        self.upload_thread.start()
-        self.sandbox_wait1_thread.start()
-        self.sandbox_wait2_thread.start()
-
-    def stop(self):
+    @classmethod
+    def from_context(cls, ctx):
         raise NotImplementedError()
+
+    def UpdateContext(self, ctx):
+        raise NotImplementedError()
+
+    def start(self):
+        self.threads = [
+            ProfiledThread(target=self._share_loop, name_prefix='ResShare'),
+            ProfiledThread(target=self._upload_loop, name_prefix='ResUpload'),
+            ProfiledThread(target=self._sandbox_wait1_loop, name_prefix='ResWait1'),
+            ProfiledThread(target=self._sandbox_wait2_loop, name_prefix='ResWait2'),
+        ]
+
+        for t in self.threads:
+            t.start()
+
+# TODO This is naive implementation
+    def stop(self):
+        with self.lock:
+            self.should_stop = True
+
+            condvars = [
+                self.share_queue_not_empty
+                self.upload_queue_not_empty
+                self.wait1_queue_not_empty
+                self.wait2_queue_not_empty
+            ]
+
+            for condvar in condvars:
+                condvar.notify()
+
+        for t in self.threads:
+            t.join()
 
     class Job(object):
         def __init__(self, resource_type, name, filename, arch=None, ttl=None):
@@ -252,7 +275,7 @@ class Sharer(object):
             protocol='skynet',
             remote_file_name=job.torrent_id,
             arch=job.arch,
-            ttl=job.ttl or self.default_ttl,
+            ttl=job.ttl,
             owner=self.task_owner,
             priority=self.task_priority,
             notifications=[],
@@ -449,3 +472,12 @@ class Sharer(object):
                 self._set_promise(job, resource_id)
 
             del job
+
+
+class SharedFiles(object):
+    def __init__(self, sharer, ttl=86400):
+        self.sharer = sharer
+        self.ttl = ttl
+        self.files = {}
+
+    def add(self, path, checksum):

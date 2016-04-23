@@ -88,10 +88,6 @@ class JobGraphExecutor(Unpickable(
                             jobs=dict,
                             jobs_graph=dict,
 
-                        # XXX TODO XXX directory and pck_id can be changed in PacketBase
-                        # XXX TODO XXX directory and pck_id can be changed in sandbox.Packet
-                        # XXX TODO XXX directory __________ can be changed in sandbox_packet.Packet
-                            directory=str,
                             pck_id=str,
 
                             kill_all_jobs_on_error=(bool, True),
@@ -105,17 +101,16 @@ class JobGraphExecutor(Unpickable(
 
                             _clean_state=(bool, False), # False for loading old backups
                             _active_jobs=always(_ActiveJobs),
-                            streams=dict,
+                            created_inputs=set,
 
                             dont_run_new_jobs=bool,
                       ) ):
-    def __init__(self, ops, jobs, jobs_graph, pck_id, directory, kill_all_jobs_on_error):
+    def __init__(self, ops, jobs, jobs_graph, pck_id, kill_all_jobs_on_error):
         super(JobGraphExecutor, self).__init__()
         self.jobs = jobs
         self.jobs_graph = jobs_graph
         self._clean_state = True
         self._ops = ops
-        self.directory = directory
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
         self._init_job_deps_graph()
 
@@ -197,48 +192,42 @@ class JobGraphExecutor(Unpickable(
 
         self._notify_can_run_jobs_if_need()
 
-    # TODO Don't store filehandles in self, only filenames
-    def _stream_file(self, jid, type):
-        stream = self.streams.get((type, jid), None)
-        if stream is not None:
-            if not stream.closed:
-                stream.close()
-            if stream.name != "<uninitialized file>":
-                return stream.name
-        filename = os.path.join(self.directory, "%s-%s" % (type, jid))
-        if os.path.isfile(filename):
-            return filename
-        return None
+    def _format_io_filename(self, (direction, job_id)):
+        return '%s/%s-%s' % (self._ops.get_io_directory(), direction, job_id)
 
     def _create_input(self, jid):
-        if jid in self.jobs:
-            filename = self._stream_file(jid, "in")
-            job = self.jobs[jid]
-            if filename is not None:
-                stream = self.streams[("in", jid)] = open(filename, "r")
-            elif len(job.inputs) == 0:
-                stream = self.streams[("in", jid)] = osspec.get_null_input()
-            elif len(job.inputs) == 1:
-                pid, = job.inputs
-                logging.debug("pid: %s, pck_id: %s", pid, self.pck_id)
-                stream = self.streams[("in", jid)] = open(self._stream_file(pid, "out"), "r")
-            else:
-                with open(os.path.join(self.directory, "in-%s" % jid), "w") as writer:
-                    for pid in job.inputs:
-                        with open(self.streams[("out", pid)].name, "r") as reader:
-                            writer.write(reader.read()) # TODO chunks
-                stream = self.streams[("in", jid)] = open(writer.name, "r")
-            return stream
-        raise RuntimeError("alien job input request")
+        job = self.jobs.get(jid)
+
+        if jid is None:
+            raise AssertionError("alien job input request")
+
+        if len(job.inputs) == 0:
+            return osspec.get_null_input()
+
+        io_id = ('in', jid)
+
+        if len(job.inputs) == 1:
+            io_id = ('out', job.inputs[0])
+
+        elif io_id in self.created_inputs:
+            pass
+
+        else:
+            filename = self._format_io_filename(io_id)
+
+            with open(filename, "w") as writer:
+                for pid in job.inputs:
+                    with open(self._format_io_filename(('out', pid)), "r") as reader:
+                        writer.write(reader.read()) # TODO chunks
+
+            self.created_inputs.add(io_id)
+
+        return open(self._format_io_filename(io_id))
 
     def _create_output(self, jid, type):
-        if jid in self.jobs:
-            filename = self._stream_file(jid, type)
-            if filename is None:
-                filename = os.path.join(self.directory, "%s-%s" % (type, jid))
-            stream = self.streams[(type, jid)] = open(filename, "w")
-            return stream
-        raise RuntimeError("alien job output request")
+        if jid not in self.jobs:
+            raise AssertionError("alien job output request")
+        return open(self._format_io_filename((type, jid)), 'w')
 
     # We can't use lock here (deadlock)
     # FIXME We can avoid locking here because call to _kill_jobs() in _release_place()
@@ -392,7 +381,7 @@ class JobGraphExecutor(Unpickable(
                     if not self.wait_job_deps[jid] and jid not in jobs_to_retry
             )
 
-            self._notify_can_run_jobs_if_need()
+            #self._notify_can_run_jobs_if_need() # Don't call it here
 
     # jobs
     # jobs_graph        = edges
@@ -418,7 +407,7 @@ class JobGraphExecutor(Unpickable(
         self.jobs_to_retry.clear()
 
         self._init_job_deps_graph()
-        self.streams.clear()
+        self.created_inputs.clear()
 
         self._clean_state = True # FIXME
 
@@ -531,7 +520,7 @@ class JobGraphExecutor(Unpickable(
     def recover_after_backup_loading(self):
         self.failed_jobs.clear() # FIXME
         self.active_jobs_cache.clear()
-        self._init_job_deps_graph()
+        #self._init_job_deps_graph()
 
     def vivify_jobs_waiting_stoppers(self):
         jobs_to_retry, self.jobs_to_retry = self.jobs_to_retry, {}

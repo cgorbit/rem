@@ -3,6 +3,8 @@
 import os
 import sys
 
+import base64
+
 import rem.job as job
 import rem.packet as packet
 import rem.delayed_executor as delayed_executor
@@ -93,23 +95,32 @@ def main():
 
     sbx_pck = pck.create_sandbox_packet()
 
+    import cPickle as pickle
+    serialized = base64.b64encode(pickle.dumps(sbx_pck, 2))
+
+    sbx_pck1 = pickle.loads(base64.b64decode(serialized))
+
+    print sbx_pck1.__dict__
+
     if True:
         print >>sys.stderr, os.getpid()
         rem_logging.reinit_logger(ctx)
-        runner = rem.sandbox_packet.PacketRunner(sbx_pck, '/home/trofimenkov/tmp/sbx-XJ23klfd')
-        runner.run()
-        return
+
+        sbx_pck.start('/home/trofimenkov/tmp/sbx-XJ23klfd')
+        sbx_pck.join()
+
+        return 0
 
     #print '+ __dict__:'
     #pprint(sbx_pck.__dict__)
     #print
 
-    serialized = sbx_pck.dumps_json()
+    #serialized = sbx_pck.dumps_json()
 
     #print '+ SERIALIZED:'
-    print serialized
+    #print serialized
 
-    pck_copy = sbx_pck.loads_json(serialized)
+    #pck_copy = sbx_pck.loads_json(serialized)
 
     #print id(sbx_pck), type(sbx_pck)
     #print id(pck_copy), type(pck_copy)

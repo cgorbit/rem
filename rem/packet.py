@@ -262,7 +262,10 @@ class PacketBase(Unpickable(
             old_file = self.bin_links.pop(binname)
             if isinstance(old_file, BinaryFile):
                 old_file.Unlink(self, binname)
-        self._create_link(binname, file)
+        if self.directory:
+            self._create_link(binname, file)
+        else:
+            self.binLinks[binname] = file.checksum
 
     def _vivify_link(self, context, link):
         if isinstance(link, str):
@@ -584,7 +587,7 @@ class PacketBase(Unpickable(
                 if dep_id not in self.jobs:
                     raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.pck_id)))
 
-            job = Job(shell, parents, pipe_parents, self, maxTryCount=tries,
+            job = Job(shell, parents, pipe_parents, self.id, maxTryCount=tries,
                       max_err_len=max_err_len, retry_delay=retry_delay,
                       pipe_fail=pipe_fail, description=description, notify_timeout=notify_timeout, max_working_time=max_working_time, output_to_status=output_to_status)
 
@@ -664,7 +667,6 @@ class PacketBase(Unpickable(
 
         return status
 
-    # TODO Don't support this in ACTIVE for sandbox
     def rpc_add_binary(self, binname, file):
         with self.lock:
             self._add_link(binname, file)
@@ -730,11 +732,6 @@ class PacketBase(Unpickable(
     def _get_scheduler_ctx(self):
         return PacketCustomLogic.SchedCtx
         #return self._get_scheduler().context
-
-# Костыли для job.Job в Sandbox
-    def start_process(self, args, kwargs):
-        ctx = PacketCustomLogic.SchedCtx
-        return ctx.run_job(*args, **kwargs)
 
     def _get_all_done_tags(self):
         if self.done_tag:
@@ -814,6 +811,11 @@ class _LocalPacketJobGraphOps(object):
     def __init__(self, pck):
         self.pck = pck
 
+    def get_io_directory(self):
+        return self.pck.directory
+
+    get_working_directory = get_io_directory
+
     def update_repr_state(self):
         self.pck._update_repr_state()
 
@@ -838,7 +840,21 @@ class _LocalPacketJobGraphOps(object):
             tag.Set()
 
     def create_job_runner(self, job):
-        return JobRunner(job)
+        return JobRunner(self, job)
+
+    def on_job_done(self, runner):
+        self.pck.on_job_done(runner)
+
+    def create_file_handles(self, job):
+        return self.pck._graph_executor.create_job_file_handles(job)
+
+    def notify_long_execution(self, job):
+        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, job.id)
+        self.pck.send_job_long_execution_notification(self, job)
+
+    def start_process(self, args, kwargs):
+        ctx = PacketCustomLogic.SchedCtx
+        return ctx.run_job(*args, **kwargs)
 
 
 class LocalPacket(PacketBase):
@@ -850,15 +866,12 @@ class LocalPacket(PacketBase):
             self.jobs,
             self.jobs_graph,
             self.id,
-            self.directory,
+            #self.directory,
             self.kill_all_jobs_on_error,
         )
 
     def _on_repr_state_change(self):
         self.FireEvent("change") # queue.relocatePacket
-
-    def get_working_directory(self):
-        return self.directory
 
     #def _has_active_jobs(self):
         #return bool(self._active_jobs)
@@ -1005,10 +1018,13 @@ class SandboxPacket(PacketBase):
     def _check_can_move_beetwen_queues(self):
         pass
 
+    def rpc_add_binary(self, binname, file):
+        #self._get_scheduler_ctx().sandbox_files.add(file.path, checksum=file.checksum)
+        super(SandboxPacket, self).rpc_add_binary(binname, file)
+
     def create_sandbox_packet(self):
         return sandbox_packet.Packet(
             self.id,
-            'localhost:23452423',
             self.jobs,
             self.jobs_graph,
             self.kill_all_jobs_on_error)
