@@ -9,16 +9,3 @@ class ReprState(object):
     HISTORIED = "HISTORIED"             # temporary state before removal
     WAITING = "WAITING"                 # wait timeout for retry failed jobs (may have running jobs)
     NONINITIALIZED = "NONINITIALIZED"
-    # src -> dst
-    #allowed = {
-        #CREATED: (WORKABLE, SUSPENDED),
-        #WORKABLE: (SUSPENDED, ERROR, SUCCESSFULL, PENDING, WAITING, NONINITIALIZED),
-        #PENDING: (SUSPENDED, WORKABLE, ERROR, WAITING, NONINITIALIZED),
-        #SUSPENDED: (WORKABLE, HISTORIED, WAITING, ERROR, NONINITIALIZED),
-        #WAITING: (PENDING, SUSPENDED, ERROR, NONINITIALIZED),
-        #ERROR: (SUSPENDED, HISTORIED, NONINITIALIZED),
-        #SUCCESSFULL: (HISTORIED, NONINITIALIZED),
-        #NONINITIALIZED: (CREATED,),
-        #HISTORIED: ()}
-
-

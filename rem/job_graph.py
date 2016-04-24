@@ -103,12 +103,13 @@ class JobGraphExecutor(Unpickable(
                             _active_jobs=always(_ActiveJobs),
                             created_inputs=set,
 
-                            dont_run_new_jobs=bool,
+                            dont_run_new_jobs=bool, # FIXME Rename with meangin invertion?
                       ) ):
-    def __init__(self, ops, jobs, jobs_graph, pck_id, kill_all_jobs_on_error):
+    def __init__(self, ops, pck_id, graph):
         super(JobGraphExecutor, self).__init__()
-        self.jobs = jobs
-        self.jobs_graph = jobs_graph
+        self.jobs = graph.jobs
+        self.jobs_graph = graph.build_deps_dict()
+        self.kill_all_jobs_on_error = graph.kill_all_jobs_on_error
         self._clean_state = True
         self._ops = ops
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
@@ -254,7 +255,7 @@ class JobGraphExecutor(Unpickable(
                 if not self.wait_job_deps[nid]:
                     self.jobs_to_run.add(nid)
 
-        elif job.tries < job.maxTryCount:
+        elif job.tries < job.max_try_count:
             delay = job.retry_delay or job.ERR_PENALTY_FACTOR ** job.tries
             self._register_stop_waiting(job.id, time.time() + delay)
 
@@ -450,11 +451,11 @@ class JobGraphExecutor(Unpickable(
 
         return ret
 
-    def suspend(self, kill_jobs):
+    def disallow_to_run_jobs(self, kill_running):
         self.dont_run_new_jobs = True
         self._ops.update_repr_state() # maybe from PENDING to WORKABLE
 
-        if kill_jobs:
+        if kill_running:
             # FIXME In ideal world it's better to "apply" jobs that will be
             # finished racy just before kill(2)
             self._kill_jobs_drop_results()
@@ -469,7 +470,7 @@ class JobGraphExecutor(Unpickable(
             job.tries = 0
         self._notify_can_run_jobs_if_need()
 
-    def resume(self, reset_tries=False):
+    def allow_to_run_jobs(self, reset_tries=False):
         if reset_tries:
             self._reset_tries()
         self.dont_run_new_jobs = False
@@ -477,13 +478,24 @@ class JobGraphExecutor(Unpickable(
         self._ops.update_repr_state()
         self._notify_can_run_jobs_if_need()
 
-    def drop(self):
-        pass
-
+# XXX
     def restart(self):
         if not self._clean_state:
             self._do_reset()
         self._notify_can_run_jobs_if_need()
+
+    def reset(self):
+        self._kill_jobs_drop_results()
+
+    def is_stopped(self):
+        return self.dont_run_new_jobs and not self.has_running_jobs()
+
+    def is_null(self):
+        return self.is_stopped()
+
+    def need_indefinite_time_to_reset(self):
+        return False
+# XXX
 
     def on_job_done(self, runner):
         self._active_jobs.on_done(runner)
@@ -534,7 +546,3 @@ class JobGraphExecutor(Unpickable(
         for stop_id, (job_id, cancel, deadline) in jobs_to_retry.items():
             assert cancel is None
             self._register_stop_waiting(job_id, deadline)
-
-# TODO XXX FIXME
-    def drop(self):
-        self._kill_jobs_drop_results()

@@ -81,7 +81,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
                 # Race with RPC
                 pck_id, (tm, pck) = self.packets.peak()
                 if tm < barrierTm:
-                    pck.RemoveAsOld()
+                    pck.destroy()
                     self.packets.pop(pck.id)
                 else:
                     break

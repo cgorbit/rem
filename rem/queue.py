@@ -74,19 +74,25 @@ class Queue(Unpickable(pending=PackSet.create,
         self.errorForgetTm = context.error_lifetime
 
     def forgetOldItems(self):
-        self.forgetQueueOldItems(self.worked, self.success_lifetime or self.successForgetTm)
-        self.forgetQueueOldItems(self.errored, self.errored_lifetime or self.errorForgetTm)
+        self._forget_queue_old_items(self.worked, self.success_lifetime or self.successForgetTm)
+        self._forget_queue_old_items(self.errored, self.errored_lifetime or self.errorForgetTm)
 
-    def forgetQueueOldItems(self, queue, expectedLifetime):
+    def _forget_queue_old_items(self, queue, ttl):
+        threshold = time.time() - ttl
+
+        old = []
+        with self.lock:
+            while queue:
+                pck, t = queue.peak()
+
+                if t >= threshold:
+                    break
+
+                old.append(pck)
+
         # XXX Don't use lock here to prevent deadlock
-        barrierTm = time.time() - expectedLifetime
-        while len(queue) > 0:
-            # Race with RPC
-            pck, tm = queue.peak()
-            if tm < barrierTm:
-                pck.RemoveAsOld()
-            else:
-                break
+        for pck in old:
+            pck.destroy() # May throw: race with RPC calls, that may change packet state
 
     def relocatePacket(self, pck):
         dest_queue_name = self.VIEW_BY_STATE.get(pck.state)

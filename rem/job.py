@@ -142,16 +142,16 @@ class Job(Unpickable(results=list,
                      description=str,
                      max_working_time=(int, constants.KILL_JOB_DEFAULT_TIMEOUT),
                      notify_timeout=(int, constants.NOTIFICATION_TIMEOUT),
-                     working_time=int,
+                     cached_working_time=int,
                      output_to_status=bool)):
     ERR_PENALTY_FACTOR = 6
 
-    def __init__(self, shell, parents, pipe_parents, pck_id, maxTryCount, max_err_len=None,
+    def __init__(self, shell, parents, pipe_parents, pck_id, max_try_count, max_err_len=None,
                  retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
         super(Job, self).__init__()
         self.id = id(self)
         self.pck_id = pck_id
-        self.maxTryCount = maxTryCount
+        self.max_try_count = max_try_count
         self.shell = shell
         self.parents = parents
         self.inputs = pipe_parents
@@ -369,7 +369,7 @@ class JobRunner(object):
                                     self._stderr_summary)
             )
 
-        if self.returncode_robust != 0 and job.tries >= job.maxTryCount:
+        if self.returncode_robust != 0 and job.tries >= job.max_try_count:
             logging.info("Job's %s result: TriesExceededResult", job.id)
             append_result(TriesExceededResult(job.tries))
 

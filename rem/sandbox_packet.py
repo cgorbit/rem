@@ -63,7 +63,7 @@ class _ExecutorOps(object):
 
 
 class Packet(object):
-    def __init__(self, pck_id, jobs, jobs_graph, kill_all_jobs_on_error):
+    def __init__(self, pck_id, jobs):
         self.id = pck_id
         self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
         self.history = []
@@ -73,10 +73,8 @@ class Packet(object):
 
         self._graph_executor = rem.job_graph.JobGraphExecutor(
             _ExecutorOps(self),
-            jobs,
-            jobs_graph,
             self.id,
-            kill_all_jobs_on_error,
+            jobs,
         )
 
         self.update_repr_state(ReprState.CREATED)
@@ -90,6 +88,7 @@ class Packet(object):
         self._lock = threading.RLock()
         self._job_finished = threading.Condition(self._lock)
         self._main_thread = None
+        self._job_threads = []
         self._proc_runner = None
 
     def __getstate__(self):
@@ -99,6 +98,7 @@ class Packet(object):
         sdict.pop('_directory', None)
         sdict.pop('_main_thread', None)
         sdict.pop('_proc_runner', None)
+        sdict.pop('_job_threads', None)
         return sdict
 
     def __setstate__(self, sdict):
@@ -139,6 +139,7 @@ class Packet(object):
         logging.debug('+ Packet._start_one_another_job')
         job_runner = self._graph_executor.get_job_to_run()
         t = ProfiledThread(target=job_runner.run, name_prefix='Job')
+        self._job_threads.append(t)
         t.start()
 
     def _main_loop(self):
