@@ -2,6 +2,7 @@ import sys
 import requests
 import json
 
+import requests.exceptions as exceptions
 
 class TaskPriority(object):
     class Class(object):
@@ -13,6 +14,25 @@ class TaskPriority(object):
         LOW    = 'LOW'
         NORMAL = 'NORMAL'
         HIGH   = 'HIGH'
+
+
+class NetworkError(RuntimeError):
+    pass
+
+class ServerInternalError(RuntimeError):
+    pass
+
+class UserError(RuntimeError):
+    pass
+
+_ERROR_BY_CODE = [
+    None,
+    RuntimeError,
+    RuntimeError,
+    RuntimeError,
+    UserError,
+    ServerInternalError,
+]
 
 
 class _ProxyObject(object):
@@ -69,20 +89,25 @@ class Sandbox(object):
             'Authorization': 'OAuth ' + self.oauth_token,
             'Content-Type': 'application/json',
         }
-        r = requests.request(
-            method,
-            self.url + path,
-            data=json.dumps(data),
-            headers=headers,
-            verify=False,
-            timeout=self.timeout
-        )
+
+        try:
+            r = requests.request(
+                method,
+                self.url + path,
+                data=json.dumps(data),
+                headers=headers,
+                verify=False,
+                timeout=self.timeout
+            )
+        except (exceptions.Timeout, exceptions.SSLError, exceptions.ConnectionError) as e:
+            raise NetworkError(e)
 
         if self.debug:
             print >>sys.stderr, '+ response from', path, r.status_code, r.text.encode('utf-8')
 
         if r.status_code != succ_code:
-            raise RuntimeError(r.text)
+            raise _ERROR_BY_CODE[r.status_code / 100](r.text)
+            #raise RuntimeError(r.text)
             #try:
                 #answer = r.json()
             #except:

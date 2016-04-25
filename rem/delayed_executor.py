@@ -18,11 +18,14 @@ class DelayedExecutor(object):
     def _cancel(self, id):
         with self._lock:
             if id not in self._queue: # because of user-space-race with _the_loop
-                return
-            is_front = self._queue.front()[0] == id
-            self._queue.pop_by_key(id)
-            if is_front:
+                return False
+
+            if self._queue.front()[0] == id:
                 self._modified.notify()
+
+            self._queue.pop_by_key(id)
+
+            return True
 
     def add(self, callback, deadline=None, timeout=None):
         if timeout is not None:
@@ -40,6 +43,8 @@ class DelayedExecutor(object):
                 self._modified.notify()
 
             return lambda : self._cancel(id) # TODO use weak self
+
+    schedule = add
 
     def stop(self):
         with self._lock:
