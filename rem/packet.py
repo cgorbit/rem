@@ -1077,6 +1077,7 @@ class SandboxJobGraphExecutorProxy(object):
     # XXX
         self.__dont_run_new_jobs = False
         self.__must_be_running = True # FIXME
+        self.__stopping = False # FIXME
         self.detailed_status = None
         self.state = ReprState.PENDING
         #self.history = [] # XXX TODO Непонятно вообще как с этим быть
@@ -1097,8 +1098,10 @@ class SandboxJobGraphExecutorProxy(object):
         return self.detailed_status
 
 ########### Ops for _remote_packet
-    def on_packet_terminated(self, how?):
+    # on sandbox task stopped + resources list fetched
+    def on_packet_terminated(self, ?how):
         with self._ops.lock: # FIXME lazy@ How do it right?
+            self.__stopping = False
             self._remote_packet = None
             if self.__must_be_running and not self.__dont_run_new_jobs: # FIXME
                 self._remote_packet = self._create_remote_packet()
@@ -1117,32 +1120,48 @@ class SandboxJobGraphExecutorProxy(object):
     def disallow_to_run_jobs(self, kill_running=False):
         with self._ops.lock:
             self.__dont_run_new_jobs = True
+
+            if self.__stopping:
+                return
+
             if self._remote_packet:
                 self._remote_packet.disallow_to_run_jobs(kill_running)
 
     def allow_to_run_jobs(self, reset_tries=False):
         with self._ops.lock:
             self.__dont_run_new_jobs = False
+
+            if self.__stopping:
+                return
+
             if self._remote_packet:
                 self._remote_packet.allow_to_run_jobs(reset_tries)
 
     def restart(self):
         with self._ops.lock:
             self.__must_be_running = True
+
+            if self.__stopping:
+                return
+
             if self._remote_packet:
-                self._remote_packet.restart()
+                self._remote_packet.restart() # may actually 'fail'
             else:
                 self._remote_packet = self._create_remote_packet()
 
     def reset(self):
         with self._ops.lock:
             self.__must_be_running = False
-            if self._remote_packet:
+            if self._remote_packet and not self.__stopping:
                 self._remote_packet.destroy()
+                self.__stopping = True
 
     def is_stopped(self):
         with self._ops.lock:
             return not self._remote_packet or self._remote_packet.is_suspended()
+                                                    # TODO is_suspended
+                                                    # определяется последним поставленным
+                                                    # в очередь на отправку флагом
 
     def is_null(self):
         return not self._remote_packet
@@ -1178,10 +1197,6 @@ class SandboxPacket(PacketBase):
             self.make_job_graph(),
             self.make_sandbox_task_params()
         )
-
-    #def process_incoming(self):
-        #with self.lock:
-            #self._graph_executor.process_incoming()
 
     def _apply_sandbox_message(self, msg):
         self._messages.append(msg)
