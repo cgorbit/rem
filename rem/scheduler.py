@@ -242,7 +242,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.qRef[name] = q
 
         q.UpdateContext(self.context)
-        q.AddCallbackListener(self)
+        q.scheduler = self
 
         return q
 
@@ -269,7 +269,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                     self.queues_with_jobs.push(q)
                     self.HasScheduledTask.notify()
 
-    def Get(self):
+    def get_job_to_run(self):
         with self.lock:
             while self.alive and not self.queues_with_jobs and self.schedWatcher.Empty():
                 self.HasScheduledTask.wait()
@@ -286,8 +286,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 queue = self.queues_with_jobs.pop()
 
         if queue:
-            # .Get not under lock to prevent deadlock with Notify
-            job = queue.Get(self.context)
+            # .get_job_to_run not under lock to prevent deadlock with Notify
+            job = queue.get_job_to_run(self.context)
             #if job:
                 #logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.pck))
 
@@ -298,7 +298,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         logging.warning("No tasks for execution after condition waking up")
 
     def Notify(self, ref):
-        if isinstance(ref, Queue):
+        if isinstance(ref, LocalQueue):
             self._add_queue_as_non_empty_if_need(ref)
 
         elif isinstance(ref, SchedWatcher):
@@ -510,7 +510,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             # No vivifying of tempStorage packets
 
-            self.schedWatcher.Clear() # remove tasks from Queue.relocatePacket
+            self.schedWatcher.Clear() # remove tasks from Queue.relocate_packet
             #self.FillSchedWatcher(prevWatcher)
 
     @classmethod
@@ -679,12 +679,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
         ctx = self.context
 
         q.UpdateContext(ctx)
-        q.AddCallbackListener(self)
+        q.scheduler = self
 
         for pck in list(q.ListAllPackets()):
             pck.update_tag_deps(self.tagRef)
             pck.try_recover_after_backup_loading(ctx)
-            q.relocatePacket(pck) # j.i.c force?
+            q.relocate_packet(pck) # j.i.c force?
 
             self.packStorage.Add(pck)
 
@@ -756,6 +756,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def OnTaskPending(self, ref):
         self.Notify(ref)
+
+    def _on_job_pending(self, queue):
+        self.Notify(queue)
 
     def send_email_async(self, rcpt, (subj, body)):
         self._mailer.send_async(rcpt, subj, body)

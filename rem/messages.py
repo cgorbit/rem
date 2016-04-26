@@ -84,7 +84,7 @@ class EmergencyError(IMessageHelper):
 
 class TooLongWorkingWarning(IMessageHelper):
     def __init__(self, ctx, job):
-        self.pck = job.packetRef
+        self.pck = job.pck
         self.job = job
         self.ctx = ctx
 

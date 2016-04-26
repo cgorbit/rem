@@ -194,3 +194,11 @@ class Sandbox(object):
             context['resource_arch'] = arch
 
         return self.create_task('REMOTE_COPY_RESOURCE', context, **kwargs)
+
+if __name__ == '__main__':
+    token = '0d71e6bd364c441ca28e8b68378f84fe'
+    host = 'https://sandbox.yandex-team.ru/api/v1.0/'
+
+    sbx = Sandbox(host, token, debug=True, timeout=15.0)
+
+    sbx.Task(56984384)
