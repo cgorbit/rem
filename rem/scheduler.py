@@ -19,7 +19,7 @@ from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrato
 from rem import PacketCustomLogic
 from connmanager import ConnectionManager
 from packet import LocalPacket, ReprState as PacketState
-from queue import Queue
+from queue import LocalQueue, SandboxQueue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
@@ -72,11 +72,11 @@ class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
                 logging.exception("Some exception when SchedWatcher try take task")
                 return None
 
-    def HasStartableJobs(self):
+    def has_startable_jobs(self):
         return not self.workingQueue.empty()
 
     def Empty(self):
-        return not self.HasStartableJobs()
+        return not self.has_startable_jobs()
 
     def UpdateContext(self, context):
         self.AddNonpersistentCallbackListener(context.Scheduler)
@@ -238,11 +238,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
         return False
 
     def _create_queue(self, name):
-        q = Queue(name)
+        cls = SandboxQueue if name.startswith('sbx:') else LocalQueue
+
+        q = cls(name)
         self.qRef[name] = q
 
         q.UpdateContext(self.context)
-        q.scheduler = self
 
         return q
 
@@ -263,7 +264,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def _add_queue_as_non_empty_if_need(self, q):
         # this racy code may add empty queue to queues_with_jobs,
         # but it's better, than deadlock
-        if q.HasStartableJobs():
+        if q.has_startable_jobs():
             with self.lock:
                 if q not in self.queues_with_jobs:
                     self.queues_with_jobs.push(q)

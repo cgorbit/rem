@@ -72,6 +72,8 @@ class Context(object):
         self.readonly_xmlrpc_pool_size = config.safe_getint("run", "readonly_xmlrpc_pool_size", 1)
         self.pgrpguard_binary = config.safe_get("run", "pgrpguard_binary", None)
         self.pgrpguard_binary = config.safe_get("run", "process_wrapper", self.pgrpguard_binary)
+        self.sandbox_api_url = config.safe_get("run", "sandbox_api_url", None)
+        self.sandbox_api_token = config.safe_get("run", "sandbox_api_token", None)
         self.cloud_tags_server = config.safe_get("store", "cloud_tags_server", None)
         self.cloud_tags_masks = config.safe_get("store", "cloud_tags_masks", None)
         self.cloud_tags_masks_reload_interval = config.safe_getint("store", "cloud_tags_masks_reload_interval", 300)

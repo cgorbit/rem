@@ -1,28 +1,4 @@
-class _SandboxPacketJobGraphExecutorProxyOps(object):
-    def __init__(self, pck):
-        self.pck = pck
-
-    def update_repr_state(self):
-        self.pck._update_repr_state()
-
-    def set_successfull_state(self):
-        self.pck._change_state(ImplState.SUCCESSFULL)
-
-    def set_errored_state(self):
-        self.pck._change_state(ImplState.ERROR)
-
-    def job_done_successfully(self, job_id):
-        tag = self.pck.job_done_tag.get(job_id)
-        if tag:
-            tag.Set()
-
-    def create_job_runner(self, job):
-        raise AssertionError()
-
-    def on_job_graph_becomes_empty(self):
-        self.pck._on_job_graph_become_empty()
-
-
+# -*- coding: utf-8 -*-
 ###########################
             # create
         # indef
@@ -41,6 +17,51 @@ class _SandboxPacketJobGraphExecutorProxyOps(object):
 
             # we get know that it started on some host
 
+from rem.profile import ProfiledThread
+from Queue import Queue as ThreadSafeQueue
+
+class ActionQueue(object):
+    __STOP_INDICATOR = object()
+
+    def __init__(self, thread_count=1, thread_name_prefix='Thread'):
+        self._queue = ThreadSafeQueue()
+        self._thread_name_prefix = thread_name_prefix
+        self.__start()
+
+    def __start(self):
+        self._threads = [
+            ProfiledThread(target=self.__worker, name_prefix=self._thread_name_prefix)
+                for _ in xrange(thread_count)
+        ]
+
+        for t in self._threads:
+            t.start()
+
+    def stop(self):
+        for _ in self._threads:
+            self._queue.put(self.__STOP_INDICATOR)
+
+        for t in self._threads:
+            t.join()
+
+    def invoke(self, task):
+        self._queue.put(task)
+
+    def __worker(self):
+        while True:
+            task = self._queue.get()
+
+            if task is self.__STOP_INDICATOR:
+                break
+
+            try:
+                task()
+            except Exception:
+                logging.exception("")
+
+
+from SimpleXMLRPCServer import SimpleXMLRPCServer
+
 class RemotePacketsDispatcher(object):
     _SANDBOX_TASK_CREATION_RETRY_INTERVAL = 10.0
 
@@ -49,11 +70,21 @@ class RemotePacketsDispatcher(object):
         self.local_hostname = ...
         #self.by_pck_id = {}
         self.by_instance_id = {}
+        self._rpc_listen_addr = ('ws30-511.yandex.ru', 8000)
 
-    def start(self, io_invoker, sandbox):
-        self._rpc_server = self.RpcServer(self, listen_port)
-        self._io_invoker = ...
-        self.sandbox = ...
+    def _create_rpc_server(self):
+        srv = SimpleXMLRPCServer(self._rpc_listen_addr)
+        srv.register_function(self._rpc_ping, 'ping')
+        srv.register_function(self._rpc_set_jobs_statuses, 'set_jobs_statuses')
+        return srv
+
+    #def start(self, io_invoker, sandbox):
+    def start(self, ctx):
+        self._rpc_server = self._create_rpc_server()
+        ProfiledThread(target=self._rpc_server.serve_forever, name_prefix='SbxRpc').start()
+
+        self._io_invoker = ActionQueue(thread_count=10, thread_name_prefix='SbxIO')
+        self.sandbox = sandbox.Client(ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
 
     def stop(self):
         raise NotImplementedError()
@@ -78,6 +109,12 @@ class RemotePacketsDispatcher(object):
     # so REM-server will register instance's remote_addr after
     # loading old backup (after server's fail)
 
+    def _rpc_set_jobs_statuses(self, instance_id, jobs, finished_status):
+        raise NotImplementedError()
+
+    def _rpc_ping(self, instance_id):
+        raise NotImplementedError()
+
     def register_packet(self, pck):
         with self.lock:
             pck._sandbox_task_state = SandboxTaskState.CREATING
@@ -94,7 +131,7 @@ class RemotePacketsDispatcher(object):
 
 
 # XXX FIXME We can't identify packet by pck_id in async/delayed calls
-#           becuase packet may be recreated by PacketBase
+#           because packet may be recreated by PacketBase
 #           (or we must cancel invokers (not only delayed_executor))
 
     def _start_create_sandbox_task(self, pck):
@@ -417,6 +454,31 @@ class SandboxPacketOpsForJobGraphExecutorProxy(object):
         self.lock = pck.lock
 
 
+class _SandboxPacketJobGraphExecutorProxyOps(object):
+    def __init__(self, pck):
+        self.pck = pck
+
+    def update_repr_state(self):
+        self.pck._update_repr_state()
+
+    def set_successfull_state(self):
+        self.pck._change_state(ImplState.SUCCESSFULL)
+
+    def set_errored_state(self):
+        self.pck._change_state(ImplState.ERROR)
+
+    def job_done_successfully(self, job_id):
+        tag = self.pck.job_done_tag.get(job_id)
+        if tag:
+            tag.Set()
+
+    def create_job_runner(self, job):
+        raise AssertionError()
+
+    def on_job_graph_becomes_empty(self):
+        self.pck._on_job_graph_become_empty()
+
+
 class SandboxPacket(PacketBase):
     def run(self):
         with self.lock:
@@ -424,6 +486,11 @@ class SandboxPacket(PacketBase):
                 raise NotWorkingStateError("Can't run jobs in % state" % self.state)
 
             self._graph_executor.restart()
+
+    def rpc_add_resource(self, name, path):
+        with self.lock:
+            self.files_was_modified = True
+            self.sbx_files[name] = path
 
     def _create_job_graph_executor(self):
         return SandboxJobGraphExecutorProxy(
@@ -433,17 +500,12 @@ class SandboxPacket(PacketBase):
             self.make_sandbox_task_params()
         )
 
-    def _apply_sandbox_message(self, msg):
-        self._messages.append(msg)
-        with self.lock:
-            self
-
     def _check_can_move_beetwen_queues(self):
         pass
 
-    def rpc_add_binary(self, binname, file):
-        #self._get_scheduler_ctx().sandbox_files.add(file.path, checksum=file.checksum)
-        super(SandboxPacket, self).rpc_add_binary(binname, file)
+    #def rpc_add_binary(self, binname, file):
+        ##self._get_scheduler_ctx().sandbox_files.add(file.path, checksum=file.checksum)
+        #super(SandboxPacket, self).rpc_add_binary(binname, file)
 
 # DEBUG
     def create_sandbox_packet(self):

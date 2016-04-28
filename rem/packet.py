@@ -261,6 +261,7 @@ class PacketBase(Unpickable(
                            #done_tag=object,
 
                            bin_links=dict,
+                           sbx_files=dict,
                            directory=lambda *args: args[0] if args else None,
 
                            state=(str, ReprState.ERROR),
@@ -427,7 +428,7 @@ class PacketBase(Unpickable(
         if self.directory:
             self._create_link(binname, file)
         else:
-            self.binLinks[binname] = file.checksum
+            self.bin_links[binname] = file.checksum
 
     def _vivify_link(self, context, link):
         if isinstance(link, str):
@@ -843,7 +844,6 @@ class PacketBase(Unpickable(
 
     def rpc_add_binary(self, binname, file):
         with self.lock:
-            if self.
             self.files_was_modified = True
             self._add_link(binname, file)
 
@@ -1104,3 +1104,5 @@ class LocalPacket(PacketBase):
             raise as_rpc_user_error(
                 from_rpc, RuntimeError("Can't move packets with running jobs"))
 
+
+SandboxPacket = sandbox_packet.SandboxPacket

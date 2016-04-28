@@ -4,7 +4,7 @@ import time
 
 from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
 from callbacks import CallbackHolder, ICallbackAcceptor
-from packet import LocalPacket, PacketCustomLogic, ReprState as PacketState, NotWorkingStateError
+from packet import LocalPacket, SandboxPacket, PacketCustomLogic, ReprState as PacketState, NotWorkingStateError
 from rem_logging import logger as logging
 
 
@@ -61,6 +61,7 @@ class QueueBase(Unpickable(pending=PackSet.create,
     def UpdateContext(self, context):
         self.successForgetTm = context.success_lifetime
         self.errorForgetTm = context.error_lifetime
+        self.scheduler = context.Scheduler
 
     def forgetOldItems(self):
         self._forget_queue_old_items(self.worked, self.success_lifetime or self.successForgetTm)
@@ -121,8 +122,14 @@ class QueueBase(Unpickable(pending=PackSet.create,
     def _attach_packet(self, pck):
         with self.lock:
             assert pck.queue is None
+
+            if not isinstance(pck, self._PACKET_CLASS):
+                raise RuntimeError("Packet %s is not %s, can't attach to %s" \
+                    % (pck, self._PACKET_CLASS.__name__, self.name))
+
             pck.queue = self
             self._on_packet_attach(pck)
+
         self.relocate_packet(pck)
 
     def _detach_packet(self, pck):
@@ -185,17 +192,11 @@ class QueueBase(Unpickable(pending=PackSet.create,
         return not any(getattr(self, subq_name, None) for subq_name in self.VIEW_BY_ORDER)
 
 
-class
-    def _on_change_working_limit(self):
-        raise NotImplementedError()
-        pass
-
-    def _on_resume(self):
-        raise NotImplementedError()
-
 class LocalQueue(QueueBase):
+    _PACKET_CLASS = LocalPacket
+
     def _on_change_working_limit(self):
-        if self.HasStartableJobs():
+        if self.has_startable_jobs():
             self.scheduler._on_job_pending(self)
 
     def _on_job_get(self, ref):
@@ -208,7 +209,7 @@ class LocalQueue(QueueBase):
     def _on_job_done(self, ref):
         with self.lock:
             self.working_jobs.discard(ref)
-        if self.HasStartableJobs():
+        if self.has_startable_jobs():
             self.scheduler._on_job_pending(self)
 
     def relocate_packet(self, pck):
@@ -223,7 +224,7 @@ class LocalQueue(QueueBase):
     def _on_packet_detach(self, pck):
         self.working_jobs.difference_update(pck._get_working_jobs())
 
-    def HasStartableJobs(self):
+    def has_startable_jobs(self):
         with self.lock:
             return self.pending and len(self.working_jobs) < self.workingLimit and self.IsAlive()
 
@@ -233,10 +234,10 @@ class LocalQueue(QueueBase):
     def _get_working_count(self):
         return len(self.working_jobs)
 
-    def get_job_to_run(self, context):
+    def get_job_to_run(self):
         while True:
             with self.lock:
-                if not self.HasStartableJobs():
+                if not self.has_startable_jobs():
                     return None
 
                 pck, prior = self.pending.peak()
@@ -248,3 +249,32 @@ class LocalQueue(QueueBase):
                 continue
 
             return job
+
+
+class SandboxQueue(QueueBase):
+    _PACKET_CLASS = SandboxPacket
+
+    def _on_change_working_limit(self):
+        pass
+        #raise NotImplementedError()
+
+    def _on_resume(self):
+        pass
+        #raise NotImplementedError()
+
+# TODO FIXME
+    def has_startable_jobs(self):
+        with self.lock:
+            return self.pending and len(self.working_jobs) < self.workingLimit and self.IsAlive()
+
+    def get_packet_to_run(self):
+        while True:
+            with self.lock:
+                if not self.has_startable_jobs():
+                    return None
+
+                pck = self.pending.peak()[0]
+
+#TODO
+#TODO
+#TODO

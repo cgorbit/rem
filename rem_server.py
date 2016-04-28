@@ -17,7 +17,7 @@ import argparse
 
 from rem import constants, osspec
 from rem import traced_rpc_method
-from rem import CheckEmailAddress, LocalPacket, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
+from rem import CheckEmailAddress, LocalPacket, SandboxPacket, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
 from rem import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
@@ -72,7 +72,8 @@ def MakeDuplicatePackageNameException(pck_name):
 def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
                   kill_all_jobs_on_error=True,
                   packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY,
-                  resetable=True, notify_on_reset=False, notify_on_skipped_reset=True):
+                  resetable=True, notify_on_reset=False, notify_on_skipped_reset=True,
+                  is_sandbox=False):
 
     if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
@@ -81,7 +82,8 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
         for email in notify_emails:
             rpc_assert(CheckEmailAddress(email), "incorrect e-mail: " + email)
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
-    pck = LocalPacket(packet_name, priority, _context, notify_emails,
+    pck_cls = SandboxPacket if is_sandbox else LocalPacket
+    pck = pck_cls(packet_name, priority, _context, notify_emails,
                     wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
                     kill_all_jobs_on_error=kill_all_jobs_on_error, is_resetable=resetable,
                     notify_on_reset=notify_on_reset,
@@ -351,6 +353,14 @@ def pck_add_binary(pck_id, binname, checksum):
     raise MakeNonExistedPacketException(pck_id)
 
 
+@traced_rpc_method()
+def pck_add_resource(pck_id, name, path):
+    pck = _scheduler.tempStorage.GetPacket(pck_id) or _scheduler.GetPacket(pck_id)
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+    pck.rpc_add_resource(name, path)
+
+
 @readonly_method
 @traced_rpc_method()
 def pck_list_files(pck_id):
@@ -419,16 +429,16 @@ class ApiServer(object):
     def _non_readonly_func_stub(self, name):
         def stub(*args, **kwargs):
             raise NotImplementedError('Function %s is not available in readonly interface' % name)
-
+        stub.__name__ = name
         return stub
 
-    def register_function(self, func, name):
+    def register_function(self, func):
         if self.readonly:
             is_readonly_method = getattr(func, 'readonly_method', False)
             if not is_readonly_method:
-                self.rpcserver.register_function(self._non_readonly_func_stub(name), name)
+                self.rpcserver.register_function(self._non_readonly_func_stub(func.__name__))
                 return
-        self.rpcserver.register_function(func, name)
+        self.rpcserver.register_function(func)
 
     def register_all_functions(self):
         funcs = [
@@ -445,6 +455,7 @@ class ApiServer(object):
             list_tags,
             lookup_tags,
             pck_add_binary,
+            pck_add_resource,
             pck_add_job,
             pck_addto_queue,
             pck_delete,
@@ -476,7 +487,7 @@ class ApiServer(object):
             funcs.append(do_backup)
 
         for func in funcs:
-            self.register_function(func, func.__name__)
+            self.register_function(func)
 
     def request_processor(self):
         rpc_fd = self.rpcserver.fileno()

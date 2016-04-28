@@ -418,7 +418,7 @@ class JobPacketInfo(object):
                 cs_calc.update(buff)
             return cs_calc.hexdigest()
 
-    def _GetFileChecksum(self, path, db_path=None):
+    def _get_file_checksum_from_db(self, path, db_path=None):
         if db_path is None:
             return self._CalcFileChecksum(path)
 
@@ -460,6 +460,16 @@ class JobPacketInfo(object):
                 self.conn.logger.error("check_binary_and_lock raised exception: code=%s descr=%s", e.faultCode, e.faultString)
             return False
 
+    def _get_file_checksum(self, filename):
+        checksum = self._get_file_checksum_from_db(filename, self.conn.checksumDbPath)
+        if not self._TryCheckBinaryAndLock(checksum, filename):
+            data = open(filename, 'r').read()
+            checksum2 = hashlib.md5(data).hexdigest()
+            if (checksum2 == checksum) or not self._TryCheckBinaryAndLock(checksum2, filename):
+                self.proxy.save_binary(xmlrpclib.Binary(data))
+            checksum = checksum2
+        return checksum
+
     def _AddFiles(self, files):
         """добавляет или изменяет файлы, необходимые для работы пакета
         принимает один параметр files - полностью идентичный одноименному параметру для JobPacket.AddJob"""
@@ -485,18 +495,13 @@ class JobPacketInfo(object):
             files = make_files_dict(files)
 
         for fname, fpath in files.iteritems():
-            if not os.path.isfile(fpath):
-                raise AttributeError("can't find file \"%s\"" % fpath)
-
-            checksum = self._GetFileChecksum(fpath, self.conn.checksumDbPath)
-            if not self._TryCheckBinaryAndLock(checksum, fpath):
-                data = open(fpath, 'r').read()
-                checksum2 = hashlib.md5(data).hexdigest()
-                if (checksum2 == checksum) or not self._TryCheckBinaryAndLock(checksum2, fpath):
-                    self.proxy.save_binary(xmlrpclib.Binary(data))
-                checksum = checksum2
-
-            self.proxy.pck_add_binary(self.pck_id, fname, checksum)
+            if fpath.startswith('sbx:'):
+                self.proxy.pck_add_resource(self.pck_id, fname, fpath)
+            else:
+                if not os.path.isfile(fpath):
+                    raise AttributeError("can't find file \"%s\"" % fpath)
+                checksum = self._get_file_checksum(fpath)
+                self.proxy.pck_add_binary(self.pck_id, fname, checksum)
 
     def AddFiles(self, files, retries=1):
         return _RetriableMethod(self._AddFiles, retries, True, AttributeError)(files)
