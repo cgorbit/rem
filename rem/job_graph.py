@@ -410,6 +410,8 @@ class JobGraphExecutor(Unpickable(
         self._init_job_deps_graph()
         self.created_inputs.clear()
 
+        #self._ops.recreate_working_directory() # FIXME
+
         self._clean_state = True # FIXME
 
     def produce_detailed_status(self):
@@ -484,7 +486,9 @@ class JobGraphExecutor(Unpickable(
             self._do_reset()
         self._notify_can_run_jobs_if_need()
 
-    def reset(self):
+    start = restart
+
+    def stop(self):
         self._kill_jobs_drop_results()
 
     def is_stopped(self):

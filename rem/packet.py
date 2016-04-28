@@ -21,8 +21,9 @@ import sandbox_packet
 class ImplState(object):
     UNINITIALIZED = '_UNINITIALIZED' # jobs, files and queue not set
     WAIT_TAGS     = '_WAIT_TAGS'
+    WAIT_PREV_EXECUTOR = '_WAIT_PREV_EXECUTOR'
     PENDING       = '_PENDING'
-    ACTIVE        = '_ACTIVE'
+    RUNNING       = '_RUNNING'
     SUCCESSFULL   = '_SUCCESSFULL'
     ERROR         = '_ERROR'
     BROKEN        = '_BROKEN'
@@ -32,8 +33,9 @@ class ImplState(object):
     allowed = {
         UNINITIALIZED: [BROKEN, WAIT_TAGS, PENDING, DESTROYING, HISTORIED],
         WAIT_TAGS:     [BROKEN, PENDING, DESTROYING, HISTORIED], # + SUCCESSFULL
-        PENDING:       [BROKEN, ACTIVE], # + DESTROYING, HISTORIED
-        ACTIVE:        [BROKEN, WAIT_TAGS, SUCCESSFULL, ERROR], # + DESTROYING, HISTORIED (see _can_change_state)
+        WAIT_PREV_EXECUTOR # if .files_was_modified (resources)
+        PENDING:       [BROKEN, RUNNING], # + DESTROYING, HISTORIED
+        RUNNING:       [BROKEN, WAIT_TAGS, SUCCESSFULL, ERROR], # + DESTROYING, HISTORIED (see _can_change_state)
         SUCCESSFULL:   [BROKEN, PENDING, DESTROYING, HISTORIED, WAIT_TAGS],
         ERROR:         [BROKEN, PENDING, DESTROYING, HISTORIED, WAIT_TAGS],
         BROKEN:        [DESTROYING, HISTORIED],
@@ -41,6 +43,118 @@ class ImplState(object):
         HISTORIED:     [],
     }
 
+#################################################################################
+# stopping
+#   1. позволяет не звать больше одного раза .stop(), если `g' почему-то так не умеет
+#   2. позволяет правильно работать даже тогда, когда `g' использует свой lock,
+#      а не общий с self (иначе race-condition)
+#
+# need_to_start просто нужен (если, конечно, почему-то это не реализовано в `g')
+#
+# XXX Оказывается я это уже напрограммировал в SandboxJobGraphExecutorProxy
+def something_with_restart():
+    with self.lock:
+        if self.stopping:
+            self.need_to_start = True
+        else:
+            if self.g.is_null():
+                self.g.start()
+            else:
+                self.g.stop()
+                self.stopping = True
+                self.need_to_start = True
+
+def something_with_stop():
+    with self.lock:
+        if not self.stopping:
+            self.g.stop()
+            self.stopping = True
+        self.need_to_start = False
+
+def on_g_stop(self):
+    with self.lock:
+        assert self.stopping
+        self.stopping = False
+
+        if self.need_to_start:
+            self.need_to_start = False
+            self.g.start()
+#################################################################################
+
+is_inited = bool(.queue)
+len(.jobs)
+len(.wait_dep_tags)
+type(.running) == bool
+type(.is_broken) == bool
+type(.finish_status) == (False, True, None)
+type(.destroying) == bool
+return _graph_executor.is_suspended() or _graph_executor.is_null()
+return self._graph_executor.is_null()
+
+type(.files_was_modified) == bool
+
+HISTORIED: lambda : self._release_place_if_need()
+RUNNING:   lambda : if self._graph_executor.is_null(): self._graph_executor.start()
+
+def _on_job_graph_become_empty(self):
+    if self.waiting_prev_executor:
+        self.waiting_prev_executor = False
+    self._update_state()
+
+def on_tag_set(self):
+    ...
+    if not self.wait_dep_tags:
+        self._update_state()
+
+def destroy(self):
+    
+
+# TODO TEST
+def _calc_state(self):
+    is_inited = bool(self.queue)
+
+    graph = self._graph_executor
+
+    if self.destroying:
+        if self._graph_executor.is_null():
+            return HISTORIED
+        else:
+            return DESTROYING
+
+    elif self.is_broken:
+        return BROKEN
+
+    elif not is_inited:
+        return UNINITIALIZED
+
+    elif self.wait_dep_tags:
+        return WAIT_TAGS
+
+    elif not self.jobs:
+        return SUCCESSFULL
+
+    elif self._execution_finished_sucessfully is not None:
+        return SUCCESSFULL \
+            if self._execution_finished_sucessfully \
+            else ERROR
+
+    elif not graph.does_allow_to_run_jobs():
+        if graph.has_running_jobs():
+            return PAUSING
+        else:
+                          # XXX
+            return PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого
+                          # мы должны быть уверены, что Граф будет stop/start'ed,
+                          # например, за счёт .files_was_modified
+
+    elif not graph.is_null():
+        if self.waiting_prev_executor:
+            return WAIT_PREV_EXECUTOR
+        else:
+            return RUNNING
+
+    else:
+        return PENDING
 
 ################################################################################
 # # XXX NOTHING means "only ReprState-and-subqueue change"
@@ -88,6 +202,39 @@ class PacketCustomLogic(object):
     @classmethod
     def UpdateContext(cls, context):
         cls.SchedCtx = context
+
+
+# JobGraph: wait_job_deps=dict,
+#           succeed_jobs=set,
+#           failed_jobs=set,
+#           jobs_to_run=set,
+#           jobs_to_retry=dict,
+#           active_jobs_cache=always(set),
+#           created_inputs=set,
+#           dont_run_new_jobs=bool,
+#
+# Packet: repr_state
+#         history
+#
+# Job: tries
+#      results
+#      cached_working_time
+
+
+class JobGraph(object):
+    def __init__(self, jobs, kill_all_jobs_on_error):
+        self.jobs = jobs
+        self.kill_all_jobs_on_error = kill_all_jobs_on_error
+
+    def build_deps_dict():
+        graph = {}
+
+        for job in self.jobs.values:
+            graph[job.id] = []
+            for parent_id in job.parents:
+                graph[parent_id].append(job.id)
+
+        return graph
 
 
 def reraise(msg):
@@ -218,7 +365,7 @@ class PacketBase(Unpickable(
             self.wait_dep_tags.remove(tagname)
 
             if not self.wait_dep_tags:
-                if self._impl_state == ImplState.WAIT_TAGS:
+                if self._impl_state == ImplState.WAIT_TAGS: # if self.queue
                     self._become_pending()
                 else:
                     self._update_repr_state()
@@ -368,7 +515,7 @@ class PacketBase(Unpickable(
         src = self._impl_state
 
         if src in [ImplState.PENDING, ImplState.ACTIVE] and dst == ImplState.DESTROYING:
-            return self._graph_executor.is_stopped()
+            return self._graph_executor.is_suspended() or self._graph_executor.is_null()
 
         elif src in [ImplState.PENDING, ImplState.ACTIVE] and dst == ImplState.HISTORIED:
             return self._graph_executor.is_null()
@@ -412,11 +559,12 @@ class PacketBase(Unpickable(
             self._impl_state = state
             self._update_repr_state()
 
-            #if state == ImplState.ACTIVE:
-                #self._graph_executor.restart()
-
             if state in [ImplState.ERROR, ImplState.BROKEN]:
                 self._send_email_on_error_state()
+
+            elif state == ImplState.RUNNING:
+                if self._graph_executor.is_null():
+                    self._graph_executor.start()
 
             elif state == ImplState.SUCCESSFULL:
                 if self.done_tag:
@@ -440,9 +588,6 @@ class PacketBase(Unpickable(
         self.queue._on_packet_state_change(self)
         self.FireEvent("change") # PacketNamesStorage
 
-    def is_broken(self):
-        return self._impl_state == ImplState.BROKEN
-
     def rpc_remove(self):
         with self.lock:
             try:
@@ -452,31 +597,25 @@ class PacketBase(Unpickable(
 
     def destroy(self):
         with self.lock:
-            if self._impl_state in [ImplState.HISTORIED, ImplState.DESTROYING]:
+            if self.destroying:
                 return
-
-            g = self._graph_executor
-
-            new_state = ImplState.DESTROYING \
-                if g.need_indefinite_time_to_reset() \
-                else ImplState.HISTORIED
 
             if not self._can_change_state(new_state):
                 raise NonDestroyingStateError()
 
-            g.reset()
-            self._change_state(new_state)
+            self._graph_executor.reset()
+            self._update_state()
 
     def _on_job_graph_become_empty(self):
         with self.lock:
-            if self._impl_state == ImplState.DESTROYING:
-                self._change_state(ImplState.HISTORIED)
+            self._update_state()
 
     def _mark_as_failed_on_recovery(self):
         with self.lock:
-            if self._impl_state == ImplState.BROKEN:
+            if self.is_broken:
                 return
-            self._change_state(ImplState.BROKEN)
+            self.is_broken = True
+            self._update_state()
 
     def _try_recover_directory(self, ctx):
         if os.path.isdir(self.directory):
@@ -704,6 +843,8 @@ class PacketBase(Unpickable(
 
     def rpc_add_binary(self, binname, file):
         with self.lock:
+            if self.
+            self.files_was_modified = True
             self._add_link(binname, file)
 
     def rpc_suspend(self, kill_jobs=False):
@@ -715,16 +856,26 @@ class PacketBase(Unpickable(
 
             self._graph_executor.disallow_to_run_jobs(kill_running=kill_jobs)
 
+    def _try_create_place_if_need(self):
+        try:
+            self._create_place_if_need(self._get_scheduler_ctx())
+            return True
+        except Exception:
+            logging.exception("Failed to create place")
+            self._change_state(ImplState.BROKEN)
+            self._graph_executor.stop()
+            return False
+
     def rpc_resume(self):
         with self.lock:
             # `reset_tries' is legacy behaviour of `rpc_resume'
             self._graph_executor.allow_to_run_jobs(reset_tries=True)
 
-    def _reset(self, tag_op):
-        def update_tags():
-            for tag, is_done in self._get_all_done_tags():
-                tag_op(tag, is_done)
+    def _update_done_tags(self, op):
+        for tag, is_done in self._get_all_done_tags():
+            op(tag, is_done)
 
+    #def _reset(self, tag_op):
         # XXX force call to _change_state for packets without jobs
         #if self._clean_state and self._graph_executor.jobs:
             #update_tags()
@@ -733,38 +884,13 @@ class PacketBase(Unpickable(
         # if not(self._graph_executor.jobs) we will first reset, then set (by _create_place_if_need)
 
         # TODO Test that job_done_tag are reset
-        update_tags()
+        #update_tags()
 
-        if self.wait_dep_tags:
-            self._graph_executor.reset()
+        #if self._local_directory_is_modified(): # FIXME
+            #self._release_place_if_need()
 
-        if not self._try_create_place_if_need():
-            self._change_state(ImplState.BROKEN)
-            self._graph_executor.reset()
-            return
-
-        self._become_pending_or_wait_tags()
-
-    def _try_create_place_if_need(self):
-        try:
-            self._create_place_if_need(self._get_scheduler_ctx())
-            return True
-        except Exception: # TODO
-            try:
-                logging.exception("Failed to create place")
-            except:
-                pass
-            return False
-
-    def rpc_reset(self, suspend=False):
-        with self.lock:
-            if suspend:
-                self._graph_executor.disallow_to_run_jobs()
-
-            self._reset(lambda tag, _: tag.Unset())
-
-            if not suspend:
-                self._graph_executor.allow_to_run_jobs()
+        #if self.wait_dep_tags:
+            #self._graph_executor.stop()
 
     def _get_scheduler_ctx(self):
         return PacketCustomLogic.SchedCtx
@@ -781,9 +907,32 @@ class PacketBase(Unpickable(
         if isinstance(ref, TagBase):
             self._on_tag_reset(ref, comment)
 
+    def rpc_reset(self, suspend=False):
+        with self.lock:
+            self._update_done_tags(lambda tag, _: tag.Unset())
+
+            if not self._try_create_place_if_need():
+                return
+
+            g = self._graph_executor
+
+            if suspend is None:
+                pass
+            elif suspend:
+                g.disallow_to_run_jobs()
+            else:
+                g.allow_to_run_jobs()
+
+            if self.wait_dep_tags:
+                g.stop()
+            else:
+                g.restart()
+
+            self._update_state()
+
     def _on_tag_reset(self, ref, comment):
         with self.lock:
-            if self._impl_state in [ImplState.HISTORIED, ImplState.BROKEN]:
+            if self.destroying:
                 return
 
             # FIXME Don't even update .wait_dep_tags if not self.is_resetable
@@ -791,6 +940,7 @@ class PacketBase(Unpickable(
             self.wait_dep_tags.add(tag_name)
 
             if self._impl_state == ImplState.UNINITIALIZED:
+            #if not self.queue:
                 return
 
             def notify(will_reset):
@@ -803,6 +953,11 @@ class PacketBase(Unpickable(
 
             if self.notify_on_reset:
                 notify(True)
+
+            # Reset or Unset emulates legacy behaviour
+            self._reset(lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
+
+            self._update_state()
 
             # TODO "is_done and tag.Reset(comment)" is not kosher!
             # We need reset-if-need logic in cloud_tags_server proxy
@@ -818,9 +973,6 @@ class PacketBase(Unpickable(
             # }
             #
             # FIXME This logic also may be added to local tags
-
-            # Reset or Unset emulates legacy behaviour
-            self._reset(lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
 
     def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
         with self.lock:
@@ -952,569 +1104,3 @@ class LocalPacket(PacketBase):
             raise as_rpc_user_error(
                 from_rpc, RuntimeError("Can't move packets with running jobs"))
 
-
-class _SandboxPacketJobGraphExecutorProxyOps(object):
-    def __init__(self, pck):
-        self.pck = pck
-
-    def update_repr_state(self):
-        self.pck._update_repr_state()
-
-    def set_successfull_state(self):
-        self.pck._change_state(ImplState.SUCCESSFULL)
-
-    def set_errored_state(self):
-        self.pck._change_state(ImplState.ERROR)
-
-    def job_done_successfully(self, job_id):
-        tag = self.pck.job_done_tag.get(job_id)
-        if tag:
-            tag.Set()
-
-    def create_job_runner(self, job):
-        raise AssertionError()
-
-    def on_job_graph_becomes_empty(self):
-        self.pck._on_job_graph_become_empty()
-
-# JobGraph: wait_job_deps=dict,
-#           succeed_jobs=set,
-#           failed_jobs=set,
-#           jobs_to_run=set,
-#           jobs_to_retry=dict,
-#           active_jobs_cache=always(set),
-#           created_inputs=set,
-#           dont_run_new_jobs=bool,
-#
-# Packet: repr_state
-#         history
-#
-# Job: tries
-#      results
-#      cached_working_time
-
-
-class JobGraph(object):
-    def __init__(self, jobs, kill_all_jobs_on_error):
-        self.jobs = jobs
-        self.kill_all_jobs_on_error = kill_all_jobs_on_error
-
-    def build_deps_dict():
-        graph = {}
-
-        for job in self.jobs.values:
-            graph[job.id] = []
-            for parent_id in job.parents:
-                graph[parent_id].append(job.id)
-
-        return graph
-
-
-###########################
-            # create
-        # indef
-
-            # update
-        # indef
-
-            # start
-# from now on we must do both:
-# 1. check task status (maybe not from now actually)
-# 2. be ready for rpc requests
-        # indef
-
-            # really started on some host
-        # indef
-
-            # we get know that it started on some host
-
-class RemotePacketsDispatcher(object):
-    _SANDBOX_TASK_CREATION_RETRY_INTERVAL = 10.0
-
-    def __init__(self, listen_port):
-        self.listen_port = listen_port
-        self.local_hostname = ...
-        #self.by_pck_id = {}
-        self.by_instance_id = {}
-
-    def start(self, io_invoker, sandbox):
-        self._rpc_server = self.RpcServer(self, listen_port)
-        self._io_invoker = ...
-        self.sandbox = ...
-
-    def stop(self):
-        raise NotImplementedError()
-
-# TODO max_restarts=0
-# TODO kill_timeout=14 * 86400
-# FIXME fail_on_any_error=False XXX А на каких он не падает?
-# FIXME С одной стороны хочется hidden, но тогда Рома не сможет позырить
-
-# XXX
-# 1. Может ли таск порестартоваться даже при max_restarts=0
-
-    # XXX TODO
-    # We must check task statuses periodically ourselves
-    # for packets that dont' communicate with us for a 'long time'
-
-    # XXX TODO
-    # Send instance_id in requests to instance as assert
-
-    # XXX TODO
-    # Instance must also ping server (if server doesn't ping instance)
-    # so REM-server will register instance's remote_addr after
-    # loading old backup (after server's fail)
-
-    def register_packet(self, pck):
-        with self.lock:
-            pck._sandbox_task_state = SandboxTaskState.CREATING
-        self._start_create_sandbox_task(pck)
-
-    def _reschedule_create_sandbox_task(self, pck):
-        with self.lock:
-            pck._cancel_schedule = None
-
-            if self._check_cancel_before_starting(pck):
-                return
-
-            self._start_create_sandbox_task(pck)
-
-
-# XXX FIXME We can't identify packet by pck_id in async/delayed calls
-#           becuase packet may be recreated by PacketBase
-#           (or we must cancel invokers (not only delayed_executor))
-
-    def _start_create_sandbox_task(self, pck):
-# FIXME TODO We can: pck._cancel_create = invoker.invoke(...)
-        self._io_invoker.invoke(lambda : self._do_create_sandbox_task(pck))
-
-    def _start_delete_task(self, task_id):
-        self._io_invoker.invoke(lambda : self.sandbox.delete_task(task_id)) # no retries
-
-    def _check_cancel_before_starting(self, pck):
-        if pck._cancelled:
-            pck._sandbox_task_state = SandboxTaskState.NOT_CREATED
-            #pck._on_cancelled()
-            pck._on_end_of_life()
-            return True
-        return False
-
-    def _do_create_sandbox_task(self, pck):
-        def reschedule_if_need():
-            with self.lock:
-                if self._check_cancel_before_starting(pck):
-                    return
-
-                pck._cancel_schedule = \
-                    delayed_executor.schedule(
-                        lambda : self._reschedule_create_sandbox_task(pck),
-                        timeout=self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
-
-        with self.lock:
-            if self._check_cancel_before_starting(pck):
-                return
-
-        instance_id = (pck.id, time.time())
-
-# TODO Handle 500
-
-        def handle_unknown_error():
-            raise NotImplementedError()
-
-        try:
-            task = self.sandbox.create_task(...)
-        except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
-            reschedule_if_need()
-            return
-        except:
-            handle_unknown_error()
-            return
-
-        with self.lock:
-            if self._check_cancel_before_starting(pck):
-                return
-
-        try:
-            task.update(...)
-        except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
-            reschedule_if_need()
-            self._start_delete_task(task.id)
-            return
-        except:
-            handle_unknown_error()
-            self._start_delete_task(task.id)
-            return
-
-        with self.lock:
-            if self._check_cancel_before_starting(pck):
-                return
-
-            # FIXME fork locking (mallformed pck state)
-            pck._instance_id = instance_id
-            pck._sandbox_task_id = task.id
-            pck._sandbox_task_state = SandboxTaskState.STARTING
-
-            self.by_instance_id[instance_id] = pck
-
-        try:
-            task.start()
-        except Exception as e:
-            # Here we don't know if task is really started
-            if isinstance(e, (sandbox.NetworkError, sandbox.ServerInternalError)):
-                func = self._reschedule_sandbox_task_start
-                new_state = None
-            else:
-                func = self._reschedule_sandbox_failed_start_check
-                new_state = SandboxTaskState.CHECKING_FAILED_START
-                self._start_error = e
-
-            with self.lock:
-                if new_state:
-                    pck._sandbox_task_state = new_state
-                pck._cancel_schedule = \
-                    delayed_executor.schedule(
-                        lambda : func(pck),
-                        timeout=self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
-            return
-
-        with self.lock:
-            if pck._cancelled:
-            pck._sandbox_task_state = SandboxTaskState.STARTED
-
-    def process_incoming_message(self, instance_id, msg):
-        with self.lock:
-            pck = self.by_instance_id.get(instance_id)
-            if not pck:
-                raise NonExistentInstanceError()
-
-            if pck._cancelled:
-                return
-
-            raise NotImplementedError()
-
-    def send_message(self, pck):
-        raise NotImplementedError()
-
-    def cancel_packet(self, pck):
-        with self.lock:
-            if pck._cancelled:
-                return
-
-            pck._cancelled = True
-
-            state = pck._sandbox_task_state
-
-            if state == SandboxTaskState.CREATING:
-                if pck._cancel_schedule:
-                    if pck._cancel_schedule():
-                        self._on_end_of_life()
-                    pck._cancel_schedule = None
-
-            elif state == SandboxTaskState.NOT_CREATED: # FIXME Must not be
-                self._on_end_of_life()
-
-            elif state in [SandboxTaskState.STARTING, SandboxTaskState.CHECKING_FAILED_START]:
-                pass # Don't touch!
-
-            else:
-                raise NotImplementedError()
-            #TERMINATED  = 6
-            #CREATION_FAILED = 7
-
-
-class SandboxTaskState(object):
-    NOT_CREATED = 1
-    CREATING    = 2
-    STARTING    = 3
-    STARTED     = 4
-    CHECKING_FAILED_START = 5
-    TERMINATED  = 6
-    CREATION_FAILED = 7
-
-
-class SandboxRemotePacket(object):
-    def __init__(self, ops, pck_id, graph, snapshot_resource_id, sandbox_task_params)
-        self.pck_id = pck_id
-        self._ops = ops
-        self._cancelled = False
-        self._sandbox_task_state = SandboxTaskState.NOT_CREATED
-        self._instance_id = None
-        self._sandbox_task_id = None
-        self._cancel_schedule = None
-        self._remote_addr = None
-
-        #raw_snapshot = None
-        #if not snapshot_resource_id:
-            #raw_snapshot = self._produce_raw_snapshot(pck_id, graph)
-
-        remote_packets_dispatcher.register_packet(self)
-                            #raw_snapshot=raw_snapshot,
-                            #snapshot_resource_id=snapshot_resource_id,
-                            #sandbox_task_params=sandbox_task_params)
-
-    #def send(self, msg):
-        #remote_packets_dispatcher.send(self, msg)
-
-    def cancel(self):
-        remote_packets_dispatcher.cancel_packet(self)
-
-    def restart(self):
-        remote_packets_dispatcher.send_message(self, ...)
-
-    def allow_to_run_jobs(self):
-        remote_packets_dispatcher.send_message(self, ...)
-
-    def disallow_to_run_jobs(self):
-        remote_packets_dispatcher.send_message(self, ...)
-
-    @staticmethod
-    def _produce_raw_snapshot(pck_id, graph):
-        pck = sandbox_packet.Packet(pck_id, graph)
-        return base64.b64encode(cPickle.dumps(graph, 2))
-
-
-class SandboxJobGraphExecutorProxy(object):
-    def __init__(self, ops, pck_id, graph, sandbox_task_params):
-        self._ops = ops
-        self._graph = graph
-        self.pck_id = pck_id
-        self._remote_packet = None
-        self._suspended_snapshot_resource_id = None
-        self._sandbox_task_params = sandbox_task_params
-
-    # XXX
-        self.__dont_run_new_jobs = False
-        self.__must_be_running = True # FIXME
-        self.__stopping = False # FIXME
-        self.detailed_status = None
-        #self.state = ReprState.PENDING
-        self.history = [] # XXX TODO Непонятно вообще как с этим быть
-
-    def _create_remote_packet(self):
-        return SandboxRemotePacket(
-            self, # Ops?
-            self.pck_id,
-            self._graph,
-            self._suspended_snapshot_resource_id,
-            self._sandbox_task_params
-        )
-
-    def get_repr_state(self):
-        if not self.history:
-            return ReprState.PENDING
-        return self.history[-1][0]
-
-    def produce_detailed_status(self):
-        return self.detailed_status
-
-########### Ops for _remote_packet
-    # on sandbox task stopped + resources list fetched
-    def on_packet_terminated(self, ?how):
-        with self._ops.lock: # FIXME lazy@ How do it right?
-            self.__stopping = False
-            self._remote_packet = None
-            if self.__must_be_running and not self.__dont_run_new_jobs: # FIXME
-                self._remote_packet = self._create_remote_packet()
-            else:
-                if ...:
-                    self._suspended_snapshot_resource_id = how....
-                else:
-                    self._suspended_snapshot_resource_id = None
-                self._ops.on_job_graph_becomes_empty()
-
-    def on_..._update(self, update):
-        with self._ops.lock:
-            self.....
-
-###########
-    def disallow_to_run_jobs(self, kill_running=False):
-        with self._ops.lock:
-            self.__dont_run_new_jobs = True
-
-            if self.__stopping:
-                return
-
-            if self._remote_packet:
-                self._remote_packet.disallow_to_run_jobs(kill_running)
-
-    def allow_to_run_jobs(self, reset_tries=False):
-        with self._ops.lock:
-            self.__dont_run_new_jobs = False
-
-            if self.__stopping:
-                return
-
-            if self._remote_packet:
-                self._remote_packet.allow_to_run_jobs(reset_tries)
-
-    def restart(self):
-        with self._ops.lock:
-            self.__must_be_running = True
-
-            if self.__stopping:
-                return
-
-            if self._remote_packet:
-                self._remote_packet.restart() # may actually 'fail'
-            else:
-                self._remote_packet = self._create_remote_packet()
-
-    def reset(self):
-        with self._ops.lock:
-            self.__must_be_running = False
-            if self._remote_packet and not self.__stopping:
-                self._remote_packet.cancel()
-                self.__stopping = True
-
-    def is_stopped(self):
-        with self._ops.lock:
-            return not self._remote_packet or self._remote_packet.is_suspended()
-                                                    # TODO is_suspended
-                                                    # определяется последним поставленным
-                                                    # в очередь на отправку флагом
-
-    def is_null(self):
-        return not self._remote_packet
-
-    def need_indefinite_time_to_reset(self):
-        return bool(self._remote_packet)
-###########
-
-    def recover_after_backup_loading(self):
-        pass # FIXME
-
-    #def on_job_done(self, runner):
-    #def apply_jobs_results(self):
-    #def vivify_jobs_waiting_stoppers(self):
-    #def stop_waiting(self, stop_id):
-    #def create_job_file_handles(self, job):
-    #def get_working_jobs(self):
-    #def get_job_to_run(self):
-    #def can_run_jobs_right_now(self):
-
-
-class SandboxPacketOpsForJobGraphExecutorProxy(object):
-    def __init__(self, pck):
-        self._pck = pck
-        self.lock = pck.lock
-
-
-class SandboxPacket(PacketBase):
-    def run(self):
-        with self.lock:
-            if self._impl_state != ImplState.ACTIVE:
-                raise NotWorkingStateError("Can't run jobs in % state" % self.state)
-
-            self._graph_executor.restart()
-
-    def _create_job_graph_executor(self):
-        return SandboxJobGraphExecutorProxy(
-            SandboxPacketOpsForJobGraphExecutorProxy(self),
-            self.id,
-            self.make_job_graph(),
-            self.make_sandbox_task_params()
-        )
-
-    def _apply_sandbox_message(self, msg):
-        self._messages.append(msg)
-        with self.lock:
-            self
-
-    def _check_can_move_beetwen_queues(self):
-        pass
-
-    def rpc_add_binary(self, binname, file):
-        #self._get_scheduler_ctx().sandbox_files.add(file.path, checksum=file.checksum)
-        super(SandboxPacket, self).rpc_add_binary(binname, file)
-
-# DEBUG
-    def create_sandbox_packet(self):
-        return sandbox_packet.Packet(self.id, self.make_job_graph())
-
-
-# For loading legacy backups
-class JobPacket(Unpickable(lock=PickableRLock,
-                           jobs=dict,
-                           edges=dict, # jobs_graph
-                           done=set, # succeed_jobs
-                           leafs=set, # jobs_to_run
-                           #_active_jobs=always(_ActiveJobs),
-                           job_done_indicator=dict, # job_done_tag
-                           waitingDeadline=int, # REMOVED
-                           allTags=set, # all_dep_tags
-                           waitTags=set, # wait_dep_tags
-                           binLinks=dict, # bin_links
-                           state=(str, ReprState.ERROR),
-                           history=list,
-                           notify_emails=list,
-                           flags=int, # REMOVED
-                           kill_all_jobs_on_error=(bool, True),
-                           _clean_state=(bool, False), # False for loading old backups
-                           isResetable=(bool, True), # is_resetable
-                           notify_on_reset=(bool, False),
-                           notify_on_skipped_reset=(bool, True),
-                           directory=lambda *args: args[0] if args else None,
-                           as_in_queue_working=always(set), # active_jobs_cache
-                           # + jobs_to_retry
-                           # + failed_jobs
-                           # + dont_run_new_jobs
-                          ),
-                CallbackHolder,
-                ICallbackAcceptor
-               ):
-
-    class PacketFlag:
-        USER_SUSPEND = 0b0001
-        RCVR_ERROR   = 0b0010
-
-    StateMap = {
-        ReprState.CREATED:          ImplState.UNINITIALIZED,
-        ReprState.NONINITIALIZED:   ImplState.ACTIVE,
-        ReprState.WORKABLE:         ImplState.ACTIVE,
-        ReprState.PENDING:          ImplState.ACTIVE,
-        #ReprState.SUSPENDED:
-        ReprState.WAITING:          ImplState.ACTIVE,
-        ReprState.ERROR:            ImplState.ERROR,
-        ReprState.SUCCESSFULL:      ImplState.SUCCESSFULL,
-        ReprState.HISTORIED:        ImplState.HISTORIED,
-    }
-
-    def __init__(self, *args, **kwargs):
-        raise NotImplementedError("JobPacket constructor is private")
-
-    def convert_to_v2(self):
-        pckd = self.__dict__
-
-        self.failed_jobs = set()
-        if self.state == ReprState.ERROR:
-# FIXME pop may throw
-            self.failed_jobs.add(self.leafs.pop())
-
-        self.jobs_to_retry = {}
-        if self.state == ReprState.WAITING:
-# FIXME pop may throw
-            self.jobs_to_retry[1] = (self.leafs.pop(), None, self.waitingDeadline)
-        pckd.pop('waitingDeadline', None)
-
-        self.done_tag = pckd.pop('done_indicator')
-        #self.jobs_graph = pckd.pop('edges')
-        self.succeed_jobs = pckd.pop('done')
-        self.jobs_to_run = pckd.pop('leafs')
-        self.job_done_tag = pckd.pop('job_done_indicator')
-        self.all_dep_tags = pckd.pop('allTags')
-        self.wait_dep_tags = pckd.pop('waitTags')
-        self.bin_links = pckd.pop('binLinks')
-        self.is_resetable = pckd.pop('isResetable')
-        self.active_jobs_cache = pckd.pop('as_in_queue_working')
-
-        self.dont_run_new_jobs = bool(self.flags & self.PacketFlag.USER_SUSPEND)
-        has_recovery_error = bool(self.flags & self.PacketFlag.RCVR_ERROR)
-        pckd.pop('flags')
-
-        if self.state == ReprState.SUSPENDED:
-            self._impl_state = ImplState.WAIT_TAGS if self.wait_dep_tags else ImplState.ACTIVE
-        else:
-            self._impl_state = self.StateMap[self.state]
-
-        if self._impl_state == ImplState.ERROR and has_recovery_error:
-            self._impl_state = ImplState.BROKEN
