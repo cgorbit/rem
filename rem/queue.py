@@ -39,11 +39,11 @@ class QueueBase(Unpickable(pending=PackSet.create,
     }
 
     def __init__(self, name):
-        super(Queue, self).__init__()
+        super(QueueBase, self).__init__()
         self.name = name
 
     def __getstate__(self):
-        sdict = getattr(super(Queue, self), "__getstate__", lambda: self.__dict__)()
+        sdict = getattr(super(QueueBase, self), "__getstate__", lambda: self.__dict__)()
         with self.lock:
             for q in self.VIEW_BY_ORDER:
                 sdict[q] = sdict[q].copy()
@@ -149,7 +149,7 @@ class QueueBase(Unpickable(pending=PackSet.create,
                     "worked": (list, self.worked),
                     "working": (type(self)._get_working_packets, self),
                     "waiting": (list, self.waited),
-                    None: (Queue.ListAllPackets, self)}[filter]
+                    None: (QueueBase.ListAllPackets, self)}[filter]
         for pck in pf(parg):
             yield pck
 
@@ -275,6 +275,11 @@ class SandboxQueue(QueueBase):
 
                 pck = self.pending.peak()[0]
 
+    def _on_packet_attach(self, pck):
+        pass # TODO
+
+    def _on_packet_detach(self, pck):
+        pass # TODO
 #TODO
 #TODO
 #TODO

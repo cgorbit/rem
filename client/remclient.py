@@ -230,7 +230,7 @@ class JobPacket(object):
 
     def __init__(self, connector, name, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
                  kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
-                 notify_on_reset=False, notify_on_skipped_reset=True):
+                 notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False):
         self.conn = connector
         self.proxy = connector.proxy
         if check_tag_uniqueness and self.proxy.check_tag(set_tag):
@@ -241,8 +241,11 @@ class JobPacket(object):
             kill_all_jobs_on_error, packet_name_policy, resetable,
         ]
 
-        if notify_on_reset or not notify_on_skipped_reset:
+        if notify_on_reset or not notify_on_skipped_reset or is_sandbox:
             args.extend([notify_on_reset, notify_on_skipped_reset])
+
+        if is_sandbox:
+            args.append(is_sandbox)
 
         self.id = self.proxy.create_packet(*args)
 
@@ -675,7 +678,7 @@ class Connector(object):
 
     def Packet(self, pckname, priority=MAX_PRIORITY, notify_emails=[], wait_tags=(), set_tag=None,
                check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True,
-               notify_on_reset=False, notify_on_skipped_reset=True):
+               notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False):
         """создает новый пакет с именем pckname
             priority - приоритет выполнения пакета
             notify_emails - список почтовых адресов, для уведомления об ошибках
@@ -693,7 +696,8 @@ class Connector(object):
                 kill_all_jobs_on_error=kill_all_jobs_on_error,
                 packet_name_policy=self.packet_name_policy,
                 notify_on_reset=notify_on_reset,
-                notify_on_skipped_reset=notify_on_skipped_reset
+                notify_on_skipped_reset=notify_on_skipped_reset,
+                is_sandbox=is_sandbox
             )
         except xmlrpclib.Fault, e:
             if 'DuplicatePackageNameException' in e.faultString:

@@ -63,7 +63,7 @@ class _ExecutorOps(object):
 
 
 class Packet(object):
-    def __init__(self, pck_id, jobs):
+    def __init__(self, pck_id, graph):
         self.id = pck_id
         self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
         self.history = []
@@ -74,7 +74,7 @@ class Packet(object):
         self._graph_executor = rem.job_graph.JobGraphExecutor(
             _ExecutorOps(self),
             self.id,
-            jobs,
+            graph,
         )
 
         self.update_repr_state(ReprState.CREATED)

@@ -67,10 +67,12 @@ class RemotePacketsDispatcher(object):
 
     def __init__(self, listen_port):
         self.listen_port = listen_port
-        self.local_hostname = ...
         #self.by_pck_id = {}
         self.by_instance_id = {}
-        self._rpc_listen_addr = ('ws30-511.yandex.ru', 8000)
+        self._rpc_listen_addr = ('ws30-511.yandex.ru', 8000) # TODO XXX
+        self._executor_resource_id = 14 # TODO
+        self._sbx_task_owner = 'guest'
+        self._sbx_task_priority = (TaskPriority.Class.SERVICE, TaskPriority.SubClass.NORMAL),
 
     def _create_rpc_server(self):
         srv = SimpleXMLRPCServer(self._rpc_listen_addr)
@@ -172,7 +174,15 @@ class RemotePacketsDispatcher(object):
             raise NotImplementedError()
 
         try:
-            task = self.sandbox.create_task(...)
+            task = self.sandbox.create_task(
+                'RUN_REM_JOBPACKET',
+                {
+                    'executor_resource': self._executor_resource_id,
+                    'snapshot_data': pck.produce_snapshot_data(),
+                    #'snapshot_resource': # TODO
+                    'custom_resources': pck.custom_resources,
+                }
+            )
         except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
             reschedule_if_need()
             return
@@ -185,7 +195,15 @@ class RemotePacketsDispatcher(object):
                 return
 
         try:
-            task.update(...)
+            task.update(
+                max_restarts=0,
+                kill_timeout=self._sbx_task_kill_timeout,
+                owner=self._sbx_task_owner,
+                priority=self._sbx_task_priority,
+                notifications=[],
+                #fail_on_any_error=True, # FIXME What?
+            )
+
         except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
             reschedule_if_need()
             self._start_delete_task(task.id)
@@ -229,7 +247,7 @@ class RemotePacketsDispatcher(object):
 
         with self.lock:
             if pck._cancelled:
-            pck._sandbox_task_state = SandboxTaskState.STARTED
+                pck._sandbox_task_state = SandboxTaskState.STARTED
 
     def process_incoming_message(self, instance_id, msg):
         with self.lock:
@@ -283,7 +301,7 @@ class SandboxTaskState(object):
 
 
 class SandboxRemotePacket(object):
-    def __init__(self, ops, pck_id, graph, snapshot_resource_id, sandbox_task_params)
+    def __init__(self, ops, pck_id, snapshot_data, snapshot_resource_id, custom_resources):
         self.pck_id = pck_id
         self._ops = ops
         self._cancelled = False
@@ -293,49 +311,33 @@ class SandboxRemotePacket(object):
         self._cancel_schedule = None
         self._remote_addr = None
 
-        #raw_snapshot = None
-        #if not snapshot_resource_id:
-            #raw_snapshot = self._produce_raw_snapshot(pck_id, graph)
-
         remote_packets_dispatcher.register_packet(self)
-                            #raw_snapshot=raw_snapshot,
-                            #snapshot_resource_id=snapshot_resource_id,
-                            #sandbox_task_params=sandbox_task_params)
-
-    #def send(self, msg):
-        #remote_packets_dispatcher.send(self, msg)
 
     def cancel(self):
         remote_packets_dispatcher.cancel_packet(self)
 
     def restart(self):
-        remote_packets_dispatcher.send_message(self, ...)
+        remote_packets_dispatcher.restart_packet(self)
 
-    def allow_to_run_jobs(self):
-        remote_packets_dispatcher.send_message(self, ...)
+    def stop(self, kill_jobs):
+        remote_packets_dispatcher.stop_packet(self)
 
-    def disallow_to_run_jobs(self, kill_jobs):
-        remote_packets_dispatcher.send_message(self, ...)
 
-    @staticmethod
-    def _produce_raw_snapshot(pck_id, graph):
-        pck = sandbox_packet.Packet(pck_id, graph)
-        return base64.b64encode(cPickle.dumps(graph, 2))
+def _produce_snapshot_data(pck_id, graph):
+    pck = sandbox_packet.Packet(pck_id, graph)
+    return base64.b64encode(cPickle.dumps(graph, 2))
 
 
 class SandboxJobGraphExecutorProxy(object):
-    def __init__(self, ops, pck_id, graph, sandbox_task_params):
+    def __init__(self, ops, pck_id, graph, custom_resources):
         self._ops = ops
         self._graph = graph
         self.pck_id = pck_id
         self._remote_packet = None
         self._suspended_snapshot_resource_id = None
-        self._sandbox_task_params = sandbox_task_params
+        self._custom_resources = custom_resources
 
-    # XXX
-        self.__dont_run_new_jobs = False
-        self.__must_be_running = True # FIXME
-        self.__stopping = False # FIXME
+        self.stopping = False # FIXME
         self.detailed_status = None
         #self.state = ReprState.PENDING
         self.history = [] # XXX TODO Непонятно вообще как с этим быть
@@ -344,9 +346,9 @@ class SandboxJobGraphExecutorProxy(object):
         return SandboxRemotePacket(
             self, # Ops?
             self.pck_id,
-            self._graph,
-            self._suspended_snapshot_resource_id,
-            self._sandbox_task_params
+            snapshot_data=_produce_snapshot_data(self.pck_id, self._graph),
+            snapshot_resource_id=None, # TODO
+            custom_resources=self._custom_resources
         )
 
     def get_repr_state(self):
@@ -359,80 +361,73 @@ class SandboxJobGraphExecutorProxy(object):
 
 ########### Ops for _remote_packet
     # on sandbox task stopped + resources list fetched
-    def on_packet_terminated(self, ?how):
+    def on_packet_terminated(self, how):
         with self._ops.lock: # FIXME lazy@ How do it right?
-            self.__stopping = False
-            self._remote_packet = None
-            if self.__must_be_running and not self.__dont_run_new_jobs: # FIXME
-                self._remote_packet = self._create_remote_packet()
-            else:
-                if ...:
-                    self._suspended_snapshot_resource_id = how....
-                else:
-                    self._suspended_snapshot_resource_id = None
-                self._ops.on_job_graph_becomes_empty()
-
-    def on_..._update(self, update):
-        with self._ops.lock:
-            self.....
+            raise NotImplementedError()
+            #self.stopping = False
+            #self._remote_packet = None
+            #if self.__must_be_running and not self.__dont_run_new_jobs: # FIXME
+                #self._remote_packet = self._create_remote_packet()
+            #else:
+                #if ...:
+                    #self._suspended_snapshot_resource_id = how....
+                #else:
+                    #self._suspended_snapshot_resource_id = None
+                #self._ops.on_job_graph_becomes_null()
 
 ###########
-    def disallow_to_run_jobs(self, kill_running=False):
+    def stop(self, kill_jobs):
         with self._ops.lock:
-            self.__dont_run_new_jobs = True
+            if not self._remote_packet:
+                raise
 
-            if self.__stopping:
-                return
+            self.stopping = True
+            self._remote_packet.stop(kill_jobs)
 
-            if self._remote_packet:
-                self._remote_packet.disallow_to_run_jobs(kill_running)
-
-    def allow_to_run_jobs(self, reset_tries=False):
-        with self._ops.lock:
-            self.__dont_run_new_jobs = False
-
-            if self.__stopping:
-                return
-
-            if self._remote_packet:
-                self._remote_packet.allow_to_run_jobs(reset_tries)
-
-    def start(self):
+    def stop_stopping(self):
         raise NotImplementedError()
 
-# 'fast restart' or start
-    def restart(self):
+    def start(self):
         with self._ops.lock:
-            self.__must_be_running = True
-
-            if self.__stopping:
-                return
-
             if self._remote_packet:
-                self._remote_packet.restart() # may actually 'fail'
-            else:
-                self._remote_packet = self._create_remote_packet()
+                raise RuntimeError()
+
+            self._remote_packet = self._create_remote_packet()
+
+# 'fast restart' or start
+    #def restart(self):
+        #with self._ops.lock:
+            #self.__must_be_running = True
+
+            #if self.stopping:
+                #return
+
+            #if self._remote_packet:
+                #self._remote_packet.restart() # may actually 'fail'
+            #else:
+                #self._remote_packet = self._create_remote_packet()
 
     def stop(self):
         with self._ops.lock:
-            self.__must_be_running = False
-            if self._remote_packet and not self.__stopping:
-                self._remote_packet.cancel()
-                self.__stopping = True
+            raise NotImplementedError()
+            #self.__must_be_running = False
+            #if self._remote_packet and not self.stopping:
+                #self._remote_packet.cancel()
+                #self.stopping = True
 
 # TODO Fuck this
-    def is_suspended(self):
-        with self._ops.lock:
-            return self._remote_packet and self._remote_packet.is_suspended()
-                                                    # TODO is_suspended
+    #def is_suspended(self):
+        #with self._ops.lock:
+            #return self._remote_packet and self._remote_packet.is_suspended()
+                                                    ## TODO is_suspended
                                                     # определяется последним поставленным
                                                     # в очередь на отправку флагом
 
     def is_null(self):
-        return not self._remote_packet
+        return self._remote_packet is None
 
-    def need_indefinite_time_to_reset(self):
-        return bool(self._remote_packet)
+    #def need_indefinite_time_to_reset(self):
+        #return bool(self._remote_packet)
 ###########
 
     def recover_after_backup_loading(self):
@@ -475,39 +470,7 @@ class _SandboxPacketJobGraphExecutorProxyOps(object):
     def create_job_runner(self, job):
         raise AssertionError()
 
-    def on_job_graph_becomes_empty(self):
-        self.pck._on_job_graph_become_empty()
+    def on_job_graph_becomes_null(self):
+        self.pck._on_job_graph_becomes_null()
 
-
-class SandboxPacket(PacketBase):
-    def run(self):
-        with self.lock:
-            if self._impl_state != ImplState.ACTIVE:
-                raise NotWorkingStateError("Can't run jobs in % state" % self.state)
-
-            self._graph_executor.restart()
-
-    def rpc_add_resource(self, name, path):
-        with self.lock:
-            self.files_was_modified = True
-            self.sbx_files[name] = path
-
-    def _create_job_graph_executor(self):
-        return SandboxJobGraphExecutorProxy(
-            SandboxPacketOpsForJobGraphExecutorProxy(self),
-            self.id,
-            self.make_job_graph(),
-            self.make_sandbox_task_params()
-        )
-
-    def _check_can_move_beetwen_queues(self):
-        pass
-
-    #def rpc_add_binary(self, binname, file):
-        ##self._get_scheduler_ctx().sandbox_files.add(file.path, checksum=file.checksum)
-        #super(SandboxPacket, self).rpc_add_binary(binname, file)
-
-# DEBUG
-    def create_sandbox_packet(self):
-        return sandbox_packet.Packet(self.id, self.make_job_graph())
 
