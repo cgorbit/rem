@@ -717,6 +717,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.schedWatcher.AddTaskT(timeout, fn, *args, **kws)
 
     def Start(self):
+# XXX
+        import sandbox_remote_packet
+        d = sandbox_remote_packet.remote_packets_dispatcher = sandbox_remote_packet.RemotePacketsDispatcher()
+        d.start(self.context)
+
         for q in self.qRef.itervalues():
             for pck in list(q.ListAllPackets()):
                 pck.vivify_jobs_waiting_stoppers()

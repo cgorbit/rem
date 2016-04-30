@@ -5,7 +5,6 @@ import os
 import time
 import shutil
 import errno
-import base64
 import cPickle
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
@@ -91,10 +90,10 @@ class JobGraph(object):
         self.jobs = jobs
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
 
-    def build_deps_dict():
+    def build_deps_dict(self):
         graph = {}
 
-        for job in self.jobs.values:
+        for job in self.jobs.values():
             graph[job.id] = []
             for parent_id in job.parents:
                 graph[parent_id].append(job.id)

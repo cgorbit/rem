@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import re
+import types
 import logging
 
 from projects import resource_types as rt
@@ -58,13 +59,15 @@ class RunRemJobPacket(SandboxTask):
         return '', None, 1
 
     def __init_custom_resources_param(self):
-        custom_resources = self.ctx['custom_resources'].strip()
+        custom_resources = self.ctx['custom_resources']
 
-        self.ctx['custom_resources'] = json.dumps(json.loads(custom_resources)) \
-            if custom_resources else None
+        if isinstance(custom_resources, types.StringTypes):
+            custom_resources = custom_resources.strip()
 
-    def __sync_custom_resources(self):
-        custom_resources = json.loads(self.ctx['custom_resources'])
+            self.ctx['custom_resources'] = json.loads(custom_resources) \
+                if custom_resources else None
+
+    def __sync_custom_resources(self, custom_resources):
         custom_resources_ids = set()
 
         for name, full_path in custom_resources.items():
@@ -99,7 +102,7 @@ class RunRemJobPacket(SandboxTask):
 
         custom_resources = self.ctx['custom_resources']
         if custom_resources:
-            self.__sync_custom_resources()
+            self.__sync_custom_resources(custom_resources)
 
         argv = [
             './executor/sbx_run_packet.py',
@@ -108,7 +111,7 @@ class RunRemJobPacket(SandboxTask):
         ]
 
         if custom_resources:
-            argv.extend(['--custom-resources', custom_resources])
+            argv.extend(['--custom-resources', json.dumps(custom_resources)])
 
         if self.ctx['snapshot_resource']:
             snapshot_resource_path = self.sync_resource(int(self.ctx['snapshot_resource']))

@@ -1,4 +1,20 @@
 # -*- coding: utf-8 -*-
+import os
+import sys
+import time
+import base64
+import cPickle
+from SimpleXMLRPCServer import SimpleXMLRPCServer
+import threading
+from Queue import Queue as ThreadSafeQueue
+
+from rem.profile import ProfiledThread
+import sandbox_packet
+import rem.sandbox as sandbox
+from rem_logging import logger as logging
+
+remote_packets_dispatcher = None
+
 ###########################
             # create
         # indef
@@ -17,8 +33,11 @@
 
             # we get know that it started on some host
 
-from rem.profile import ProfiledThread
-from Queue import Queue as ThreadSafeQueue
+def wrap_string(s, width):
+    return '\n'.join(
+        s[i * width : (i + 1) * width]
+            for i in xrange((len(s) - 1) / width + 1)
+    )
 
 class ActionQueue(object):
     __STOP_INDICATOR = object()
@@ -26,12 +45,13 @@ class ActionQueue(object):
     def __init__(self, thread_count=1, thread_name_prefix='Thread'):
         self._queue = ThreadSafeQueue()
         self._thread_name_prefix = thread_name_prefix
+        self._thread_count = thread_count
         self.__start()
 
     def __start(self):
         self._threads = [
             ProfiledThread(target=self.__worker, name_prefix=self._thread_name_prefix)
-                for _ in xrange(thread_count)
+                for _ in xrange(self._thread_count)
         ]
 
         for t in self._threads:
@@ -60,19 +80,19 @@ class ActionQueue(object):
                 logging.exception("")
 
 
-from SimpleXMLRPCServer import SimpleXMLRPCServer
-
 class RemotePacketsDispatcher(object):
     _SANDBOX_TASK_CREATION_RETRY_INTERVAL = 10.0
 
-    def __init__(self, listen_port):
-        self.listen_port = listen_port
+    def __init__(self):
+        #self.listen_port = listen_port
         #self.by_pck_id = {}
         self.by_instance_id = {}
-        self._rpc_listen_addr = ('ws30-511.yandex.ru', 8000) # TODO XXX
         self._executor_resource_id = 14 # TODO
+        self._sbx_task_kill_timeout = 14 * 86400 # TODO
         self._sbx_task_owner = 'guest'
-        self._sbx_task_priority = (TaskPriority.Class.SERVICE, TaskPriority.SubClass.NORMAL),
+        self._sbx_task_priority = (
+            sandbox.TaskPriority.Class.SERVICE,
+            sandbox.TaskPriority.SubClass.NORMAL)
 
     def _create_rpc_server(self):
         srv = SimpleXMLRPCServer(self._rpc_listen_addr)
@@ -80,8 +100,9 @@ class RemotePacketsDispatcher(object):
         srv.register_function(self._rpc_set_jobs_statuses, 'set_jobs_statuses')
         return srv
 
-    #def start(self, io_invoker, sandbox):
+        #def start(self, io_invoker, sandbox):
     def start(self, ctx):
+        self._rpc_listen_addr = ('ws30-511.yandex.ru', 8000) # TODO XXX
         self._rpc_server = self._create_rpc_server()
         ProfiledThread(target=self._rpc_server.serve_forever, name_prefix='SbxRpc').start()
 
@@ -118,12 +139,12 @@ class RemotePacketsDispatcher(object):
         raise NotImplementedError()
 
     def register_packet(self, pck):
-        with self.lock:
+        with pck.lock:
             pck._sandbox_task_state = SandboxTaskState.CREATING
         self._start_create_sandbox_task(pck)
 
     def _reschedule_create_sandbox_task(self, pck):
-        with self.lock:
+        with pck.lock:
             pck._cancel_schedule = None
 
             if self._check_cancel_before_starting(pck):
@@ -153,7 +174,7 @@ class RemotePacketsDispatcher(object):
 
     def _do_create_sandbox_task(self, pck):
         def reschedule_if_need():
-            with self.lock:
+            with pck.lock:
                 if self._check_cancel_before_starting(pck):
                     return
 
@@ -162,7 +183,7 @@ class RemotePacketsDispatcher(object):
                         lambda : self._reschedule_create_sandbox_task(pck),
                         timeout=self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
 
-        with self.lock:
+        with pck.lock:
             if self._check_cancel_before_starting(pck):
                 return
 
@@ -178,19 +199,22 @@ class RemotePacketsDispatcher(object):
                 'RUN_REM_JOBPACKET',
                 {
                     'executor_resource': self._executor_resource_id,
-                    'snapshot_data': pck.produce_snapshot_data(),
-                    #'snapshot_resource': # TODO
-                    'custom_resources': pck.custom_resources,
+                    'snapshot_data': wrap_string(pck._snapshot_data, 79) if pck._snapshot_data else None,
+                    'snapshot_resource': pck._snapshot_resource_id,
+                    'custom_resources': pck._custom_resources,
                 }
             )
         except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
             reschedule_if_need()
             return
         except:
+            logging.exception('')
             handle_unknown_error()
             return
 
-        with self.lock:
+        logging.debug('sbx:%d for %s created' % (task.id, pck.id))
+
+        with pck.lock:
             if self._check_cancel_before_starting(pck):
                 return
 
@@ -201,6 +225,7 @@ class RemotePacketsDispatcher(object):
                 owner=self._sbx_task_owner,
                 priority=self._sbx_task_priority,
                 notifications=[],
+                description=pck.id,
                 #fail_on_any_error=True, # FIXME What?
             )
 
@@ -209,11 +234,12 @@ class RemotePacketsDispatcher(object):
             self._start_delete_task(task.id)
             return
         except:
+            logging.exception('')
             handle_unknown_error()
             self._start_delete_task(task.id)
             return
 
-        with self.lock:
+        with pck.lock:
             if self._check_cancel_before_starting(pck):
                 return
 
@@ -236,7 +262,7 @@ class RemotePacketsDispatcher(object):
                 new_state = SandboxTaskState.CHECKING_FAILED_START
                 self._start_error = e
 
-            with self.lock:
+            with pck.lock:
                 if new_state:
                     pck._sandbox_task_state = new_state
                 pck._cancel_schedule = \
@@ -245,12 +271,12 @@ class RemotePacketsDispatcher(object):
                         timeout=self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
             return
 
-        with self.lock:
+        with pck.lock:
             if pck._cancelled:
                 pck._sandbox_task_state = SandboxTaskState.STARTED
 
     def process_incoming_message(self, instance_id, msg):
-        with self.lock:
+        with pck.lock:
             pck = self.by_instance_id.get(instance_id)
             if not pck:
                 raise NonExistentInstanceError()
@@ -264,7 +290,7 @@ class RemotePacketsDispatcher(object):
         raise NotImplementedError()
 
     def cancel_packet(self, pck):
-        with self.lock:
+        with pck.lock:
             if pck._cancelled:
                 return
 
@@ -302,11 +328,15 @@ class SandboxTaskState(object):
 
 class SandboxRemotePacket(object):
     def __init__(self, ops, pck_id, snapshot_data, snapshot_resource_id, custom_resources):
-        self.pck_id = pck_id
+        self.id = pck_id
         self._ops = ops
+        self.lock = ops._ops.lock # XXX TODO
         self._cancelled = False
         self._sandbox_task_state = SandboxTaskState.NOT_CREATED
         self._instance_id = None
+        self._snapshot_resource_id = snapshot_resource_id
+        self._snapshot_data = snapshot_data
+        self._custom_resources = custom_resources
         self._sandbox_task_id = None
         self._cancel_schedule = None
         self._remote_addr = None
@@ -445,7 +475,7 @@ class SandboxJobGraphExecutorProxy(object):
 
 class SandboxPacketOpsForJobGraphExecutorProxy(object):
     def __init__(self, pck):
-        self._pck = pck
+        #self._pck = pck
         self.lock = pck.lock
 
 

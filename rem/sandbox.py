@@ -86,9 +86,10 @@ class Client(object):
             print >>sys.stderr, '+', method, path, json.dumps(data)
 
         headers = {
-            'Authorization': 'OAuth ' + self.oauth_token,
             'Content-Type': 'application/json',
         }
+        if self.oauth_token:
+            headers['Authorization'] = 'OAuth ' + self.oauth_token
 
         try:
             r = requests.request(
@@ -129,7 +130,8 @@ class Client(object):
     class TaskProxy(_ProxyObject):
         BASE_URL = 'task'
 
-        def update(self, priority=None, owner=None, notifications=None):
+        def update(self, priority=None, owner=None, notifications=None, max_restarts=None,
+                         kill_timeout=None, description=None):
             params = {
             }
             if priority is not None:
@@ -138,6 +140,12 @@ class Client(object):
                 params['owner'] = owner
             if notifications is not None:
                 params['notifications'] = notifications
+            if max_restarts is not None:
+                params['max_restarts'] = max_restarts
+            if kill_timeout is not None:
+                params['kill_timeout'] = kill_timeout
+            if description is not None:
+                params['description'] = description
 
             if params:
                 self._make_call('PUT', 'task/%d' % self.id, params, succ_code=204, raw_result=True)

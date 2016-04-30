@@ -112,7 +112,6 @@ class JobGraphExecutor(Unpickable(
         self.kill_all_jobs_on_error = graph.kill_all_jobs_on_error
         self._clean_state = True
         self._ops = ops
-        self.kill_all_jobs_on_error = kill_all_jobs_on_error
         self._init_job_deps_graph()
 
     def __getstate__(self):
