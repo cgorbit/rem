@@ -2,6 +2,7 @@
 from __future__ import with_statement
 
 import os
+import sys
 import re
 import select
 import signal
@@ -14,6 +15,8 @@ import datetime
 import multiprocessing
 import signal
 import argparse
+import tempfile
+import shutil
 
 from rem import constants, osspec
 from rem import traced_rpc_method
@@ -21,16 +24,18 @@ from rem import CheckEmailAddress, LocalPacket, SandboxPacket, Scheduler, Thread
 from rem import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
-from rem.common import as_rpc_user_error, RpcUserError
+from rem.common import as_rpc_user_error, RpcUserError, NamedTemporaryDir
 import rem.common
 import rem.fork_locking
 from rem.rem_logging import logger as logging
 import rem.rem_logging as rem_logging
 from rem.context import Context
 import rem.subprocsrv as subprocsrv
+import rem.sandbox
 import rem.subprocsrv_fallback
 import rem.job
 import rem.delayed_executor as delayed_executor
+import rem.resource_sharing
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -803,14 +808,7 @@ def run_server(ctx):
     #logged(
         #sched.cleanup_packet_storage_fs)
 
-    delayed_executor.start()
-    try:
-        start_daemon(ctx, sched)[1]()
-    finally:
-        try:
-            delayed_executor.stop()
-        except:
-            pass
+    start_daemon(ctx, sched)[1]()
 
 
 def init_logging(ctx):
@@ -842,6 +840,74 @@ def create_process_runners(ctx):
     ctx.aux_runner = create_aux_runner()
 
 
+def _init_sandbox(ctx):
+    ctx.sandbox = rem.sandbox.Client(ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
+    ctx.sandbox_subproc = subprocsrv.create_runner()
+
+# TODO
+    shr = rem.resource_sharing.Sharer(
+        subproc=ctx.sandbox_subproc,
+        sandbox=ctx.sandbox,
+        task_owner=ctx.sandbox_task_owner,
+        task_priority=(
+            rem.sandbox.TaskPriority.Class.SERVICE,
+            rem.sandbox.TaskPriority.SubClass.NORMAL
+        ),
+    )
+
+    ctx.sbx_resource_sharer = shr
+
+    shr.start()
+
+
+def _copy_executor_files(dir):
+    code_root = os.path.dirname(sys.modules[__name__].__file__)
+
+    if code_root == '':
+        code_root = '.'
+
+    shutil.copy(code_root + '/sbx_run_packet.py', dir + '/')
+
+    shutil.copytree(
+        code_root + '/rem',
+        dir + '/rem',
+        ignore=(lambda _, files: [f for f in files if not f.endswith('.py')]),
+    )
+
+
+def _share_sandbox_executor(ctx):
+    with NamedTemporaryDir(prefix='rem_sbx_exe') as dir:
+        os.chmod(dir, 0775)
+        _copy_executor_files(dir)
+
+        id = ctx.sbx_resource_sharer.share(
+            'REM_JOBPACKET_EXECUTOR',
+            description='%s @ %s' % (
+                os.uname()[1],
+                datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%dT%H:%M:%S')
+            ),
+            name='executor',
+            filename=dir,
+            is_root=True,
+            arch='linux',
+            ttl=10 * 86400, # TODO
+        )
+
+        return id.get()
+
+
+def init(ctx):
+    init_logging(ctx)
+    create_process_runners(ctx)
+    rem.common.set_proc_runner(ctx.aux_runner)
+
+    delayed_executor.start()
+
+    if ctx.sandbox_api_url:
+        _init_sandbox(ctx)
+        ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
+
+
 def main():
     opts = parse_arguments()
 
@@ -849,13 +915,10 @@ def main():
 
     if opts.mode == 'test':
         ctx.log_warn_level = 'debug'
-        ctd.log_to_stderr = True
+        ctx.log_to_stderr = True
         ctx.register_objects_creation = True
 
-    init_logging(ctx)
-
-    create_process_runners(ctx)
-    rem.common.set_proc_runner(ctx.aux_runner)
+    init(ctx)
 
     if opts.mode == "start":
         run_server(ctx)
@@ -872,6 +935,7 @@ def main():
 
     if ctx._subprocsrv_runner:
         ctx._subprocsrv_runner.stop()
+    delayed_executor.stop()
 
     logging.debug("rem-server\texit_main")
 

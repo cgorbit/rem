@@ -25,6 +25,7 @@ class ServerInternalError(RuntimeError):
 class UserError(RuntimeError):
     pass
 
+
 _ERROR_BY_CODE = [
     None,
     RuntimeError,

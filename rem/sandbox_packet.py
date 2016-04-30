@@ -95,7 +95,8 @@ class Packet(object):
         sdict = self.__dict__.copy()
         sdict.pop('_lock', None)
         sdict.pop('_job_finished', None)
-        sdict.pop('_directory', None)
+        sdict.pop('_working_directory', None)
+        sdict.pop('_io_directory', None)
         sdict.pop('_main_thread', None)
         sdict.pop('_proc_runner', None)
         sdict.pop('_job_threads', None)
@@ -105,8 +106,9 @@ class Packet(object):
         self.__dict__.update(sdict)
         #self._init_non_persistent()
 
-    def start(self, directory):
-        self._directory = directory
+    def start(self, working_directory, io_directory):
+        self._working_directory = working_directory
+        self._io_directory = io_directory
         self._init_non_persistent()
         self._proc_runner = rem.job.create_job_runner(None, None)
 
@@ -120,10 +122,10 @@ class Packet(object):
         self._main_thread.join()
 
     def get_working_directory(self):
-        return self._directory + '/work'
+        return self._working_directory
 
     def get_io_directory(self):
-        return self._directory + '/io'
+        return self._io_directory
 
     #def run(self):
         #runner_srv = rem.subprocsrv.create_runner()

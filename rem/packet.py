@@ -116,6 +116,9 @@ class DummyGraphExecutor(object):
     def is_null(self):
         return True
 
+    def produce_detailed_status(self):
+        return {}
+
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,

@@ -13,18 +13,20 @@ from future import Promise, wrap_future
 import rem.delayed_executor as delayed_executor
 
 
-def sky_share(subproc, filename):
+def sky_share(subproc, filename, is_root):
     out = NamedTemporaryFile('w')
 
-    dirname, basename = os.path.split(filename)
+    if is_root:
+        dirname, basename = (filename, '.')
+    else:
+        dirname, basename = os.path.split(filename)
+
+    argv = ['sky', 'share', '-d', dirname, basename]
+    logging.debug(argv)
 
     # FIXME collect STDERR
     try:
-        p = subproc.Popen(
-            ['sky', 'share', '-d', dirname, basename],
-            stdout=out.name,
-            stderr='/dev/null'
-        )
+        p = subproc.Popen(argv, stdout=out.name)
     except:
         try:
             raise
@@ -58,7 +60,8 @@ def sky_share(subproc, filename):
 
 
 def T(msg):
-    logging.debug(msg)
+    pass
+    #logging.debug(msg)
 
 class Timing(object):
     def __init__(self, label):
@@ -120,10 +123,10 @@ class Sharer(object):
             self.should_stop = True
 
             condvars = [
-                self.share_queue_not_empty
-                self.upload_queue_not_empty
-                self.wait1_queue_not_empty
-                self.wait2_queue_not_empty
+                self.share_queue_not_empty,
+                self.upload_queue_not_empty,
+                self.wait1_queue_not_empty,
+                self.wait2_queue_not_empty,
             ]
 
             for condvar in condvars:
@@ -133,13 +136,16 @@ class Sharer(object):
             t.join()
 
     class Job(object):
-        def __init__(self, resource_type, name, filename, arch=None, ttl=None):
+        def __init__(self, resource_type, name, filename, arch=None, ttl=None,
+                           is_root=False, description=None):
             self.id = None
             self.resource_type = resource_type
             self.name = name
             self.filename = filename
             self.arch = arch
             self.ttl = ttl
+            self.is_root = is_root
+            self.description = description
             self.torrent_id = None
             self.upload_task_id = None
             #self.resource_id = None
@@ -256,8 +262,9 @@ class Sharer(object):
 
             try:
                 with Timing('sky_share_future %d' % job.id): # ~4ms (we wait pid from subprocsrv)
-                    torrent_id = sky_share(self.subproc, job.filename)
+                    torrent_id = sky_share(self.subproc, job.filename, job.is_root)
             except:
+                logging.exception('') # TODO
                 in_progress.remove(job)
                 schedule_retry(job)
                 del job
@@ -290,6 +297,13 @@ class Sharer(object):
         except Exception as e:
             logging.warning('Failed to create upload task %s to Sandbox: %s' % (job, e))
             return
+
+        if job.description:
+            try:
+                task.update(description=job.description)
+            except Exception as e:
+                logging.warning('Failed to update task: %s' % (job, e))
+                return
 
         try:
             task.start()
@@ -473,11 +487,3 @@ class Sharer(object):
 
             del job
 
-
-class SharedFiles(object):
-    def __init__(self, sharer, ttl=86400):
-        self.sharer = sharer
-        self.ttl = ttl
-        self.files = {}
-
-    def add(self, path, checksum):

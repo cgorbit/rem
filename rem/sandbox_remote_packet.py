@@ -87,7 +87,7 @@ class RemotePacketsDispatcher(object):
         #self.listen_port = listen_port
         #self.by_pck_id = {}
         self.by_instance_id = {}
-        self._executor_resource_id = 14 # TODO
+# TODO
         self._sbx_task_kill_timeout = 14 * 86400 # TODO
         self._sbx_task_owner = 'guest'
         self._sbx_task_priority = (
@@ -102,6 +102,7 @@ class RemotePacketsDispatcher(object):
 
         #def start(self, io_invoker, sandbox):
     def start(self, ctx):
+        self._executor_resource_id = ctx.sandbox_executor_resource_id
         self._rpc_listen_addr = ('ws30-511.yandex.ru', 8000) # TODO XXX
         self._rpc_server = self._create_rpc_server()
         ProfiledThread(target=self._rpc_server.serve_forever, name_prefix='SbxRpc').start()
@@ -225,7 +226,7 @@ class RemotePacketsDispatcher(object):
                 owner=self._sbx_task_owner,
                 priority=self._sbx_task_priority,
                 notifications=[],
-                description=pck.id,
+                description='%s @ %s' % (instance_id, self._rpc_listen_addr)
                 #fail_on_any_error=True, # FIXME What?
             )
 
@@ -355,7 +356,7 @@ class SandboxRemotePacket(object):
 
 def _produce_snapshot_data(pck_id, graph):
     pck = sandbox_packet.Packet(pck_id, graph)
-    return base64.b64encode(cPickle.dumps(graph, 2))
+    return base64.b64encode(cPickle.dumps(pck, 2))
 
 
 class SandboxJobGraphExecutorProxy(object):

@@ -714,3 +714,16 @@ def wait(f, timeout=None, deadline=None):
 
     return None
 
+
+class NamedTemporaryDir(object):
+    def __init__(self, *args, **kwargs):
+        self._args = args
+        self._kwargs = kwargs
+
+    def __enter__(self):
+        self.name = tempfile.mkdtemp(*self._args, **self._kwargs)
+        return self.name
+
+    def __exit__(self, e, t, bt):
+        shutil.rmtree(self.name)
+        self.name = None

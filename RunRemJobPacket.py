@@ -118,7 +118,7 @@ class RunRemJobPacket(SandboxTask):
             argv.extend(['--snapshot-file', snapshot_resource_path])
 
         elif self.ctx['snapshot_data']:
-            argv.extend(['--snapshot-data', self.ctx['snapshot_data']])
+            argv.extend(['--snapshot-data', self.ctx['snapshot_data'].replace('\n', '')])
 
         else:
             raise SandboxTaskFailureError()
