@@ -226,7 +226,8 @@ class RemotePacketsDispatcher(object):
                 owner=self._sbx_task_owner,
                 priority=self._sbx_task_priority,
                 notifications=[],
-                description='%s @ %s' % (instance_id, self._rpc_listen_addr)
+                description='%s @ %s\n%s\n%s' % (
+                    instance_id, self._rpc_listen_addr, '_pck_name_TODO_', '_jobs_graph_TODO_')
                 #fail_on_any_error=True, # FIXME What?
             )
 

@@ -40,26 +40,25 @@ class _ExecutorOps(object):
     def set_successfull_state(self):
         r = self.pck
         r._finished = True
-        r._job_finished.notify()
+        r._something_changed.notify()
         logging.debug('+++ set_successfull_state')
 
     def set_errored_state(self):
         r = self.pck
         r._failed = True
         r._finished = True
-        r._job_finished.notify()
+        r._something_changed.notify()
         logging.debug('+++ set_errored_state')
 
     def job_done_successfully(self, job_id):
-        pass # TODO Notify rem_server for job_done_tag
-        self.pck._job_finished.notify()
+        self.pck._something_changed.notify() # TODO Notify rem_server for job_done_tag
         logging.debug('+++ job_done_successfully')
 
     def create_job_runner(self, job):
         return rem.job.JobRunner(self.pck, job) # brain damage
 
     def on_can_run_jobs(self):
-        self.pck._job_finished.notify()
+        self.pck._something_changed.notify()
 
 
 class Packet(object):
@@ -86,7 +85,7 @@ class Packet(object):
 
     def _init_non_persistent(self):
         self._lock = threading.RLock()
-        self._job_finished = threading.Condition(self._lock)
+        self._something_changed = threading.Condition(self._lock)
         self._main_thread = None
         self._job_threads = []
         self._proc_runner = None
@@ -94,7 +93,7 @@ class Packet(object):
     def __getstate__(self):
         sdict = self.__dict__.copy()
         sdict.pop('_lock', None)
-        sdict.pop('_job_finished', None)
+        sdict.pop('_something_changed', None)
         sdict.pop('_working_directory', None)
         sdict.pop('_io_directory', None)
         sdict.pop('_main_thread', None)
@@ -144,15 +143,50 @@ class Packet(object):
         self._job_threads.append(t)
         t.start()
 
+    def stop(self, kill_jobs):
+        with self.lock:
+            if self._finished: # FIXME
+                raise RuntimeError("Already finished")
+            if self._cancelled:
+                raise RuntimeError("Already cancelled")
+            self._graph_executor.disallow_to_run_jobs(kill_jobs)
+
+    # For those who changed their's minds after call to stop(kill_jobs=False)
+    def resume(self):
+        with self.lock:
+            if self._finished: # FIXME
+                raise RuntimeError("Already finished")
+            if self._cancelled:
+                raise RuntimeError("Already cancelled")
+            self._graph_executor.disallow_to_run_jobs(kill_jobs)
+
+    def cancel(self):
+        with self.lock:
+            if self._finished:
+                raise RuntimeError("Already finished")
+            self._cancelled = True
+            self._graph_executor.cancel()
+            self._something_changed.notify()
+
+    def restart(self):
+        with self.lock:
+            if self._finished:
+                raise RuntimeError("Already finished")
+            if self._cancelled:
+                raise RuntimeError("Already cancelled")
+            self._graph_executor.restart()
+
     def _main_loop(self):
         logging.debug('+ Packet.run')
 
         while not self._finished:
             with self._lock:
+                if self.repr_state == ReprState.WAITING:
                 while self._graph_executor.can_run_jobs_right_now():
                     self._start_one_another_job()
 
-                self._job_finished.wait()
+                self._something_changed.wait()
+
         logging.debug('+ exiting Packet.run')
 
     def _calc_repr_state(self):
@@ -174,7 +208,7 @@ class Packet(object):
     def start_process(self, *args, **kwargs):
         return self._proc_runner(*args, **kwargs)
 
-    def send_job_long_execution_notification(self):
+    def notify_long_execution(self, job):
         raise NotImplementedError()
 
     def _create_job_file_handles(self, job):
@@ -185,6 +219,7 @@ class Packet(object):
 
         with self._lock:
             self._graph_executor.apply_jobs_results()
+            self._something_changed.notify() # For WAITING, SUSPENDED
 
     def create_file_handles(self, job):
         return self._graph_executor.create_job_file_handles(job)

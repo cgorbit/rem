@@ -19,10 +19,13 @@ import sandbox_remote_packet
 
 class ImplState(object):
     UNINITIALIZED = '_UNINITIALIZED' # jobs, files and queue not set
-    WAIT_TAGS     = '_WAIT_TAGS'
-    WAIT_PREV_EXECUTOR = '_WAIT_PREV_EXECUTOR'
+    TAGS_WAIT     = '_TAGS_WAIT'
+    PREV_EXECUTOR_WAIT = '_PREV_EXECUTOR_WAIT'
     PENDING       = '_PENDING'
     RUNNING       = '_RUNNING'
+    PAUSED        = '_PAUSED'
+    PAUSING       = '_PAUSING'
+    TIME_WAIT     = '_TIME_WAIT'
     SUCCESSFULL   = '_SUCCESSFULL'
     ERROR         = '_ERROR'
     BROKEN        = '_BROKEN'
@@ -30,13 +33,13 @@ class ImplState(object):
     HISTORIED     = '_HISTORIED'
 
     #allowed = {
-        #UNINITIALIZED: [BROKEN, WAIT_TAGS, PENDING, DESTROYING, HISTORIED],
-        #WAIT_TAGS:     [BROKEN, PENDING, DESTROYING, HISTORIED, SUCCESSFULL],
-        #WAIT_PREV_EXECUTOR: [], # if .files_modified (resources)
+        #UNINITIALIZED: [BROKEN, TAGS_WAIT, PENDING, DESTROYING, HISTORIED],
+        #TAGS_WAIT:     [BROKEN, PENDING, DESTROYING, HISTORIED, SUCCESSFULL],
+        #PREV_EXECUTOR_WAIT: [], # if .files_modified (resources)
         #PENDING:       [BROKEN, RUNNING, DESTROYING, HISTORIED],
-        #RUNNING:       [BROKEN, WAIT_TAGS, SUCCESSFULL, ERROR, DESTROYING, HISTORIED],
-        #SUCCESSFULL:   [BROKEN, PENDING, DESTROYING, HISTORIED, WAIT_TAGS],
-        #ERROR:         [BROKEN, PENDING, DESTROYING, HISTORIED, WAIT_TAGS],
+        #RUNNING:       [BROKEN, TAGS_WAIT, SUCCESSFULL, ERROR, DESTROYING, HISTORIED],
+        #SUCCESSFULL:   [BROKEN, PENDING, DESTROYING, HISTORIED, TAGS_WAIT],
+        #ERROR:         [BROKEN, PENDING, DESTROYING, HISTORIED, TAGS_WAIT],
         #BROKEN:        [DESTROYING, HISTORIED],
         #DESTROYING:    [HISTORIED],
         #HISTORIED:     [],
@@ -164,6 +167,7 @@ class PacketBase(Unpickable(
         self.directory = None
         self.queue = None
         self.finish_status = None
+        self.time_wait_deadline = None
 
         self._graph_executor = DummyGraphExecutor()
 
@@ -184,11 +188,12 @@ class PacketBase(Unpickable(
     def _is_executable(self):
         return not self.is_broken and not self.need_to_be_removed
 
-    def _is_runnable(self):
-        return self._is_executable() and not self.wait_dep_tags and self.queue \
-            and self.jobs and self.finish_status is None \
-            and self._graph_executor.is_null()
+    #def _is_runnable(self):
+        #return self._is_executable() and not self.wait_dep_tags and self.queue \
+            #and self.jobs and self.finish_status is None \
+            #and self._graph_executor.is_null()
 
+# TODO Test this code offline with mask
     def _calc_state(self):
         is_inited = bool(self.queue)
 
@@ -207,7 +212,7 @@ class PacketBase(Unpickable(
             return ImplState.UNINITIALIZED
 
         elif self.wait_dep_tags:
-            return ImplState.WAIT_TAGS
+            return ImplState.TAGS_WAIT
 
         elif not self.jobs:
             return ImplState.SUCCESSFULL
@@ -223,9 +228,12 @@ class PacketBase(Unpickable(
                             # мы должны быть уверены, что Граф будет stop/start'ed,
                             # например, за счёт .files_modified
 
+        elif self.time_wait_deadline:
+            return ImplState.TIME_WAIT
+
         elif not graph.is_null():
-            if graph.stopping:
-                return ImplState.WAIT_PREV_EXECUTOR
+            if graph.stopping: # XXX TODO
+                return ImplState.PREV_EXECUTOR_WAIT
             else:
                 return ImplState.RUNNING
 
@@ -247,9 +255,9 @@ class PacketBase(Unpickable(
             ImplState.BROKEN:           ReprState.ERROR,
             ImplState.PENDING:          ReprState.PENDING,
             ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
-            ImplState.WAIT_TAGS:        ReprState.SUSPENDED,
+            ImplState.TAGS_WAIT:        ReprState.SUSPENDED,
             # XXX Must be WORKABLE to support fast_restart
-            ImplState.WAIT_PREV_EXECUTOR: ReprState.WORKABLE,
+            ImplState.PREV_EXECUTOR_WAIT: ReprState.WORKABLE,
             #ImplState.DESTROYING:       ReprState.WORKABLE,
             ImplState.HISTORIED:        ReprState.HISTORIED,
         }
@@ -384,7 +392,7 @@ class PacketBase(Unpickable(
 # TODO XXX TODO BROKEN
 
     def _create_place(self, context):
-        assert not self._graph_executor or self._graph_executor.is_null() # FIXME
+        assert self._graph_executor.is_null() # FIXME
 
         if self.directory:
             raise RuntimeError("can't create duplicate working directory")
@@ -449,14 +457,14 @@ class PacketBase(Unpickable(
         #elif src == ImplState.UNINITIALIZED and dst == ImplState.SUCCESSFULL:
             #return not self.jobs and not self.wait_dep_tags
 
-        #elif src == ImplState.WAIT_TAGS and dst == ImplState.SUCCESSFULL:
+        #elif src == ImplState.TAGS_WAIT and dst == ImplState.SUCCESSFULL:
             #return not self.jobs
 
         #return dst in ImplState.allowed[src]
 
     #def _become_pending_or_wait_tags(self):
         #if self.wait_dep_tags:
-            #self._change_state(ImplState.WAIT_TAGS)
+            #self._change_state(ImplState.TAGS_WAIT)
         #else:
             #self._become_pending()
 
@@ -490,10 +498,6 @@ class PacketBase(Unpickable(
 
             elif state == ImplState.PENDING:
                 self._create_place_if_need()
-
-            elif state == ImplState.RUNNING:
-                if self._graph_executor.is_null():
-                    self._graph_executor.start()
 
             elif state == ImplState.SUCCESSFULL:
                 if self.done_tag:
@@ -542,8 +546,8 @@ class PacketBase(Unpickable(
             #except NotAllowedStateChangeError:
                 #raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self.state))
 
-    def _on_job_graph_becomes_null(self, finish_status=None):
-        if finish_status is not None:
+    def _on_job_graph_becomes_null(self, finish_status):
+        if finish_status 
             assert self.finish_status is None # TODO Need to be reset in other funcs
             self.finish_status = finish_status
         self._update_state()
@@ -714,9 +718,8 @@ class PacketBase(Unpickable(
 
             return job
 
-    # FIXME Diese Funktion ist Wunderwaffe
-    def _resume(self, resume_workable=False, silent_noop=False):
-        raise AssertionError("FUCK YOU BITCH!")
+    def _resume(self, resume_workable=False):
+        raise AssertionError("Diese Funktion ist Wunderwaffe")
 
     def History(self):
         return self.history or []
@@ -828,13 +831,17 @@ class PacketBase(Unpickable(
         with self.lock:
             #raise NotImplementedError("CHECKS") # TODO XXX
 
+            if not self.do_not_run:
+                return
+
             self.do_not_run = False
 
             # `reset_tries' is legacy behaviour of `rpc_resume'
             #self._graph_executor.reset_tries(reset_tries=True) # FUCK XXX OMG TODO
-        # FIXME
-            if not self._graph_executor.is_null():
-                self._graph_executor.stop_stopping()
+
+        # TODO
+            #if not self._graph_executor.is_null():
+                #self._graph_executor.stop_stopping()
 
             self._update_state()
 
@@ -894,7 +901,8 @@ class PacketBase(Unpickable(
             elif suspend:
                 g.cancel()
             else:
-                # ImplState.WAIT_PREV_EXECUTOR -> must be -> ReprState.WORKABLE
+                # ImplState.PREV_EXECUTOR_WAIT -> must be -> ReprState.WORKABLE
+    # XXX FIXME
                 g.try_fast_restart() # may fail later (race with network)
                                     # try_fast_restart must set cancel flag in itself
 
@@ -930,7 +938,7 @@ class PacketBase(Unpickable(
             self._update_done_tags(
                 lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
 
-            if not g.is_null(): # changed under pck.lock
+            if not g.is_null():
                 g.cancel()
 
             self.finish_status = None
@@ -1037,7 +1045,7 @@ class _LocalPacketJobGraphOps(object):
 
     def notify_long_execution(self, job):
         logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, job.id)
-        self.pck.send_job_long_execution_notification(self, job)
+        self.pck.send_job_long_execution_notification(job)
 
     def start_process(self, args, kwargs):
         ctx = PacketCustomLogic.SchedCtx
@@ -1112,6 +1120,7 @@ class SandboxPacket(PacketBase):
                 raise NotWorkingStateError("Can't run jobs in % state" % self.state)
 
             self._graph_executor.start()
+            self._update_state()
 
     def rpc_add_resource(self, name, path):
         with self.lock:

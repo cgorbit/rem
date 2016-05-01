@@ -10,8 +10,8 @@ import osspec
 from packet_common import ReprState
 
 
-#                                     ---jobs_to_retry--
-#                                     |                 \
+#                                     /--jobs_to_retry<--\
+#                                     |                  |
 #                                     |                  |
 #                                     |                  |
 # jobs_graph -> wait_job_deps -> jobs_to_run -> active_jobs_cache
@@ -132,11 +132,7 @@ class JobGraphExecutor(Unpickable(
     def get_repr_state(self):
         has_active_jobs = bool(self.active_jobs_cache)
 
-        if False:
-        #if self.wait_dep_tags:
-            return ReprState.SUSPENDED
-
-        elif has_active_jobs:
+        if has_active_jobs:
             if self.dont_run_new_jobs or self.failed_jobs:
                 return ReprState.WORKABLE
             elif self.jobs_to_run:
@@ -145,7 +141,7 @@ class JobGraphExecutor(Unpickable(
                 return ReprState.WORKABLE
 
         elif self.failed_jobs:
-            raise AssertionError("Unreachable") # reachable only on [not has_active_jobs]
+            raise AssertionError("Unreachable") # ERROR reachable only on [not has_active_jobs]
 
         elif self.dont_run_new_jobs:
             return ReprState.SUSPENDED
@@ -157,7 +153,7 @@ class JobGraphExecutor(Unpickable(
             return ReprState.WAITING
 
         else:
-            raise AssertionError("Unreachable: %s" % self)
+            raise AssertionError("Unreachable: %s" % self) # SUCCESSFULL
 
     def _register_stop_waiting(self, job_id, deadline):
         stop_id = None
@@ -300,7 +296,7 @@ class JobGraphExecutor(Unpickable(
         jid = self.jobs_to_run.pop()
         job = self.jobs[jid]
         self.active_jobs_cache.add(jid)
-        self._ops.add_working(job)
+        self._ops.add_working(job) # for queue
         self._clean_state = False
 
         runner = self._ops.create_job_runner(job)
@@ -408,6 +404,7 @@ class JobGraphExecutor(Unpickable(
 
         self._init_job_deps_graph()
         self.created_inputs.clear()
+        self.dont_run_new_jobs = False
 
         #self._ops.recreate_working_directory() # FIXME
 
@@ -487,14 +484,18 @@ class JobGraphExecutor(Unpickable(
 
     start = restart
 
-    def stop(self):
+    def stop(self): # for LocalPacket
         self._kill_jobs_drop_results()
 
-    def is_stopped(self):
-        return self.dont_run_new_jobs and not self.has_running_jobs()
+    def cancel(self): # for SandboxPacket
+        self._kill_jobs_drop_results()
+
+raise AssertionError("How to use is_null for LocalPacket and on_job_graph_becomes_null")
+    #def is_stopped(self):
+        #return self.dont_run_new_jobs and not self.has_running_jobs()
 
     def is_null(self):
-        return self.is_stopped()
+        return not self.has_running_jobs()
 
     def need_indefinite_time_to_reset(self):
         return False

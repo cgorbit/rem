@@ -4,7 +4,7 @@ import time
 
 from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
 from callbacks import CallbackHolder, ICallbackAcceptor
-from packet import LocalPacket, SandboxPacket, PacketCustomLogic, ReprState as PacketState, NotWorkingStateError
+from packet import LocalPacket, SandboxPacket, PacketCustomLogic, ReprState as PacketState, ImplState as PacketImplState, NotWorkingStateError
 from rem_logging import logger as logging
 
 
@@ -262,24 +262,32 @@ class SandboxQueue(QueueBase):
         pass
         #raise NotImplementedError()
 
+    def relocate_packet(self, pck):
+        QueueBase.relocate_packet(pck)
+
+        if pck._impl_state == PacketImplState.PENDING: # TODO
+            self.scheduler._on_job_pending(self)
+
 # TODO FIXME
-    def has_startable_jobs(self):
+    def has_startable_packets(self):
         with self.lock:
-            return self.pending and len(self.working_jobs) < self.workingLimit and self.IsAlive()
+            return self.really_pending \ # TODO rename
+                and len(self.working_packets) < self.workingLimit \
+                and self.IsAlive()
 
     def get_packet_to_run(self):
         while True:
             with self.lock:
-                if not self.has_startable_jobs():
+                if not self.has_startable_packets():
                     return None
 
-                pck = self.pending.peak()[0]
+                return self.really_pending.peak()[0]
 
     def _on_packet_attach(self, pck):
-        pass # TODO
+        self.really_pending.add(pck)
 
     def _on_packet_detach(self, pck):
-        pass # TODO
+        self.really_pending.remove(pck)
 #TODO
 #TODO
 #TODO

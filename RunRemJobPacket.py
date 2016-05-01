@@ -125,5 +125,8 @@ class RunRemJobPacket(SandboxTask):
 
         run_process(argv)
 
+        #REM_JOBPACKET_EXECUTION_SNAPSHOT
+        #REM_JOBPACKET_EXECUTION_RESULTS
+
 
 __Task__ = RunRemJobPacket

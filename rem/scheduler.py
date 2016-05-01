@@ -756,6 +756,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.Stop1()
         self.Stop2()
         self.Stop3()
+        sandbox_remote_packet.remote_packets_dispatcher.stop()
 
     def GetConnectionManager(self):
         return self.connManager
