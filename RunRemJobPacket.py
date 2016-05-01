@@ -4,6 +4,7 @@ import json
 import re
 import types
 import logging
+import subprocess
 
 from projects import resource_types as rt
 from sandboxsdk.channel import channel
@@ -33,6 +34,16 @@ class RunRemJobPacket(SandboxTask):
         resource_type = rt.REM_JOBPACKET_EXECUTION_SNAPSHOT
         required = False
 
+    class InstanceId(parameters.SandboxStringParameter):
+        name = "instance_id"
+        description = "instance_id"
+        required = True
+
+    class RemServerAddr(parameters.SandboxStringParameter):
+        name = "rem_server_addr"
+        description = "rem_server_addr"
+        required = True
+
     #class CustomResources(parameters.ListRepeater, parameters.SandboxStringParameter):
     #class CustomResources(parameters.DictRepeater, parameters.SandboxStringParameter):
     class CustomResources(parameters.SandboxStringParameter):
@@ -48,6 +59,8 @@ class RunRemJobPacket(SandboxTask):
         required = True
 
     input_parameters = [
+        InstanceId,
+        RemServerAddr,
         Executor,
         ExecutionSnapshotData,
         ExecutionSnapshotResource,
@@ -108,6 +121,9 @@ class RunRemJobPacket(SandboxTask):
             './executor/sbx_run_packet.py',
                 '--work-dir', 'work',
                 '--io-dir',   'io',
+                '--instance-id', self.ctx['instance_id'],
+                '--rem-server-addr', self.ctx['rem_server_addr'],
+                '--result-file=result.json',
         ]
 
         if custom_resources:

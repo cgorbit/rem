@@ -19,6 +19,7 @@ from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrato
 from rem import PacketCustomLogic
 from connmanager import ConnectionManager
 from packet import LocalPacket, ReprState as PacketState
+import packet
 from queue import LocalQueue, SandboxQueue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
@@ -131,6 +132,65 @@ class QueueList(object):
 
     def __len__(self):
         return len(self.__exists)
+
+
+class SandboxPacketsRunner(object):
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._changed = threading.Condition(self._lock)
+        self._running_count = 0 # XXX TODO update after backup loading
+        self._limit = 200 # TODO
+        self._should_stop = False
+        self._queues = QueueList()
+        self._thread = ProfiledThread(target=self._loop, name_prefix='SbxPackRunner')
+        self._thread.start()
+
+    def _loop(self):
+        while True:
+            with self._lock:
+                while not(
+                    self._queues and self._running_count < self._limit \
+                        or self._should_stop):
+                    self._changed.wait()
+
+                if self._should_stop:
+                    return
+
+                q = self._queues.pop()
+
+                pck = q.get_packet_to_run()
+                if not pck:
+                    continue
+
+                if q.has_startable_packets():
+                    self._queues.push(q)
+
+                self._running_count += 1
+
+            try:
+                stopped = pck.run()
+            except packet.NotWorkingStateError:
+                with self._lock:
+                    self._running_count -= 1
+                continue
+
+            stopped.subscribe(self._on_packet_stop)
+
+    def on_queue_not_empty(self, queue):
+        with self._lock:
+            if q not in self._queues:
+                self._queue.push(q)
+                self._changed.notify()
+
+    def _on_packet_stop(self):
+        with self._lock:
+            self._running_count -= 1
+            self._changed.notify()
+
+    def stop(self):
+        with self._lock:
+            self._should_stop = True
+            self._changed.notify()
 
 
 class Mailer(object):
@@ -739,7 +799,10 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.connManager.Start()
         logging.debug("after_connection_manager_start")
 
+        self._sandbox_packets_runner = SandboxPacketsRunner()
+
     def Stop1(self):
+        self._sandbox_packets_runner.stop()
         self.connManager.Stop()
         with self.lock:
             self.alive = False
@@ -766,6 +829,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def _on_job_pending(self, queue):
         self.Notify(queue)
+
+    def _on_packet_pending(self, queue):
+        self._sandbox_packets_runner.on_queue_not_empty(queue)
 
     def send_email_async(self, rcpt, (subj, body)):
         self._mailer.send_async(rcpt, subj, body)

@@ -59,10 +59,6 @@ if False:
     do_not_run=bool
 
 
-class NotAllowedStateChangeError(AssertionError):
-    pass
-
-
 class PacketCustomLogic(object):
     SchedCtx = None
 
@@ -573,7 +569,7 @@ class PacketBase(Unpickable(
 
         else:
             if not self._are_links_alive(ctx):
-                raise RuntimeError("Not all links alive")
+                raise NotAllFileLinksAlive("Not all links alive")
 
             try:
                 self.directory = None
@@ -1052,6 +1048,12 @@ class _LocalPacketJobGraphOps(object):
         return ctx.run_job(*args, **kwargs)
 
 
+#class NotAllowedStateChangeError(AssertionError):
+    #pass
+
+class NotAllFileLinksAlive(RuntimeError):
+    pass
+
 class NotWorkingStateError(RuntimeError):
     pass
 
@@ -1119,8 +1121,10 @@ class SandboxPacket(PacketBase):
             if not self._is_executable():
                 raise NotWorkingStateError("Can't run jobs in % state" % self.state)
 
-            self._graph_executor.start()
+            stopped = self._graph_executor.start()
             self._update_state()
+
+            return stopped
 
     def rpc_add_resource(self, name, path):
         with self.lock:

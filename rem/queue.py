@@ -115,6 +115,7 @@ class QueueBase(Unpickable(pending=PackSet.create,
 
             if dst_queue is not None:
                 dst_queue.add(pck)
+                self._on_relocate(pck)
 
     def IsAlive(self):
         return not self.isSuspended
@@ -250,6 +251,9 @@ class LocalQueue(QueueBase):
 
             return job
 
+    def _on_relocate(self, pck):
+        pass
+
 
 class SandboxQueue(QueueBase):
     _PACKET_CLASS = SandboxPacket
@@ -265,8 +269,8 @@ class SandboxQueue(QueueBase):
     def relocate_packet(self, pck):
         QueueBase.relocate_packet(pck)
 
-        if pck._impl_state == PacketImplState.PENDING: # TODO
-            self.scheduler._on_job_pending(self)
+        if self.really_pending: # TODO
+            self.scheduler._on_packet_pending(self) # XXX not under lock!
 
 # TODO FIXME
     def has_startable_packets(self):
@@ -284,10 +288,14 @@ class SandboxQueue(QueueBase):
                 return self.really_pending.peak()[0]
 
     def _on_packet_attach(self, pck):
-        self.really_pending.add(pck)
+        pass
+
+    def _on_relocate(self, pck):
+        if pck._impl_state == PacketImplState.PENDING:
+            self.really_pending.add(pck)
 
     def _on_packet_detach(self, pck):
-        self.really_pending.remove(pck)
+        self.really_pending.discard(pck)
 #TODO
 #TODO
 #TODO

@@ -12,6 +12,7 @@ from rem.profile import ProfiledThread
 import sandbox_packet
 import rem.sandbox as sandbox
 from rem_logging import logger as logging
+from rem.future import Promise
 
 remote_packets_dispatcher = None
 
@@ -188,7 +189,7 @@ class RemotePacketsDispatcher(object):
             if self._check_cancel_before_starting(pck):
                 return
 
-        instance_id = (pck.id, time.time())
+        instance_id = '%s@%.6f' % (pck.id, time.time())
 
 # TODO Handle 500
 
@@ -203,6 +204,8 @@ class RemotePacketsDispatcher(object):
                     'snapshot_data': wrap_string(pck._snapshot_data, 79) if pck._snapshot_data else None,
                     'snapshot_resource': pck._snapshot_resource_id,
                     'custom_resources': pck._custom_resources,
+                    'rem_server_addr': self._rpc_listen_addr,
+                    'instance_id': instance_id,
                 }
             )
         except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
@@ -396,6 +399,7 @@ class SandboxJobGraphExecutorProxy(object):
     def on_packet_terminated(self, how):
         with self._ops.lock: # FIXME lazy@ How do it right?
             raise NotImplementedError()
+            self._stop_promise.set()
             #self.stopping = False
             #self._remote_packet = None
             #if self.__must_be_running and not self.__dont_run_new_jobs: # FIXME
@@ -424,7 +428,10 @@ class SandboxJobGraphExecutorProxy(object):
             if self._remote_packet:
                 raise RuntimeError()
 
+            self._stop_promise = Promise()
             self._remote_packet = self._create_remote_packet()
+
+            return self._stop_promise.to_future()
 
 # 'fast restart' or start
     #def restart(self):

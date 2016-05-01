@@ -4,6 +4,8 @@ import os
 import cPickle as pickle
 import argparse
 import base64
+import socket
+from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
 
 import rem.sandbox_packet
 import rem.delayed_executor
@@ -15,7 +17,9 @@ def parse_arguments():
     p.add_argument('--io-dir', dest='io_dir', required=True)
     p.add_argument('--work-dir', dest='work_dir', required=True)
     p.add_argument('--custom-resources', dest='custom_resources')
-    p.add_argument('--instance-id', dest='instance_id')
+    p.add_argument('--instance-id', dest='instance_id', required=True)
+    p.add_argument('--rem-server-addr', dest='rem_server_addr', required=True)
+    p.add_argument('--result-file', dest='result_file', default='/dev/stdout')
 
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument('--snapshot-data', dest='snapshot_data')
@@ -24,19 +28,40 @@ def parse_arguments():
     return p.parse_args()
 
 
-class
+class RpcMethods(object):
+    def __init__(self, pck, instance_id):
+        self.pck = pck
+        self.instance_id = instance_id
+
+    def _listMethods(self):
+        return list_public_methods(self)
+
     def rpc_restart(self):
-        pass
+        self.pck.restart()
 
     def rpc_stop(self, kill_jobs):
-        pass
+        self.pck.stop(kill_jobs)
 
-    def rpc_cancel(self, kill_jobs):
-        pass
+    def rpc_cancel(self):
+        self.pck.cancel()
 
     def rpc_ping(self):
         return self.instance_id
 
+
+class XMLRPCServer(SimpleXMLRPCServer):
+    address_family = socket.AF_INET6 # + hope that IPV6_V6ONLY is off in /sys
+
+
+def _create_rpc_server(pck, opts):
+    srv = XMLRPCServer()
+
+    #srv.register_introspection_functions()
+    srv.register_instance(RpcMethods(pck, opts.instance_id))
+
+    threading.Thread(target=srv.serve_forever).start()
+
+    return srv
 
 if __name__ == '__main__':
     opts = parse_arguments()
@@ -45,9 +70,6 @@ if __name__ == '__main__':
     for attr in ['io_dir', 'work_dir'] \
             + (['snapshot_file'] if opts.snapshot_file is not None else []):
         setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
-
-
-    #opts.snapshot_data = 'gAJjcmVtLnBhY2tldApKb2JHcmFwaApxASmBcQJ9cQMoVRZraWxsX2FsbF9qb2JzX29uX2Vycm9ycQSIVQRqb2JzcQV9cQZJMTQwMzA4MTkzMDIxMDA4CmNyZW0uam9iCkpvYgpxBymBcQh9cQkoVQZpbnB1dHNxCl1xC1UQbWF4X3dvcmtpbmdfdGltZXEMSgB1EgBVBXNoZWxscQ1VB3NsZWVwIDVxDlULZGVzY3JpcHRpb25xD1UAVQdyZXN1bHRzcRBdcRFVBXRyaWVzcRJLAFUJcGlwZV9mYWlscROJVQ1tYXhfdHJ5X2NvdW50cRRLBVUObm90aWZ5X3RpbWVvdXRxFUqAOgkAVQtyZXRyeV9kZWxheXEWTlUCaWRxF0kxNDAzMDgxOTMwMjEwMDgKVRBvdXRwdXRfdG9fc3RhdHVzcRiJVQttYXhfZXJyX2xlbnEZTlUHcGFyZW50c3EaXXEbVRNjYWNoZWRfd29ya2luZ190aW1lcRxLAFUGcGNrX2lkcR1VCnBjay1GRHhkX1BxHnVic3ViLg=='
 
     rem.delayed_executor.start()
 
@@ -60,6 +82,14 @@ if __name__ == '__main__':
     pck.vivify_jobs_waiting_stoppers()
 
     pck.start(opts.work_dir, opts.io_dir)
-    pck.join()
 
-    rem.delayed_executor.stop()
+    rpc_server = _create_rpc_server(pck, opts)
+
+    pck.join()
+    rpc_server.shutdown()
+    rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
+
+# TODO
+
+    with open(opts.result_file, 'w') as out:
+        pass # TODO
