@@ -29,6 +29,16 @@ def always(ctor):
     return always
 
 
+class GraphState(object):
+    PENDING =  'GS_PENDING'
+    WORKABLE_AND_PENDING =  'GS_PENDING'
+    WORKABLE =   'GS_WORKABLE'
+    TIME_WAIT =  'GS_WAITING'
+    SUSPENDED =  'GS_SUSPENDED'
+    ERROR =      'GS_ERROR'
+    SUCCESSFULL =  'GS_SUCCESSFULL'
+
+
 class _ActiveJobs(object):
     def __init__(self):
         self._running = {} # From get_job_to_run moment
@@ -130,30 +140,75 @@ class JobGraphExecutor(Unpickable(
         return sdict
 
     def get_repr_state(self):
+        state = self.get_state()
+
+        map = {
+            GraphState.PENDING: ReprState.PENDING,
+            GraphState.WORKABLE_AND_PENDING: ReprState.PENDING,
+            GraphState.WORKABLE:  ReprState.WORKABLE,
+            GraphState.TIME_WAIT: ReprState.WAITING,
+            GraphState.SUSPENDED: ReprState.SUSPENDED,
+            GraphState.ERROR:     ReprState.ERROR,
+            GraphState.SUCCESSFULL: ReprState.SUCCESSFULL,
+        }
+
+        return map[state]
+
+    def get_state(self):
         has_active_jobs = bool(self.active_jobs_cache)
 
-        if has_active_jobs:
-            if self.dont_run_new_jobs or self.failed_jobs:
-                return ReprState.WORKABLE
-            elif self.jobs_to_run:
-                return ReprState.PENDING
+        if len(self.jobs) == len(self.succeed_jobs):
+            return GraphState.SUCCESSFULL
+
+        elif has_active_jobs:
+            if self.dont_run_new_jobs or self.failed_jobs or not self.jobs_to_run:
+                return GraphState.WORKABLE
             else:
-                return ReprState.WORKABLE
+                return GraphState.WORKABLE_AND_PENDING
 
         elif self.failed_jobs:
-            raise AssertionError("Unreachable") # ERROR reachable only on [not has_active_jobs]
+            return GraphState.ERROR
 
         elif self.dont_run_new_jobs:
-            return ReprState.SUSPENDED
+            return GraphState.SUSPENDED
 
         elif self.jobs_to_run:
-            return ReprState.PENDING
+            return GraphState.PENDING
 
         elif self.jobs_to_retry:
-            return ReprState.WAITING
+            return GraphState.TIME_WAIT
 
         else:
-            raise AssertionError("Unreachable: %s" % self) # SUCCESSFULL
+            raise AssertionError("Unreachable: %s" % self)
+
+    #def get_repr_state(self):
+        #has_active_jobs = bool(self.active_jobs_cache)
+
+        #if has_active_jobs:
+            #if self.dont_run_new_jobs or self.failed_jobs:
+                #return ReprState.WORKABLE
+            #elif self.jobs_to_run:
+                #return ReprState.PENDING
+            #else:
+                #return ReprState.WORKABLE
+
+        #elif self.failed_jobs:
+            #raise AssertionError("Unreachable") # ERROR reachable only on [not has_active_jobs]
+
+        #elif self.dont_run_new_jobs:
+            #return ReprState.SUSPENDED
+
+        #elif self.jobs_to_run:
+            #return ReprState.PENDING
+
+        #elif self.jobs_to_retry:
+            #return ReprState.WAITING
+
+        #else:
+            #raise AssertionError("Unreachable: %s" % self) # SUCCESSFULL
+
+    def is_stopping(self):
+        return False
 
     def _register_stop_waiting(self, job_id, deadline):
         stop_id = None
@@ -497,8 +552,8 @@ raise AssertionError("How to use is_null for LocalPacket and on_job_graph_become
     def is_null(self):
         return not self.has_running_jobs()
 
-    def need_indefinite_time_to_reset(self):
-        return False
+    #def need_indefinite_time_to_reset(self):
+        #return False
 # XXX
 
     def on_job_done(self, runner):

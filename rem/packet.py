@@ -14,49 +14,24 @@ import osspec
 import messages
 from rem_logging import logger as logging
 import job_graph
+from job_graph import GraphState
 from packet_common import ReprState
 import sandbox_remote_packet
 
 class ImplState(object):
-    UNINITIALIZED = '_UNINITIALIZED' # jobs, files and queue not set
-    TAGS_WAIT     = '_TAGS_WAIT'
-    PREV_EXECUTOR_WAIT = '_PREV_EXECUTOR_WAIT'
-    PENDING       = '_PENDING'
-    RUNNING       = '_RUNNING'
-    PAUSED        = '_PAUSED'
-    PAUSING       = '_PAUSING'
-    TIME_WAIT     = '_TIME_WAIT'
-    SUCCESSFULL   = '_SUCCESSFULL'
-    ERROR         = '_ERROR'
-    BROKEN        = '_BROKEN'
-    DESTROYING    = '_DESTROYING'
-    HISTORIED     = '_HISTORIED'
-
-    #allowed = {
-        #UNINITIALIZED: [BROKEN, TAGS_WAIT, PENDING, DESTROYING, HISTORIED],
-        #TAGS_WAIT:     [BROKEN, PENDING, DESTROYING, HISTORIED, SUCCESSFULL],
-        #PREV_EXECUTOR_WAIT: [], # if .files_modified (resources)
-        #PENDING:       [BROKEN, RUNNING, DESTROYING, HISTORIED],
-        #RUNNING:       [BROKEN, TAGS_WAIT, SUCCESSFULL, ERROR, DESTROYING, HISTORIED],
-        #SUCCESSFULL:   [BROKEN, PENDING, DESTROYING, HISTORIED, TAGS_WAIT],
-        #ERROR:         [BROKEN, PENDING, DESTROYING, HISTORIED, TAGS_WAIT],
-        #BROKEN:        [DESTROYING, HISTORIED],
-        #DESTROYING:    [HISTORIED],
-        #HISTORIED:     [],
-    #}
-
-
-if False:
-    is_inited = bool(queue)
-    len(jobs)
-    type(is_broken) == bool
-    len(wait_dep_tags)
-    type(finish_status) == (False, True, None)
-    type(need_to_be_removed) == bool
-    type(files_modified) == bool
-    _graph_executor.is_null() # FIXME type(running) == bool
-    _graph_executor.stopping  # FIXME type(running) == bool
-    do_not_run=bool
+    UNINITIALIZED = 'IS_UNINITIALIZED' # jobs, files and queue not set
+    TAGS_WAIT     = 'IS_TAGS_WAIT'
+    PREV_EXECUTOR_WAIT = 'IS_PREV_EXECUTOR_WAIT'
+    PENDING       = 'IS_PENDING'
+    RUNNING       = 'IS_RUNNING'
+    PAUSED        = 'IS_PAUSED'
+    PAUSING       = 'IS_PAUSING'
+    TIME_WAIT     = 'IS_TIME_WAIT'
+    SUCCESSFULL   = 'IS_SUCCESSFULL'
+    ERROR         = 'IS_ERROR'
+    BROKEN        = 'IS_BROKEN'
+    DESTROYING    = 'IS_DESTROYING'
+    HISTORIED     = 'IS_HISTORIED'
 
 
 class PacketCustomLogic(object):
@@ -163,7 +138,7 @@ class PacketBase(Unpickable(
         self.directory = None
         self.queue = None
         self.finish_status = None
-        self.time_wait_deadline = None
+        #self.time_wait_deadline = None
 
         self._graph_executor = DummyGraphExecutor()
 
@@ -224,11 +199,11 @@ class PacketBase(Unpickable(
                             # мы должны быть уверены, что Граф будет stop/start'ed,
                             # например, за счёт .files_modified
 
-        elif self.time_wait_deadline:
-            return ImplState.TIME_WAIT
+        #elif self.time_wait_deadline:
+            #return ImplState.TIME_WAIT
 
         elif not graph.is_null():
-            if graph.stopping: # XXX TODO
+            if graph.is_stopping():
                 return ImplState.PREV_EXECUTOR_WAIT
             else:
                 return ImplState.RUNNING
@@ -819,7 +794,7 @@ class PacketBase(Unpickable(
             logging.exception("Failed to create place")
             #self._change_state(ImplState.BROKEN)
             self.is_broken = True
-            self._graph_executor.stop()
+            self._graph_executor.cancel()
             self._update_state()
             return False
 
@@ -966,6 +941,14 @@ class PacketBase(Unpickable(
             if dst_queue:
                 dst_queue._attach_packet(self)
 
+                if isinstance(self._graph_executor, DummyGraphExecutor):
+                    self._graph_executor = self._create_job_graph_executor()
+
+                self._graph_executor.set_runner(self.queue.runner)
+
+            else:
+                self._graph_executor = DummyGraphExecutor()
+
     def rpc_move_to_queue(self, src_queue, dst_queue):
         with self.lock:
             if not self.queue:
@@ -986,7 +969,6 @@ class PacketBase(Unpickable(
             #assert self._impl_state == ImplState.UNINITIALIZED
             self._move_to_queue(None, queue)
 
-            self._graph_executor = self._create_job_graph_executor()
             #self._become_pending_or_wait_tags()
             self._update_state()
 
@@ -1110,8 +1092,8 @@ class LocalPacket(PacketBase):
             #raise as_rpc_user_error(
                 #from_rpc, RuntimeError("Can't move packets with running jobs"))
 
-    def _stop_graph(self):
-        self._graph_executor.stop()
+    #def _stop_graph(self):
+        #self._graph_executor.stop()
 
 
 #SandboxPacket = sandbox_remote_packet.SandboxPacket

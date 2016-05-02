@@ -40,6 +40,7 @@ def wrap_string(s, width):
             for i in xrange((len(s) - 1) / width + 1)
     )
 
+
 class ActionQueue(object):
     __STOP_INDICATOR = object()
 
@@ -334,8 +335,9 @@ class SandboxTaskState(object):
 class SandboxRemotePacket(object):
     def __init__(self, ops, pck_id, snapshot_data, snapshot_resource_id, custom_resources):
         self.id = pck_id
-        self._ops = ops
-        self.lock = ops._ops.lock # XXX TODO
+        #self._ops = ops
+        #self.lock = ops._ops.lock # XXX TODO
+        self.lock = threading.Lock()
         self._cancelled = False
         self._sandbox_task_state = SandboxTaskState.NOT_CREATED
         self._instance_id = None
@@ -366,13 +368,22 @@ def _produce_snapshot_data(pck_id, graph):
 class SandboxJobGraphExecutorProxy(object):
     def __init__(self, ops, pck_id, graph, custom_resources):
         self._ops = ops
-        self._graph = graph
+        self.lock = self._ops.lock
         self.pck_id = pck_id
-        self._remote_packet = None
-        self._suspended_snapshot_resource_id = None
+        self._graph = graph
         self._custom_resources = custom_resources
 
-        self.stopping = False # FIXME
+        self._remote_packet = None
+        self._snapshot_resource_id = None
+        self._result_resource_id = None # TODO FIXME
+
+        self.do_not_run = True # FIXME
+        self.cancelled = False # FIXME
+        self.time_wait_deadline = None
+        self.time_wait_sched = None
+        self.result = None
+
+    # TODO FIXME
         self.detailed_status = None
         #self.state = ReprState.PENDING
         self.history = [] # XXX TODO Непонятно вообще как с этим быть
@@ -381,8 +392,9 @@ class SandboxJobGraphExecutorProxy(object):
         return SandboxRemotePacket(
             self, # Ops?
             self.pck_id,
-            snapshot_data=_produce_snapshot_data(self.pck_id, self._graph),
-            snapshot_resource_id=None, # TODO
+            snapshot_data=_produce_snapshot_data(self.pck_id, self._graph) \
+                if not self._snapshot_resource_id else None,
+            snapshot_resource_id=self._snapshot_resource_id,
             custom_resources=self._custom_resources
         )
 
@@ -394,38 +406,104 @@ class SandboxJobGraphExecutorProxy(object):
     def produce_detailed_status(self):
         return self.detailed_status
 
+    def is_stopping(self):
+        with self.lock:
+            return self.do_not_run and self._remote_packet
+
 ########### Ops for _remote_packet
     # on sandbox task stopped + resources list fetched
     def on_packet_terminated(self, how):
-        with self._ops.lock: # FIXME lazy@ How do it right?
-            raise NotImplementedError()
+        def on_stop():
+            self._remote_packet = None
             self._stop_promise.set()
-            #self.stopping = False
-            #self._remote_packet = None
-            #if self.__must_be_running and not self.__dont_run_new_jobs: # FIXME
-                #self._remote_packet = self._create_remote_packet()
-            #else:
-                #if ...:
-                    #self._suspended_snapshot_resource_id = how....
-                #else:
-                    #self._suspended_snapshot_resource_id = None
-                #self._ops.on_job_graph_becomes_null()
+            self._stop_promise = None
+            self._ops.on_job_graph_becomes_null()
 
-###########
+        with self.lock:
+            if self.cancelled:
+                self.cancelled = False
+                on_stop()
+                return
+
+            if how.exception:
+                logging.warning('...')
+
+                # XXX TODO XXX Rollback history/Status to prev state
+
+                if self.do_not_run:
+                    on_stop()
+                else:
+                    self._remote_packet = self._create_remote_packet()
+
+                return
+
+            # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
+            # (TODO Support this rule in PacketBase)
+
+            if how == TIME_WAIT:
+                self.time_wait_deadline = how.time_wait_deadline
+                self.time_wait_sched = \
+                    delayed_executor.schedule(self._stop_time_wait,             # TODO Fix races
+                                              deadline=self.time_wait_deadline)
+
+            elif how == SUCCESSFULL:
+                self.result = True
+                self._result_resource_id = how.result_resource_id
+
+            elif how == ERROR:
+                self.result = False
+
+            self._snapshot_resource_id = how.snapshot_id \
+                if not how.SUCCESSFULL else None
+
+            on_stop()
+
+    def _stop_time_wait(self):
+        with self.lock:
+            # TODO Fix races
+            self.time_wait_deadline = None
+            self.time_wait_sched = None
+
+            if not self.do_not_run:
+                self._remote_packet = self._create_remote_packet()
+
+    def repr_state(self):
+        with self.lock:
+            if self._remote_packet:
+                if self.cancelled:
+                    return CANCEL_WAIT
+                elif self.do_not_run:
+                    return STOP_WAIT
+                else
+                    return WORKING
+
+            elif self.result is not None:
+                return SUCCESSFULL or ERROR
+
+            elif self.time_wait_deadline:
+                return TIME_WAIT
+
+            elif self.do_not_run:
+                return SUSPENDED
+
+            else:
+                return PENDING
+
     def stop(self, kill_jobs):
-        with self._ops.lock:
+        with self.lock:
             if not self._remote_packet:
                 raise
+            if self.cancelled:
+                return # FIXME
 
-            self.stopping = True
+            self.do_not_run = True
             self._remote_packet.stop(kill_jobs)
 
-    def stop_stopping(self):
-        raise NotImplementedError()
-
     def start(self):
-        with self._ops.lock:
+        with self.lock:
             if self._remote_packet:
+                raise RuntimeError()
+            if self.do_not_run:
                 raise RuntimeError()
 
             self._stop_promise = Promise()
@@ -433,41 +511,19 @@ class SandboxJobGraphExecutorProxy(object):
 
             return self._stop_promise.to_future()
 
-# 'fast restart' or start
-    #def restart(self):
-        #with self._ops.lock:
-            #self.__must_be_running = True
+    def cancel(self):
+        with self.lock:
+            if not self._remote_packet:
+                return
 
-            #if self.stopping:
-                #return
+            self.do_not_run = True
+            self.cancelled = True
+            self._snapshot_resource_id = None
 
-            #if self._remote_packet:
-                #self._remote_packet.restart() # may actually 'fail'
-            #else:
-                #self._remote_packet = self._create_remote_packet()
-
-    def stop(self):
-        with self._ops.lock:
-            raise NotImplementedError()
-            #self.__must_be_running = False
-            #if self._remote_packet and not self.stopping:
-                #self._remote_packet.cancel()
-                #self.stopping = True
-
-# TODO Fuck this
-    #def is_suspended(self):
-        #with self._ops.lock:
-            #return self._remote_packet and self._remote_packet.is_suspended()
-                                                    ## TODO is_suspended
-                                                    # определяется последним поставленным
-                                                    # в очередь на отправку флагом
+            self._remote_packet.cancel()
 
     def is_null(self):
         return self._remote_packet is None
-
-    #def need_indefinite_time_to_reset(self):
-        #return bool(self._remote_packet)
-###########
 
     def recover_after_backup_loading(self):
         pass # FIXME
