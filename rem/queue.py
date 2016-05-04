@@ -9,7 +9,7 @@ from rem_logging import logger as logging
 
 
 class ByUserState(Unpickable(
-                       pending=set,
+                       pending=PackSet.create,
                        working=set,
                        worked=TimedSet.create,
                        errored=TimedSet.create,
@@ -27,6 +27,9 @@ class ByUserState(Unpickable(
     def __getitem__(self, key):
         return self.__dict__[key]
 
+    def __setitem__(self, key, val):
+        self.__dict__[key] = val
+
 
 class QueueBase(Unpickable(
                        by_user_state=ByUserState,
@@ -42,13 +45,12 @@ class QueueBase(Unpickable(
                        is_suspended=bool,
                        lock=PickableRLock,
                        working_limit=(int, 1),
-                       successfull_ttl=(int, 0),
-                       successfull_default_ttl=int,
-                       error_ttl=(int, 0),
-                       error_default_ttl=int,
-                ),
-            CallbackHolder,
-            ICallbackAcceptor):
+                       successfull_lifetime=(int, 0),
+                       successfull_default_lifetime=int,
+                       errored_lifetime=(int, 0),
+                       errored_default_lifetime=int,
+                    )
+                ):
 
     VIEW_BY_ORDER = "pending", "waiting", "errored", "suspended", "working", "worked"
 
@@ -103,7 +105,7 @@ class QueueBase(Unpickable(
 
 ########################################################################
 
-# pending_jobs
+# packets_with_pending_jobs
 #     pck.has_pending_jobs()
 
 # working_jobs (for limiting)
@@ -125,28 +127,30 @@ class QueueBase(Unpickable(
 
     def __getstate__(self):
         sdict = getattr(super(QueueBase, self), "__getstate__", lambda: self.__dict__)()
+# FIXME Bullshit: copy without lock
         with self.lock:
-            for q in self.by_user_state.values():
-                sdict[q] = sdict[q].copy()
+            by_user_state = sdict['by_user_state']
+            for qname, q in by_user_state.items():
+                by_user_state[qname] = q.copy()
         return sdict
 
     def SetSuccessLifeTime(self, lifetime):
-        self.successfull_ttl = lifetime
+        self.successfull_lifetime = lifetime
 
     def SetErroredLifeTime(self, lifetime):
-        self.error_ttl = lifetime
+        self.errored_lifetime = lifetime
 
     def _on_packet_state_change(self, pck):
         self.relocate_packet(pck)
 
     def UpdateContext(self, context):
-        self.successfull_default_ttl = context.successfull_ttl
-        self.error_default_ttl = context.error_lifetime
+        self.successfull_default_lifetime = context.successfull_packet_lifetime
+        self.errored_default_lifetime = context.errored_packet_lifetime
         self.scheduler = context.Scheduler
 
     def forgetOldItems(self):
-        self._forget_queue_old_items(self.worked, self.successfull_ttl or self.successfull_default_ttl)
-        self._forget_queue_old_items(self.errored, self.error_ttl or self.error_default_ttl)
+        self._forget_queue_old_items(self.by_user_state.worked, self.successfull_lifetime or self.successfull_default_lifetime)
+        self._forget_queue_old_items(self.by_user_state.errored, self.errored_lifetime or self.errored_default_lifetime)
 
     def _forget_queue_old_items(self, queue, ttl):
         threshold = time.time() - ttl
@@ -257,8 +261,8 @@ class QueueBase(Unpickable(
         status.update({
             "alive": self.is_alive(),
             "working-limit": self.working_limit,
-            "success-lifetime": self.successfull_ttl or self.successfull_default_ttl,
-            "error-lifetime": self.error_ttl or self.error_default_ttl
+            "success-lifetime": self.successfull_lifetime or self.successfull_default_lifetime,
+            "error-lifetime": self.errored_lifetime or self.errored_default_lifetime
         })
 
         return status
@@ -274,9 +278,13 @@ class QueueBase(Unpickable(
 class LocalQueue(QueueBase):
     _PACKET_CLASS = LocalPacket
 
-    def _on_change_working_limit(self):
+    def _notify_has_pending_if_need(self):
+# FIXME Optimize
         if self.has_startable_jobs():
             self.scheduler._on_job_pending(self)
+
+    def _on_change_working_limit(self):
+        self._notify_has_pending_if_need()
 
     def _on_job_get(self, ref):
         with self.lock:
@@ -288,24 +296,25 @@ class LocalQueue(QueueBase):
     def _on_job_done(self, ref):
         with self.lock:
             self.working_jobs.discard(ref)
-        if self.has_startable_jobs():
-            self.scheduler._on_job_pending(self)
+        self._notify_has_pending_if_need()
 
     def relocate_packet(self, pck):
-        QueueBase.relocate_packet(pck)
-
-        if pck.state == PacketState.PENDING:
-            self.scheduler._on_job_pending(self)
+        QueueBase.relocate_packet(self, pck)
+        self._notify_has_pending_if_need()
 
     def _on_packet_attach(self, pck):
         self.working_jobs.update(pck._get_working_jobs())
 
     def _on_packet_detach(self, pck):
         self.working_jobs.difference_update(pck._get_working_jobs())
+# FIXME Optimize
+        self.packets_with_pending_jobs.discard(pck)
 
     def has_startable_jobs(self):
         with self.lock:
-            return self.pending and len(self.working_jobs) < self.working_limit and self.is_alive()
+            return self.packets_with_pending_jobs \
+                and len(self.working_jobs) < self.working_limit \
+                and self.is_alive()
 
     def _get_working_packets(self):
         return set(job.pck for job in self.working_jobs)
@@ -319,7 +328,7 @@ class LocalQueue(QueueBase):
                 if not self.has_startable_jobs():
                     return None
 
-                pck, prior = self.pending.peak()
+                pck, prior = self.packets_with_pending_jobs.peak()
 
             # .get_job_to_run not under lock to prevent deadlock
             try:
@@ -330,7 +339,11 @@ class LocalQueue(QueueBase):
             return job
 
     def _on_relocate(self, pck):
-        pass
+# FIXME Optimize
+        if pck.has_pending_jobs():
+            self.packets_with_pending_jobs.add(pck)
+        else:
+            self.packets_with_pending_jobs.discard(pck)
 
 
 class SandboxQueue(QueueBase):
@@ -351,7 +364,7 @@ class SandboxQueue(QueueBase):
         return self.by_user_state['pending']
 
     def relocate_packet(self, pck):
-        QueueBase.relocate_packet(pck)
+        QueueBase.relocate_packet(self, pck)
         self._notify_has_pending_if_need()
 
     def has_startable_packets(self):
@@ -371,10 +384,11 @@ class SandboxQueue(QueueBase):
         pass
 
     def _on_relocate(self, pck):
+# FIXME Optimize
         if not pck._graph_executor.is_null():
             self.working_packets.add(pck)
         else:
-            self.working_packets.remove(pck)
+            self.working_packets.discard(pck)
 
     def _on_packet_detach(self, pck):
         self.working_packets.remove(pck)

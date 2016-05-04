@@ -970,7 +970,7 @@ class PacketBase(Unpickable(
                 if isinstance(self._graph_executor, DummyGraphExecutor):
                     self._graph_executor = self._create_job_graph_executor()
 
-                self._graph_executor.set_runner(self.queue.runner)
+                #self._graph_executor.set_runner(self.queue.runner)
 
             else:
                 self._graph_executor = DummyGraphExecutor()

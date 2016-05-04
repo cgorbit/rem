@@ -14,6 +14,7 @@ import rem.sandbox as sandbox
 from rem_logging import logger as logging
 from rem.future import Promise
 from packet_state import PacketState
+from job_graph import GraphState
 
 remote_packets_dispatcher = None
 
@@ -206,7 +207,7 @@ class RemotePacketsDispatcher(object):
                     'snapshot_data': wrap_string(pck._snapshot_data, 79) if pck._snapshot_data else None,
                     'snapshot_resource': pck._snapshot_resource_id,
                     'custom_resources': pck._custom_resources,
-                    'rem_server_addr': self._rpc_listen_addr,
+                    'rem_server_addr': ('%s:%d' % self._rpc_listen_addr),
                     'instance_id': instance_id,
                 }
             )
@@ -378,7 +379,7 @@ class SandboxJobGraphExecutorProxy(object):
         self._snapshot_resource_id = None
         self._result_resource_id = None # TODO FIXME
 
-        self.do_not_run = True # FIXME
+        self.do_not_run = False # FIXME
         self.cancelled = False # FIXME
         self.time_wait_deadline = None
         self.time_wait_sched = None
@@ -386,6 +387,7 @@ class SandboxJobGraphExecutorProxy(object):
 
     # TODO FIXME
         self.detailed_status = None
+        self.state = None
         self._update_state()
         #self.state = ReprState.PENDING
         #self.history = [] # XXX TODO Непонятно вообще как с этим быть
@@ -484,7 +486,7 @@ class SandboxJobGraphExecutorProxy(object):
         self.state = new
         self._ops.on_state_change()
 
-    def calc_state(self):
+    def _calc_state(self):
         with self.lock:
             if self._remote_packet:
                 state = GraphState.WORKING
@@ -506,7 +508,7 @@ class SandboxJobGraphExecutorProxy(object):
                 return GraphState.SUSPENDED
 
             else:
-                return GraphState.PENDING
+                return GraphState.PENDING_JOBS
 
     def stop(self, kill_jobs):
         with self.lock:
@@ -523,8 +525,8 @@ class SandboxJobGraphExecutorProxy(object):
         with self.lock:
             if self._remote_packet:
                 raise RuntimeError()
-            if self.do_not_run:
-                raise RuntimeError()
+
+            self.do_not_run = False
 
             self._stop_promise = Promise()
             self._remote_packet = self._create_remote_packet()
@@ -562,14 +564,15 @@ class SandboxJobGraphExecutorProxy(object):
 
 
 class SandboxPacketOpsForJobGraphExecutorProxy(object):
-    def __init__(self, pck):
+    #def __init__(self, pck):
         #self._pck = pck
-        self.lock = pck.lock
+        #self.lock = pck.lock
 
 
-class _SandboxPacketJobGraphExecutorProxyOps(object):
+#class _SandboxPacketJobGraphExecutorProxyOps(object):
     def __init__(self, pck):
         self.pck = pck
+        self.lock = pck.lock
 
     def on_state_change(self):
         self.pck._on_graph_executor_state_change()

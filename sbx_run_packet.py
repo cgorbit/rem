@@ -67,9 +67,11 @@ if __name__ == '__main__':
     opts = parse_arguments()
 
     # Overengineering you say?
-    for attr in ['io_dir', 'work_dir'] \
+    for attr in ['io_dir', 'work_dir', 'result_file'] \
             + (['snapshot_file'] if opts.snapshot_file is not None else []):
         setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
+
+    os.chdir(opts.work_dir)
 
     rem.delayed_executor.start()
 

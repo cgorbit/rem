@@ -12,6 +12,7 @@ from Queue import Empty, Queue as ThreadSafeQueue
 import cStringIO
 import StringIO
 import itertools
+import threading
 
 import fork_locking
 from job import FuncJob, FuncRunner
@@ -136,7 +137,7 @@ class QueueList(object):
 
 class SandboxPacketsRunner(object):
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = PickableLock()
         self._changed = threading.Condition(self._lock)
         self._running_count = 0 # XXX TODO update after backup loading
         self._limit = 200 # TODO
@@ -176,10 +177,10 @@ class SandboxPacketsRunner(object):
 
             #stopped.subscribe(self._on_packet_stop)
 
-    def on_queue_not_empty(self, queue):
+    def on_queue_not_empty(self, q):
         with self._lock:
             if q not in self._queues:
-                self._queue.push(q)
+                self._queues.push(q)
                 self._changed.notify()
 
     #def _on_packet_stop(self):

@@ -75,6 +75,7 @@ class Packet(object):
             graph,
         )
 
+        self.state = None
         self._update_state_if_need()
 
     def update_state(self, state):
