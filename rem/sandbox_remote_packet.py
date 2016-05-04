@@ -476,7 +476,7 @@ class SandboxJobGraphExecutorProxy(object):
             return
 
         self.state = new
-        self._ops.update_state()
+        self._ops.on_state_change()
 
     def calc_state(self):
         with self.lock:
@@ -561,8 +561,8 @@ class _SandboxPacketJobGraphExecutorProxyOps(object):
     def __init__(self, pck):
         self.pck = pck
 
-    def update_state(self):
-        self.pck._update_state()
+    def on_state_change(self):
+        self.pck._on_graph_executor_state_change()
 
     def set_successfull_state(self):
         self.pck._change_state(PacketState.SUCCESSFULL)

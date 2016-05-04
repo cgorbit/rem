@@ -197,7 +197,7 @@ class JobGraphExecutor(Unpickable(
         self.jobs_to_run.add(job_id)
 
         if not had_to_run:
-            self._ops.update_state() # TODO BACK_REFERENCE
+            self._ops.on_state_change() # TODO BACK_REFERENCE
 
         self._notify_can_run_jobs_if_need()
 
@@ -271,7 +271,7 @@ class JobGraphExecutor(Unpickable(
             self.failed_jobs.add(job.id)
 
             # Чтобы не вводить в заблуждение get_job_to_run
-            #self._ops.update_state() # XXX assert in _calc_repr_state
+            #self._ops.on_state_change() # XXX assert in _calc_repr_state
 
             if self.kill_all_jobs_on_error:
                 self._kill_jobs_drop_results()
@@ -285,7 +285,7 @@ class JobGraphExecutor(Unpickable(
         elif not self.active_jobs_cache and self.failed_jobs:
             self._ops.set_errored_state()
         else:
-            self._ops.update_state()
+            self._ops.on_state_change()
 
     def get_working_jobs(self):
         return [self.jobs[jid] for jid in list(self.active_jobs_cache)]
@@ -464,13 +464,13 @@ class JobGraphExecutor(Unpickable(
 
     def disallow_to_run_jobs(self, kill_running):
         self.dont_run_new_jobs = True
-        self._ops.update_state() # maybe from PENDING to WORKABLE
+        self._ops.on_state_change() # maybe from PENDING to WORKABLE
 
         if kill_running:
             # FIXME In ideal world it's better to "apply" jobs that will be
             # finished racy just before kill(2)
             self._kill_jobs_drop_results()
-            self._ops.update_state() # maybe from PENDING to WORKABLE
+            self._ops.on_state_change() # maybe from PENDING to WORKABLE
 
         self._notify_can_run_jobs_if_need()
 
@@ -486,7 +486,7 @@ class JobGraphExecutor(Unpickable(
             self._reset_tries()
         self.dont_run_new_jobs = False
         # FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
-        self._ops.update_state()
+        self._ops.on_state_change()
         self._notify_can_run_jobs_if_need()
 
 # XXX

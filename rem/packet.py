@@ -537,10 +537,16 @@ class PacketBase(Unpickable(
             #except NotAllowedStateChangeError:
                 #raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
 
-    def _on_job_graph_becomes_null(self, finish_status):
-        if finish_status 
-            assert self.finish_status is None # TODO Need to be reset in other funcs
-            self.finish_status = finish_status
+    def _on_graph_executor_state_change(self):
+        state = self._graph_executor.state
+
+        if state == GraphState.SUCCESSFULL:
+            self.finish_status = True
+            self._graph_executor = DummyGraphExecutor()
+
+        elif state == GraphState.ERROR:
+            self.finish_status = False
+
         self._update_state()
 
     def _mark_as_failed_on_recovery(self):
@@ -1005,8 +1011,8 @@ class _LocalPacketJobGraphOps(object):
 
     get_working_directory = get_io_directory
 
-    def update_state(self):
-        self.pck._update_state()
+    def on_state_change(self):
+        self.pck._on_graph_executor_state_change()
 
     def stop_waiting(self, stop_id):
         self.pck._stop_waiting(stop_id)
