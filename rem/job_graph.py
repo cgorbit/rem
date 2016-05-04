@@ -503,7 +503,6 @@ class JobGraphExecutor(Unpickable(
     def cancel(self): # for SandboxPacket
         self._kill_jobs_drop_results()
 
-raise AssertionError("How to use is_null for LocalPacket and on_job_graph_becomes_null")
     #def is_stopped(self):
         #return self.dont_run_new_jobs and not self.has_running_jobs()
 

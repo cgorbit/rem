@@ -110,7 +110,7 @@ class PacketBase(Unpickable(
                            sbx_files=dict,
                            directory=lambda *args: args[0] if args else None,
 
-                           state=(str, ReprState.ERROR),
+                           _repr_state=(str, ReprState.ERROR),
                            state=(str, ImplState.BROKEN),
 
                            notify_emails=list,

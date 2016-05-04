@@ -44,8 +44,9 @@ class QueueBase(Unpickable(
                        working_limit=(int, 1),
                        successfull_ttl=(int, 0),
                        successfull_default_ttl=int,
-                       error_ttl=(int, 0)),
+                       error_ttl=(int, 0),
                        error_default_ttl=int,
+                ),
             CallbackHolder,
             ICallbackAcceptor):
 
