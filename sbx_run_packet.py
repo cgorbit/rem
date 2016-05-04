@@ -5,7 +5,9 @@ import cPickle as pickle
 import argparse
 import base64
 import socket
+import threading
 from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
+import rem.rem_logging
 
 import rem.sandbox_packet
 import rem.delayed_executor
@@ -26,6 +28,14 @@ def parse_arguments():
     group.add_argument('--snapshot-file', dest='snapshot_file')
 
     return p.parse_args()
+
+
+class Context(object):
+    def __init__(self):
+        self.log_warn_level = 'debug'
+        self.log_to_stderr = True
+
+rem.rem_logging.reinit_logger(Context())
 
 
 class RpcMethods(object):
@@ -54,7 +64,7 @@ class XMLRPCServer(SimpleXMLRPCServer):
 
 
 def _create_rpc_server(pck, opts):
-    srv = XMLRPCServer()
+    srv = XMLRPCServer(('::', 0))
 
     #srv.register_introspection_functions()
     srv.register_instance(RpcMethods(pck, opts.instance_id))

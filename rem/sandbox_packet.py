@@ -90,6 +90,9 @@ class Packet(object):
         self._job_threads = []
         self._proc_runner = None
 
+    def vivify_jobs_waiting_stoppers(self):
+        pass # TODO XXX
+
     def __getstate__(self):
         sdict = self.__dict__.copy()
         sdict.pop('_lock', None)
