@@ -15,7 +15,7 @@ from common import Unpickable, TimedMap, PickableLock, cleanup_directory, Binary
 import common as rem_common
 from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor, ETagEvent
 from journal import TagLogger
-from packet import ReprState as PacketState, PacketBase
+from packet import PacketState, PacketBase
 from Queue import Queue
 import fork_locking
 from future import Promise, READY_FUTURE, CheckAllFuturesSucceed

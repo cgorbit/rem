@@ -8,7 +8,6 @@ import rem.job_graph
 from rem.profile import ProfiledThread
 #import rem.packet # XXX don't import
 import rem.subprocsrv
-from rem.packet_common import ReprState
 from rem_logging import logger as logging
 
 #class Resources(object):
@@ -22,8 +21,8 @@ class _ExecutorOps(object):
     def __init__(self, pck):
         self.pck = pck
 
-    def update_repr_state(self):
-        self.pck._update_repr_state_if_need()
+    def update_state(self):
+        self.pck._update_state_if_need()
 
     def stop_waiting(self, stop_id):
         self.pck._stop_waiting(stop_id)
@@ -76,10 +75,10 @@ class Packet(object):
             graph,
         )
 
-        self.update_repr_state(ReprState.CREATED)
+        self._update_state_if_need()
 
-    def update_repr_state(self, state):
-        self.repr_state = state
+    def update_state(self, state):
+        self.state = state
         self.history.append((state, time.time()))
         logging.info("new state %s" % state)
 
@@ -112,7 +111,7 @@ class Packet(object):
         self._proc_runner = rem.job.create_job_runner(None, None)
 
         print >>sys.stderr, self._graph_executor.__dict__
-        print >>sys.stderr, self._graph_executor.get_repr_state()
+        print >>sys.stderr, self._graph_executor.get_state()
 
         self._main_thread = ProfiledThread(target=self._main_loop, name_prefix='Packet')
         self._main_thread.start()
@@ -181,7 +180,9 @@ class Packet(object):
 
         while not self._finished:
             with self._lock:
-                if self.repr_state == ReprState.WAITING:
+                #if self.state == ReprState.WAITING:
+                # WTF
+
                 while self._graph_executor.can_run_jobs_right_now():
                     self._start_one_another_job()
 
@@ -189,16 +190,14 @@ class Packet(object):
 
         logging.debug('+ exiting Packet.run')
 
-    def _calc_repr_state(self):
-        if self._finished:
-            return ReprState.ERROR if self.failed else ReprState.SUCCESSFULL
-        return self._graph_executor.get_repr_state()
+    def _calc_state(self):
+        return self._graph_executor.get_state()
 
 # OPS for JobGraphExecutor's OPS
-    def _update_repr_state_if_need(self):
-        new_state = self._calc_repr_state()
-        if new_state != self.repr_state:
-            self.update_repr_state(new_state)
+    def _update_state_if_need(self):
+        new_state = self._calc_state()
+        if new_state != self.state:
+            self.update_state(new_state)
 
     def _stop_waiting(self, stop_id):
         with self._lock:

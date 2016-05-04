@@ -7,7 +7,6 @@ from common import Unpickable, safeStringEncode, RpcUserError
 import delayed_executor
 from rem_logging import logger as logging
 import osspec
-from packet_common import ReprState
 
 
 #                                     /--jobs_to_retry<--\
@@ -30,13 +29,13 @@ def always(ctor):
 
 
 class GraphState(object):
-    PENDING =  'GS_PENDING'
-    WORKABLE_AND_PENDING =  'GS_PENDING'
-    WORKABLE =   'GS_WORKABLE'
-    TIME_WAIT =  'GS_WAITING'
-    SUSPENDED =  'GS_SUSPENDED'
-    ERROR =      'GS_ERROR'
-    SUCCESSFULL =  'GS_SUCCESSFULL'
+    PENDING_JOBS = 0b00000001
+    WORKING      = 0b00000010
+    TIME_WAIT    = 0b00000100
+    SUSPENDED    = 0b00001000
+    ERROR        = 0b00010000
+    SUCCESSFULL  = 0b00100000
+    CANCELLED    = 0b01000000
 
 
 class _ActiveJobs(object):
@@ -139,21 +138,6 @@ class JobGraphExecutor(Unpickable(
 
         return sdict
 
-    def get_repr_state(self):
-        state = self.get_state()
-
-        map = {
-            GraphState.PENDING: ReprState.PENDING,
-            GraphState.WORKABLE_AND_PENDING: ReprState.PENDING,
-            GraphState.WORKABLE:  ReprState.WORKABLE,
-            GraphState.TIME_WAIT: ReprState.WAITING,
-            GraphState.SUSPENDED: ReprState.SUSPENDED,
-            GraphState.ERROR:     ReprState.ERROR,
-            GraphState.SUCCESSFULL: ReprState.SUCCESSFULL,
-        }
-
-        return map[state]
-
     def get_state(self):
         has_active_jobs = bool(self.active_jobs_cache)
 
@@ -162,9 +146,9 @@ class JobGraphExecutor(Unpickable(
 
         elif has_active_jobs:
             if self.dont_run_new_jobs or self.failed_jobs or not self.jobs_to_run:
-                return GraphState.WORKABLE
+                return GraphState.WORKING | (self.dont_run_new_jobs and GraphState.SUSPENDED)
             else:
-                return GraphState.WORKABLE_AND_PENDING
+                return GraphState.WORKING | GraphState.PENDING_JOBS
 
         elif self.failed_jobs:
             return GraphState.ERROR
@@ -173,39 +157,13 @@ class JobGraphExecutor(Unpickable(
             return GraphState.SUSPENDED
 
         elif self.jobs_to_run:
-            return GraphState.PENDING
+            return GraphState.PENDING_JOBS
 
         elif self.jobs_to_retry:
             return GraphState.TIME_WAIT
 
         else:
             raise AssertionError("Unreachable: %s" % self)
-
-    #def get_repr_state(self):
-        #has_active_jobs = bool(self.active_jobs_cache)
-
-        #if has_active_jobs:
-            #if self.dont_run_new_jobs or self.failed_jobs:
-                #return ReprState.WORKABLE
-            #elif self.jobs_to_run:
-                #return ReprState.PENDING
-            #else:
-                #return ReprState.WORKABLE
-
-        #elif self.failed_jobs:
-            #raise AssertionError("Unreachable") # ERROR reachable only on [not has_active_jobs]
-
-        #elif self.dont_run_new_jobs:
-            #return ReprState.SUSPENDED
-
-        #elif self.jobs_to_run:
-            #return ReprState.PENDING
-
-        #elif self.jobs_to_retry:
-            #return ReprState.WAITING
-
-        #else:
-            #raise AssertionError("Unreachable: %s" % self) # SUCCESSFULL
 
     def is_stopping(self):
         return False
@@ -239,7 +197,7 @@ class JobGraphExecutor(Unpickable(
         self.jobs_to_run.add(job_id)
 
         if not had_to_run:
-            self._ops.update_repr_state() # TODO BACK_REFERENCE
+            self._ops.update_state() # TODO BACK_REFERENCE
 
         self._notify_can_run_jobs_if_need()
 
@@ -313,7 +271,7 @@ class JobGraphExecutor(Unpickable(
             self.failed_jobs.add(job.id)
 
             # Чтобы не вводить в заблуждение get_job_to_run
-            #self._ops.update_repr_state() # XXX assert in _calc_repr_state
+            #self._ops.update_state() # XXX assert in _calc_repr_state
 
             if self.kill_all_jobs_on_error:
                 self._kill_jobs_drop_results()
@@ -327,7 +285,7 @@ class JobGraphExecutor(Unpickable(
         elif not self.active_jobs_cache and self.failed_jobs:
             self._ops.set_errored_state()
         else:
-            self._ops.update_repr_state()
+            self._ops.update_state()
 
     def get_working_jobs(self):
         return [self.jobs[jid] for jid in list(self.active_jobs_cache)]
@@ -506,13 +464,13 @@ class JobGraphExecutor(Unpickable(
 
     def disallow_to_run_jobs(self, kill_running):
         self.dont_run_new_jobs = True
-        self._ops.update_repr_state() # maybe from PENDING to WORKABLE
+        self._ops.update_state() # maybe from PENDING to WORKABLE
 
         if kill_running:
             # FIXME In ideal world it's better to "apply" jobs that will be
             # finished racy just before kill(2)
             self._kill_jobs_drop_results()
-            self._ops.update_repr_state() # maybe from PENDING to WORKABLE
+            self._ops.update_state() # maybe from PENDING to WORKABLE
 
         self._notify_can_run_jobs_if_need()
 
@@ -528,7 +486,7 @@ class JobGraphExecutor(Unpickable(
             self._reset_tries()
         self.dont_run_new_jobs = False
         # FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
-        self._ops.update_repr_state()
+        self._ops.update_state()
         self._notify_can_run_jobs_if_need()
 
 # XXX

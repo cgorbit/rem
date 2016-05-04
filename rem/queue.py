@@ -4,39 +4,119 @@ import time
 
 from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
 from callbacks import CallbackHolder, ICallbackAcceptor
-from packet import LocalPacket, SandboxPacket, PacketCustomLogic, ReprState as PacketState, ImplState as PacketImplState, NotWorkingStateError
+from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError
 from rem_logging import logger as logging
 
 
-class QueueBase(Unpickable(pending=PackSet.create,
+class ByUserState(Unpickable(
+                       pending=set,
+                       working=set,
                        worked=TimedSet.create,
                        errored=TimedSet.create,
                        suspended=set,
-                       waited=set,
-                       working_jobs=emptyset, # move to LocalQueue
-                       isSuspended=bool,
-                       noninitialized=set,
+                       waiting=set,
+                       #noninitialized=set,
+                 )):
+
+    def items(self):
+        return self.__dict__.items()
+
+    def values(self):
+        return self.__dict__.values()
+
+    def __getitem__(self, key):
+        return self.__dict__[key]
+
+
+class QueueBase(Unpickable(
+                       by_user_state=ByUserState,
+
+                    # LocalQueue # TODO move
+                       working_jobs=emptyset,
+                       packets_with_pending_jobs=PackSet.create,
+
+                    # SandboxQueue # TODO move
+                       working_packets=emptyset,
+                       #_pending_packets <=> by_user_state['pending']
+
+                       is_suspended=bool,
                        lock=PickableRLock,
-                       errorForgetTm=int,
-                       successForgetTm=int,
-                       workingLimit=(int, 1),
-                       success_lifetime=(int, 0),
-                       errored_lifetime=(int, 0)),
+                       working_limit=(int, 1),
+                       successfull_ttl=(int, 0),
+                       successfull_default_ttl=int,
+                       error_ttl=(int, 0)),
+                       error_default_ttl=int,
             CallbackHolder,
             ICallbackAcceptor):
 
-    VIEW_BY_ORDER = "pending", "waited", "errored", "suspended", "worked", "noninitialized"
+    VIEW_BY_ORDER = "pending", "waiting", "errored", "suspended", "working", "worked"
 
     VIEW_BY_STATE = {
-        PacketState.SUSPENDED: "suspended", # SUSPENDED packet may have running jobs
-        PacketState.WORKABLE: "suspended",  # Wrong
-        PacketState.PENDING: "pending",     # PENDING packet may have running jobs
-        PacketState.ERROR: "errored",
+        PacketState.PAUSED:    "suspended",
+        PacketState.PAUSING:   "suspended",
+        PacketState.TAGS_WAIT: "suspended",
+
+        PacketState.PENDING:                 "pending",
+        PacketState.PREV_EXECUTOR_STOP_WAIT: "pending", # FIXME
+
+        PacketState.RUNNING:    "working",
+        PacketState.DESTROYING: "working",
+
         PacketState.SUCCESSFULL: "worked",
-        PacketState.WAITING: "waited",
-        PacketState.NONINITIALIZED: "noninitialized"
-        # CREATED packets stored in ShortStorage
+
+        PacketState.TIME_WAIT: "waiting",
+
+        PacketState.ERROR:  "errored",
+        PacketState.BROKEN: "errored",
+
+        PacketState.UNINITIALIZED: None, # stored in ShortStorage
+        PacketState.HISTORIED:     None,
     }
+
+# suspended
+#     PAUSED or PAUSING or TAGS_WAIT
+
+# pending
+#     Old
+#     PacketState.PENDING or PacketState.RUNNING and pck.has_pending_jobs()
+
+#     New
+#     PacketState.PENDING
+#     PacketState.PREV_EXECUTOR_STOP_WAIT # FIXME
+
+# working
+#     PacketState.RUNNING
+#     PacketState.DESTROYING # FIXME
+
+# worked
+#     PacketState.SUCCESSFULL
+
+# waiting
+#     PacketState.TIME_WAIT
+
+# errored
+#     PacketState.ERROR or PacketState.BROKEN
+
+# None
+#     UNINITIALIZED
+
+########################################################################
+
+# pending_jobs
+#     pck.has_pending_jobs()
+
+# working_jobs (for limiting)
+#     on callbacks
+
+########################################################################
+
+# pending_packets
+#     by_user_state['pending']
+
+# working_packets (for limiting)
+#     pck.graph.state & GraphState.WORKING
+
+########################################################################
 
     def __init__(self, name):
         super(QueueBase, self).__init__()
@@ -45,27 +125,27 @@ class QueueBase(Unpickable(pending=PackSet.create,
     def __getstate__(self):
         sdict = getattr(super(QueueBase, self), "__getstate__", lambda: self.__dict__)()
         with self.lock:
-            for q in self.VIEW_BY_ORDER:
+            for q in self.by_user_state.values():
                 sdict[q] = sdict[q].copy()
         return sdict
 
     def SetSuccessLifeTime(self, lifetime):
-        self.success_lifetime = lifetime
+        self.successfull_ttl = lifetime
 
     def SetErroredLifeTime(self, lifetime):
-        self.errored_lifetime = lifetime
+        self.error_ttl = lifetime
 
     def _on_packet_state_change(self, pck):
         self.relocate_packet(pck)
 
     def UpdateContext(self, context):
-        self.successForgetTm = context.success_lifetime
-        self.errorForgetTm = context.error_lifetime
+        self.successfull_default_ttl = context.successfull_ttl
+        self.error_default_ttl = context.error_lifetime
         self.scheduler = context.Scheduler
 
     def forgetOldItems(self):
-        self._forget_queue_old_items(self.worked, self.success_lifetime or self.successForgetTm)
-        self._forget_queue_old_items(self.errored, self.errored_lifetime or self.errorForgetTm)
+        self._forget_queue_old_items(self.worked, self.successfull_ttl or self.successfull_default_ttl)
+        self._forget_queue_old_items(self.errored, self.error_ttl or self.error_default_ttl)
 
     def _forget_queue_old_items(self, queue, ttl):
         threshold = time.time() - ttl
@@ -85,18 +165,17 @@ class QueueBase(Unpickable(pending=PackSet.create,
             pck.destroy() # May throw: race with RPC calls, that may change packet state
 
     def relocate_packet(self, pck):
-        dest_queue_name = self.VIEW_BY_STATE.get(pck.state)
-        dest_queue = getattr(self, dest_queue_name) if dest_queue_name else None
+        dest_queue_name = self.VIEW_BY_STATE[pck.state]
+        dest_queue = self.by_user_state[dest_queue_name] if dest_queue_name else None
 
         with self.lock:
             if not(dest_queue and pck in dest_queue):
-                logging.debug("queue %s\tmoving packet %s typed as %s", self.name, pck.name, pck.state)
+                logging.debug("queue %s\tmoving packet %s typed as %s", self.name, pck.name, pck._repr_state)
                 self._move_packet(pck, dest_queue)
 
     def _find_packet_queue(self, pck):
         ret = None
-        for qname in self.VIEW_BY_ORDER:
-            queue = getattr(self, qname, {})
+        for qname, queue in self.by_user_state.items():
             if pck in queue:
                 if ret is not None:
                     logging.warning("packet %r is in several queues", pck)
@@ -117,8 +196,8 @@ class QueueBase(Unpickable(pending=PackSet.create,
                 dst_queue.add(pck)
                 self._on_relocate(pck)
 
-    def IsAlive(self):
-        return not self.isSuspended
+    def is_alive(self):
+        return not self.is_suspended
 
     def _attach_packet(self, pck):
         with self.lock:
@@ -141,18 +220,13 @@ class QueueBase(Unpickable(pending=PackSet.create,
         self._move_packet(pck, None)
 
     def ListAllPackets(self):
-        return itertools.chain(*(getattr(self, q) for q in self.VIEW_BY_ORDER))
+        return itertools.chain(*(self.by_user_state[qname] for qname in self.VIEW_BY_ORDER))
 
     def _filter_packets(self, filter=None):
-        pf, parg = {"errored": (list, self.errored),
-                    "suspended": (list, self.suspended),
-                    "pending": (list, self.pending),
-                    "worked": (list, self.worked),
-                    "working": (type(self)._get_working_packets, self),
-                    "waiting": (list, self.waited),
-                    None: (QueueBase.ListAllPackets, self)}[filter]
-        for pck in pf(parg):
-            yield pck
+        if filter is None:
+            return self.ListAllPackets()
+
+        return list(self.by_user_state[filter])
 
     def rpc_list_packets(self, filter=None, name_regex=None, prefix=None, last_modified=None):
         if filter == 'all':
@@ -170,27 +244,30 @@ class QueueBase(Unpickable(pending=PackSet.create,
             return packets
 
     def Resume(self):
-        self.isSuspended = False
+        self.is_suspended = False
         self._on_resume()
 
     def Suspend(self):
-        self.isSuspended = True
+        self.is_suspended = True
 
     def Status(self):
-        return {"alive": self.IsAlive(), "pending": len(self.pending), "suspended": len(self.suspended),
-                "errored": len(self.errored), "worked": len(self.worked),
-                "waiting": len(self.waited),
-                "working": self._get_working_count(), # get working (job or packet) count
-                "working-limit": self.workingLimit,
-                "success-lifetime": self.success_lifetime if self.success_lifetime > 0 else self.successForgetTm,
-                "error-lifetime": self.errored_lifetime if self.errored_lifetime > 0 else self.errorForgetTm}
+        status = {name: len(queue) for name, queue in self.by_user_state.items()}
+
+        status.update({
+            "alive": self.is_alive(),
+            "working-limit": self.working_limit,
+            "success-lifetime": self.successfull_ttl or self.successfull_default_ttl,
+            "error-lifetime": self.error_ttl or self.error_default_ttl
+        })
+
+        return status
 
     def ChangeWorkingLimit(self, lmtValue):
-        self.workingLimit = int(lmtValue)
+        self.working_limit = int(lmtValue)
         self._on_change_working_limit()
 
     def Empty(self):
-        return not any(getattr(self, subq_name, None) for subq_name in self.VIEW_BY_ORDER)
+        return not any(self.by_user_state[subq_name] for subq_name in self.VIEW_BY_ORDER)
 
 
 class LocalQueue(QueueBase):
@@ -227,13 +304,13 @@ class LocalQueue(QueueBase):
 
     def has_startable_jobs(self):
         with self.lock:
-            return self.pending and len(self.working_jobs) < self.workingLimit and self.IsAlive()
+            return self.pending and len(self.working_jobs) < self.working_limit and self.is_alive()
 
     def _get_working_packets(self):
         return set(job.pck for job in self.working_jobs)
 
-    def _get_working_count(self):
-        return len(self.working_jobs)
+    #def _get_working_count(self):
+        #return len(self.working_jobs)
 
     def get_job_to_run(self):
         while True:
@@ -258,44 +335,48 @@ class LocalQueue(QueueBase):
 class SandboxQueue(QueueBase):
     _PACKET_CLASS = SandboxPacket
 
+    def _notify_has_pending_if_need(self):
+        if self._pending_packets:
+            self.scheduler._on_packet_pending(self) # XXX not under lock!
+
     def _on_change_working_limit(self):
-        pass
-        #raise NotImplementedError()
+        self._notify_has_pending_if_need()
 
     def _on_resume(self):
-        pass
-        #raise NotImplementedError()
+        self._notify_has_pending_if_need()
+
+    @property
+    def _pending_packets(self):
+        return self.by_user_state['pending']
 
     def relocate_packet(self, pck):
         QueueBase.relocate_packet(pck)
+        self._notify_has_pending_if_need()
 
-        if self.really_pending: # TODO
-            self.scheduler._on_packet_pending(self) # XXX not under lock!
-
-# TODO FIXME
     def has_startable_packets(self):
         with self.lock:
-            return self.really_pending \ # TODO rename
-                and len(self.working_packets) < self.workingLimit \
-                and self.IsAlive()
+            return self._pending_packets \
+                and len(self.working_packets) < self.working_limit \
+                and self.is_alive()
 
     def get_packet_to_run(self):
-        while True:
-            with self.lock:
-                if not self.has_startable_packets():
-                    return None
+        with self.lock:
+            if not self.has_startable_packets():
+                return None
 
-                return self.really_pending.peak()[0]
+            return self._pending_packets.peak()[0]
 
     def _on_packet_attach(self, pck):
         pass
 
     def _on_relocate(self, pck):
-        if pck._impl_state == PacketImplState.PENDING:
-            self.really_pending.add(pck)
+        if not pck._graph_executor.is_null():
+            self.working_packets.add(pck)
+        else:
+            self.working_packets.remove(pck)
 
     def _on_packet_detach(self, pck):
-        self.really_pending.discard(pck)
-#TODO
-#TODO
-#TODO
+        self.working_packets.remove(pck)
+
+    #def _get_working_count(self):
+        #return len(self.working_packets)

@@ -13,6 +13,7 @@ import sandbox_packet
 import rem.sandbox as sandbox
 from rem_logging import logger as logging
 from rem.future import Promise
+from packet_state import PacketState
 
 remote_packets_dispatcher = None
 
@@ -385,8 +386,9 @@ class SandboxJobGraphExecutorProxy(object):
 
     # TODO FIXME
         self.detailed_status = None
+        self._update_state()
         #self.state = ReprState.PENDING
-        self.history = [] # XXX TODO Непонятно вообще как с этим быть
+        #self.history = [] # XXX TODO Непонятно вообще как с этим быть
 
     def _create_remote_packet(self):
         return SandboxRemotePacket(
@@ -398,17 +400,18 @@ class SandboxJobGraphExecutorProxy(object):
             custom_resources=self._custom_resources
         )
 
-    def get_repr_state(self):
-        if not self.history:
-            return ReprState.PENDING
-        return self.history[-1][0]
+    #def get_state(self):
+        #if not self.history:
+            #return ReprState.PENDING
+        #return self.history[-1][0]
 
     def produce_detailed_status(self):
         return self.detailed_status
 
     def is_stopping(self):
         with self.lock:
-            return self.do_not_run and self._remote_packet
+            return (self.do_not_run or self.cancelled) and self._remote_packet
+            # (WORKING | CANCELLED) || (WORKING | SUSPENDED)
 
 ########### Ops for _remote_packet
     # on sandbox task stopped + resources list fetched
@@ -467,27 +470,37 @@ class SandboxJobGraphExecutorProxy(object):
             if not self.do_not_run:
                 self._remote_packet = self._create_remote_packet()
 
-    def repr_state(self):
+    def _update_state(self):
+        new = self._calc_state()
+        if new == self.state:
+            return
+
+        self.state = new
+        self._ops.update_state()
+
+    def calc_state(self):
         with self.lock:
             if self._remote_packet:
+                state = GraphState.WORKING
+
                 if self.cancelled:
-                    return CANCEL_WAIT
+                    state |= GraphState.CANCELLED
                 elif self.do_not_run:
-                    return STOP_WAIT
-                else
-                    return WORKING
+                    state |= GraphState.SUSPENDED
+
+                return state
 
             elif self.result is not None:
-                return SUCCESSFULL or ERROR
+                return GraphState.SUCCESSFULL if self.result else GraphState.ERROR
 
             elif self.time_wait_deadline:
-                return TIME_WAIT
+                return GraphState.TIME_WAIT
 
             elif self.do_not_run:
-                return SUSPENDED
+                return GraphState.SUSPENDED
 
             else:
-                return PENDING
+                return GraphState.PENDING
 
     def stop(self, kill_jobs):
         with self.lock:
@@ -548,14 +561,14 @@ class _SandboxPacketJobGraphExecutorProxyOps(object):
     def __init__(self, pck):
         self.pck = pck
 
-    def update_repr_state(self):
-        self.pck._update_repr_state()
+    def update_state(self):
+        self.pck._update_state()
 
     def set_successfull_state(self):
-        self.pck._change_state(ImplState.SUCCESSFULL)
+        self.pck._change_state(PacketState.SUCCESSFULL)
 
     def set_errored_state(self):
-        self.pck._change_state(ImplState.ERROR)
+        self.pck._change_state(PacketState.ERROR)
 
     def job_done_successfully(self, job_id):
         tag = self.pck.job_done_tag.get(job_id)

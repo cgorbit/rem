@@ -18,7 +18,7 @@ from job import FuncJob, FuncRunner
 from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject
 from rem import PacketCustomLogic
 from connmanager import ConnectionManager
-from packet import LocalPacket, ReprState as PacketState
+from packet import LocalPacket, PacketState
 import packet
 from queue import LocalQueue, SandboxQueue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
@@ -174,7 +174,7 @@ class SandboxPacketsRunner(object):
                     self._running_count -= 1
                 continue
 
-            stopped.subscribe(self._on_packet_stop)
+            #stopped.subscribe(self._on_packet_stop)
 
     def on_queue_not_empty(self, queue):
         with self._lock:
@@ -182,10 +182,10 @@ class SandboxPacketsRunner(object):
                 self._queue.push(q)
                 self._changed.notify()
 
-    def _on_packet_stop(self):
-        with self._lock:
-            self._running_count -= 1
-            self._changed.notify()
+    #def _on_packet_stop(self):
+        #with self._lock:
+            #self._running_count -= 1
+            #self._changed.notify()
 
     def stop(self):
         with self._lock:
@@ -666,7 +666,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             )
 
         def produce_packets_to_wait():
-            packets = list_packets_in_queues(PacketState.WAITING)
+            packets = list_packets_in_queues(PacketState.TIME_WAIT)
 
             logging.debug("WAITING packets in Queue's for schedWatcher: %s" % [pck.id for pck in packets])
 
