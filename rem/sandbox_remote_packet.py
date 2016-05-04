@@ -416,6 +416,10 @@ class SandboxJobGraphExecutorProxy(object):
 ########### Ops for _remote_packet
     # on sandbox task stopped + resources list fetched
     def on_packet_terminated(self, how):
+        self._on_packet_terminated(how)
+        self._update_state()
+
+    def _on_packet_terminated(self, how):
         def on_stop():
             self._remote_packet = None
             self._stop_promise.set()
@@ -470,6 +474,8 @@ class SandboxJobGraphExecutorProxy(object):
             if not self.do_not_run:
                 self._remote_packet = self._create_remote_packet()
 
+            self._update_state()
+
     def _update_state(self):
         new = self._calc_state()
         if new == self.state:
@@ -511,6 +517,7 @@ class SandboxJobGraphExecutorProxy(object):
 
             self.do_not_run = True
             self._remote_packet.stop(kill_jobs)
+            self._update_state()
 
     def start(self):
         with self.lock:
@@ -521,6 +528,8 @@ class SandboxJobGraphExecutorProxy(object):
 
             self._stop_promise = Promise()
             self._remote_packet = self._create_remote_packet()
+
+            self._update_state()
 
             return self._stop_promise.to_future()
 
@@ -534,6 +543,7 @@ class SandboxJobGraphExecutorProxy(object):
             self._snapshot_resource_id = None
 
             self._remote_packet.cancel()
+            self._update_state()
 
     def is_null(self):
         return self._remote_packet is None

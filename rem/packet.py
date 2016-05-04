@@ -232,7 +232,8 @@ class PacketBase(Unpickable(
         if self.state != new:
             self._change_state(new)
 
-    def _calc_repr_state(self):
+    @staticmethod
+    def _calc_repr_state(state):
         map = {
             ImplState.UNINITIALIZED:    ReprState.CREATED,
             ImplState.ERROR:            ReprState.ERROR,
@@ -244,15 +245,14 @@ class PacketBase(Unpickable(
             ImplState.PAUSED:           ReprState.SUSPENDED,
             ImplState.PAUSING:          ReprState.SUSPENDED,
 
-            # XXX Must be WORKABLE to support fast_restart
-            ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
+            ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE, # XXX Must be WORKABLE to support fast_restart
             ImplState.RUNNING:          ReprState.WORKABLE,
 
             ImplState.DESTROYING:       ReprState.WORKABLE,
             ImplState.HISTORIED:        ReprState.HISTORIED,
         }
 
-        return map[self.state]
+        return map[state]
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
@@ -504,7 +504,7 @@ class PacketBase(Unpickable(
                 self._release_place() # will kill jobs if need
 
     def _update_repr_state(self):
-        new = self._calc_repr_state()
+        new = self._calc_repr_state(self.state)
 
         if new == self._repr_state:
             return
