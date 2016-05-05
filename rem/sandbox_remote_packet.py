@@ -15,6 +15,7 @@ from rem_logging import logger as logging
 from rem.future import Promise
 from packet_state import PacketState
 from job_graph import GraphState
+from rem.common import PickableLock
 
 remote_packets_dispatcher = None
 
@@ -309,11 +310,11 @@ class RemotePacketsDispatcher(object):
             if state == SandboxTaskState.CREATING:
                 if pck._cancel_schedule:
                     if pck._cancel_schedule():
-                        self._on_end_of_life()
+                        pck._on_end_of_life()
                     pck._cancel_schedule = None
 
             elif state == SandboxTaskState.NOT_CREATED: # FIXME Must not be
-                self._on_end_of_life()
+                pck._on_end_of_life()
 
             elif state in [SandboxTaskState.STARTING, SandboxTaskState.CHECKING_FAILED_START]:
                 pass # Don't touch!
@@ -326,12 +327,13 @@ class RemotePacketsDispatcher(object):
 
 class SandboxTaskState(object):
     NOT_CREATED = 1
-    CREATING    = 2
-    STARTING    = 3
-    STARTED     = 4
-    CHECKING_FAILED_START = 5
-    TERMINATED  = 6
-    CREATION_FAILED = 7
+    CREATING = 2
+    CREATION_FAILED = 3
+    STARTING = 4
+    STARTED = 5
+    CHECKING_FAILED_START = 6
+    TERMINATED_FETCHING_RESULT = 7
+    TERMINATED = 8
 
 
 class SandboxRemotePacket(object):
@@ -339,7 +341,8 @@ class SandboxRemotePacket(object):
         self.id = pck_id
         #self._ops = ops
         #self.lock = ops._ops.lock # XXX TODO
-        self.lock = threading.Lock()
+        #self.lock = threading.Lock()
+        self.lock = PickableLock()
         self._cancelled = False
         self._sandbox_task_state = SandboxTaskState.NOT_CREATED
         self._instance_id = None
@@ -355,11 +358,14 @@ class SandboxRemotePacket(object):
     def cancel(self):
         remote_packets_dispatcher.cancel_packet(self)
 
-    def restart(self):
-        remote_packets_dispatcher.restart_packet(self)
+    #def restart(self): # TODO .fast_restart
+        #remote_packets_dispatcher.restart_packet(self)
 
     def stop(self, kill_jobs):
         remote_packets_dispatcher.stop_packet(self)
+
+    def _on_end_of_life(self):
+        self._ops._on_packet_terminated()
 
 
 def _produce_snapshot_data(pck_id, graph):
@@ -388,9 +394,11 @@ class SandboxJobGraphExecutorProxy(object):
     # TODO FIXME
         self.detailed_status = None
         self.state = None
-        self._update_state()
         #self.state = ReprState.PENDING
         #self.history = [] # XXX TODO Непонятно вообще как с этим быть
+
+    def init(self):
+        self._update_state()
 
     def _create_remote_packet(self):
         return SandboxRemotePacket(

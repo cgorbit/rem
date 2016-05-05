@@ -122,6 +122,18 @@ class JobGraphExecutor(Unpickable(
         self._clean_state = True
         self._ops = ops
         self._init_job_deps_graph()
+        self.state = None
+
+    def init(self):
+        self._update_state()
+
+    def _update_state(self):
+        new = self._calc_state()
+        if new == self.state:
+            return
+
+        self.state = new
+        self._ops.on_state_change()
 
     def __getstate__(self):
         sdict = self.__dict__.copy()
@@ -138,7 +150,7 @@ class JobGraphExecutor(Unpickable(
 
         return sdict
 
-    def get_state(self):
+    def _calc_state(self):
         has_active_jobs = bool(self.active_jobs_cache)
 
         if len(self.jobs) == len(self.succeed_jobs):
@@ -196,10 +208,13 @@ class JobGraphExecutor(Unpickable(
         had_to_run = bool(self.jobs_to_run)
         self.jobs_to_run.add(job_id)
 
-        if not had_to_run:
-            self._ops.on_state_change() # TODO BACK_REFERENCE
+        #if not had_to_run:
+            #self._ops.on_state_change() # TODO BACK_REFERENCE
+            #self._update_state()
 
-        self._notify_can_run_jobs_if_need()
+        self._update_state()
+
+        #self._notify_can_run_jobs_if_need()
 
     def _format_io_filename(self, (direction, job_id)):
         return '%s/%s-%s' % (self._ops.get_io_directory(), direction, job_id)
@@ -248,9 +263,9 @@ class JobGraphExecutor(Unpickable(
             self._create_output(job.id, "err")
         )
 
-    def _notify_can_run_jobs_if_need(self):
-        if self.can_run_jobs_right_now():
-            self._ops.on_can_run_jobs()
+    #def _notify_can_run_jobs_if_need(self):
+        #if self.can_run_jobs_right_now():
+            #self._ops.on_can_run_jobs()
 
     def _apply_job_result(self, job, runner):
         if runner.returncode_robust == 0 and not runner.is_cancelled():
@@ -271,21 +286,21 @@ class JobGraphExecutor(Unpickable(
             self.failed_jobs.add(job.id)
 
             # Чтобы не вводить в заблуждение get_job_to_run
-            #self._ops.on_state_change() # XXX assert in _calc_repr_state
+            #self._ops.on_state_change() # XXX assert in _calc_state
 
             if self.kill_all_jobs_on_error:
                 self._kill_jobs_drop_results()
 
-        self._notify_can_run_jobs_if_need()
+        #if len(self.succeed_jobs) == len(self.jobs):
+            #self._ops.set_successfull_state()
+        ## we can't start new jobs on _kill_jobs_drop_results=False
+        #elif not self.active_jobs_cache and self.failed_jobs:
+            #self._ops.set_errored_state()
+        #else:
+            #self._ops.on_state_change()
 
-    # TODO Check conditions again
-        if len(self.succeed_jobs) == len(self.jobs):
-            self._ops.set_successfull_state()
-        # we can't start new jobs on _kill_jobs_drop_results=False
-        elif not self.active_jobs_cache and self.failed_jobs:
-            self._ops.set_errored_state()
-        else:
-            self._ops.on_state_change()
+        #self._notify_can_run_jobs_if_need()
+        self._update_state()
 
     def get_working_jobs(self):
         return [self.jobs[jid] for jid in list(self.active_jobs_cache)]
@@ -464,36 +479,40 @@ class JobGraphExecutor(Unpickable(
 
     def disallow_to_run_jobs(self, kill_running):
         self.dont_run_new_jobs = True
-        self._ops.on_state_change() # maybe from PENDING to WORKABLE
+        #self._ops.on_state_change() # maybe from PENDING to WORKABLE
+        self._update_state()
 
         if kill_running:
             # FIXME In ideal world it's better to "apply" jobs that will be
             # finished racy just before kill(2)
             self._kill_jobs_drop_results()
-            self._ops.on_state_change() # maybe from PENDING to WORKABLE
+            #self._ops.on_state_change() # maybe from PENDING to WORKABLE
+            self._update_state()
 
-        self._notify_can_run_jobs_if_need()
+        #self._notify_can_run_jobs_if_need()
 
     def _reset_tries(self):
         self.jobs_to_run.update(self.failed_jobs)
         self.failed_jobs.clear()
         for job in self.jobs.values():
             job.tries = 0
-        self._notify_can_run_jobs_if_need()
+        #self._notify_can_run_jobs_if_need()
 
     def allow_to_run_jobs(self, reset_tries=False):
         if reset_tries:
             self._reset_tries()
         self.dont_run_new_jobs = False
         # FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
-        self._ops.on_state_change()
-        self._notify_can_run_jobs_if_need()
+        #self._ops.on_state_change()
+        self._update_state()
+        #self._notify_can_run_jobs_if_need()
 
 # XXX
     def restart(self):
         if not self._clean_state:
             self._do_reset()
-        self._notify_can_run_jobs_if_need()
+        #self._notify_can_run_jobs_if_need()
+        self._update_state()
 
     start = restart
 

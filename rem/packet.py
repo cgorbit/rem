@@ -895,13 +895,16 @@ class PacketBase(Unpickable(
 
             if g.is_null():
                 pass # becomes PENDING
-            elif suspend:
-                g.cancel()
             else:
-                # ImplState.PREV_EXECUTOR_STOP_WAIT -> must be -> ReprState.WORKABLE
-    # XXX FIXME
-                g.try_fast_restart() # may fail later (race with network)
-                                    # try_fast_restart must set cancel flag in itself
+                g.cancel()
+
+    # TODO XXX
+            #elif suspend:
+                #g.cancel()
+            #else:
+                ## ImplState.PREV_EXECUTOR_STOP_WAIT -> must be -> ReprState.WORKABLE
+                #g.try_fast_restart() # may fail later (race with network)
+                                    ## try_fast_restart must set cancel flag in itself
 
             self._update_state()
 
@@ -969,6 +972,7 @@ class PacketBase(Unpickable(
 
                 if isinstance(self._graph_executor, DummyGraphExecutor):
                     self._graph_executor = self._create_job_graph_executor()
+                    self._graph_executor.init() # TODO Better
 
                 #self._graph_executor.set_runner(self.queue.runner)
 

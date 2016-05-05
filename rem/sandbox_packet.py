@@ -5,6 +5,7 @@ import threading
 
 import rem.job
 import rem.job_graph
+from rem.job_graph import GraphState
 from rem.profile import ProfiledThread
 #import rem.packet # XXX don't import
 import rem.subprocsrv
@@ -21,9 +22,6 @@ class _ExecutorOps(object):
     def __init__(self, pck):
         self.pck = pck
 
-    def update_state(self):
-        self.pck._update_state_if_need()
-
     def stop_waiting(self, stop_id):
         self.pck._stop_waiting(stop_id)
 
@@ -36,28 +34,36 @@ class _ExecutorOps(object):
     def get_io_directory(self):
         return self.pck.get_io_directory()
 
-    def set_successfull_state(self):
-        r = self.pck
-        r._finished = True
-        r._something_changed.notify()
-        logging.debug('+++ set_successfull_state')
+    def on_state_change(self):
+    #def set_successfull_state(self):
+        pck = self.pck
 
-    def set_errored_state(self):
-        r = self.pck
-        r._failed = True
-        r._finished = True
-        r._something_changed.notify()
-        logging.debug('+++ set_errored_state')
+        graph = pck._graph_executor
+        pck = self.pck
+
+        pck._update_state(graph.state)
+        pck._last_detailed_status = graph.produce_detailed_status()
+
+        if graph.state == GraphState.SUCCESSFULL:
+            pck._finished = True
+            logging.debug('+++ set_successfull_state')
+        elif graph.state == GraphState.ERROR:
+            pck._finished = True
+            #pck._failed = True
+            logging.debug('+++ set_errored_state')
+
+        pck._something_changed.notify()
 
     def job_done_successfully(self, job_id):
-        self.pck._something_changed.notify() # TODO Notify rem_server for job_done_tag
-        logging.debug('+++ job_done_successfully')
+        pass # TODO Notify rem_server for job_done_tag
+        #self.pck._something_changed.notify()
+        #logging.debug('+++ job_done_successfully')
 
     def create_job_runner(self, job):
         return rem.job.JobRunner(self.pck, job) # brain damage
 
-    def on_can_run_jobs(self):
-        self.pck._something_changed.notify()
+    #def on_can_run_jobs(self):
+        #self.pck._something_changed.notify()
 
 
 class Packet(object):
@@ -66,8 +72,11 @@ class Packet(object):
         self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
         self.history = []
         self._finished = False
-        self._failed = False
-        #self._init_non_persistent()
+        #self._failed = False
+        self._init_non_persistent()
+
+        self.state = None
+        #self._update_state_if_need()
 
         self._graph_executor = rem.job_graph.JobGraphExecutor(
             _ExecutorOps(self),
@@ -75,10 +84,11 @@ class Packet(object):
             graph,
         )
 
-        self.state = None
-        self._update_state_if_need()
+    # TODO Better
+        with self._lock:
+            self._graph_executor.init()
 
-    def update_state(self, state):
+    def _update_state(self, state):
         self.state = state
         self.history.append((state, time.time()))
         logging.info("new state %s" % state)
@@ -102,20 +112,22 @@ class Packet(object):
         sdict.pop('_main_thread', None)
         sdict.pop('_proc_runner', None)
         sdict.pop('_job_threads', None)
+        sdict.pop('_on_update', None)
         return sdict
 
     def __setstate__(self, sdict):
         self.__dict__.update(sdict)
         #self._init_non_persistent()
 
-    def start(self, working_directory, io_directory):
+    def start(self, working_directory, io_directory, on_update):
+        self._on_update = on_update
         self._working_directory = working_directory
         self._io_directory = io_directory
         self._init_non_persistent()
         self._proc_runner = rem.job.create_job_runner(None, None)
 
         print >>sys.stderr, self._graph_executor.__dict__
-        print >>sys.stderr, self._graph_executor.get_state()
+        print >>sys.stderr, self._graph_executor.state
 
         self._main_thread = ProfiledThread(target=self._main_loop, name_prefix='Packet')
         self._main_thread.start()
@@ -155,6 +167,7 @@ class Packet(object):
             self._graph_executor.disallow_to_run_jobs(kill_jobs)
 
     # For those who changed their's minds after call to stop(kill_jobs=False)
+# ATW NOT USED
     def resume(self):
         with self.lock:
             if self._finished: # FIXME
@@ -171,6 +184,7 @@ class Packet(object):
             self._graph_executor.cancel()
             self._something_changed.notify()
 
+# ATW NOT USED
     def restart(self):
         with self.lock:
             if self._finished:
@@ -182,26 +196,32 @@ class Packet(object):
     def _main_loop(self):
         logging.debug('+ Packet.run')
 
-        while not self._finished:
+        while True:
             with self._lock:
-                #if self.state == ReprState.WAITING:
+                #if self.state == PacketState.TIME_WAIT:
                 # WTF
 
-                while self._graph_executor.can_run_jobs_right_now():
+                #while self._graph_executor.can_run_jobs_right_now():
+                while self._graph_executor.state & GraphState.PENDING_JOBS:
                     self._start_one_another_job()
+
+                self._on_update(self.history, self._last_detailed_status)
+
+                if self._finished:
+                    return
 
                 self._something_changed.wait()
 
         logging.debug('+ exiting Packet.run')
 
-    def _calc_state(self):
-        return self._graph_executor.get_state()
+    #def _calc_state(self):
+        #return self._graph_executor.get_state()
 
 # OPS for JobGraphExecutor's OPS
-    def _update_state_if_need(self):
-        new_state = self._calc_state()
-        if new_state != self.state:
-            self.update_state(new_state)
+    #def _update_state_if_need(self):
+        #new_state = self._calc_state()
+        #if new_state != self.state:
+            #self._update_state(new_state)
 
     def _stop_waiting(self, stop_id):
         with self._lock:
@@ -222,7 +242,7 @@ class Packet(object):
 
         with self._lock:
             self._graph_executor.apply_jobs_results()
-            self._something_changed.notify() # For WAITING, SUSPENDED
+            self._something_changed.notify() # For TIME_WAIT, SUSPENDED
 
     def create_file_handles(self, job):
         return self._graph_executor.create_job_file_handles(job)

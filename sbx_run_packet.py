@@ -73,10 +73,10 @@ def _create_rpc_server(pck, opts):
 
     return srv
 
+
 if __name__ == '__main__':
     opts = parse_arguments()
 
-    # Overengineering you say?
     for attr in ['io_dir', 'work_dir', 'result_file'] \
             + (['snapshot_file'] if opts.snapshot_file is not None else []):
         setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
@@ -93,7 +93,10 @@ if __name__ == '__main__':
 
     pck.vivify_jobs_waiting_stoppers()
 
-    pck.start(opts.work_dir, opts.io_dir)
+    def on_update(state_history, detailed_status):
+        pass # TODO
+
+    pck.start(opts.work_dir, opts.io_dir, on_update)
 
     rpc_server = _create_rpc_server(pck, opts)
 
