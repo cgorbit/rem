@@ -108,8 +108,13 @@ class Client(object):
             print >>sys.stderr, '+ response from', path, r.status_code, r.text.encode('utf-8')
 
         if r.status_code != succ_code:
+    # FIXME TODO XXX
+    # use r.json()['message']
+    # FIXME TODO XXX
             raise _ERROR_BY_CODE[r.status_code / 100](r.text)
+
             #raise RuntimeError(r.text)
+
             #try:
                 #answer = r.json()
             #except:
@@ -154,14 +159,21 @@ class Client(object):
             self._update()
 
         def start(self):
-            res = self._make_call(
+            self._start(self._api, id)
+
+        @staticmethod
+        def _start(api, id):
+            res = api._make_call(
                 'PUT',
                 'batch/tasks/start',
-                [self.id],
+                [id],
             )[0]
 
             if res['status'] == 'ERROR':
                 raise RuntimeError(res['message'])
+
+    def start_task(self, id)
+        self.TaskProxy._start(self, id)
 
     def Task(self, id):
         return self.TaskProxy(self, self._make_call('GET', '/task/%d' % id))

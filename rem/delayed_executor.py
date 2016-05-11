@@ -42,7 +42,10 @@ class DelayedExecutor(object):
             if self._queue.front()[0] == id:
                 self._modified.notify()
 
-            return lambda : self._cancel(id) # TODO use weak self
+            ret = lambda : self._cancel(id) # TODO use weak self
+            ret.id = id
+
+            return ret
 
     schedule = add
 
@@ -78,7 +81,10 @@ class DelayedExecutor(object):
                 self._queue.pop_front()
 
             try:
-                callback()
+                if callback.__code__.co_argcount:
+                    callback(id)
+                else:
+                    callback()
             except:
                 logging.exception("Failed to execute %s" % callback)
 

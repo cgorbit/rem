@@ -19,7 +19,7 @@ def parse_arguments():
     p.add_argument('--io-dir', dest='io_dir', required=True)
     p.add_argument('--work-dir', dest='work_dir', required=True)
     p.add_argument('--custom-resources', dest='custom_resources')
-    p.add_argument('--instance-id', dest='instance_id', required=True)
+    p.add_argument('--task-id', dest='task_id', required=True)
     p.add_argument('--rem-server-addr', dest='rem_server_addr', required=True)
     p.add_argument('--result-file', dest='result_file', default='/dev/stdout')
 
@@ -39,24 +39,32 @@ rem.rem_logging.reinit_logger(Context())
 
 
 class RpcMethods(object):
-    def __init__(self, pck, instance_id):
+    def __init__(self, pck, task_id):
         self.pck = pck
-        self.instance_id = instance_id
+        self.task_id = task_id
 
     def _listMethods(self):
         return list_public_methods(self)
 
-    def rpc_restart(self):
+    def _check_task_id(self, task_id): # TODO Use decorator
+        if task_id != self.task_id:
+            raise WrongTaskId()
+
+    def rpc_restart(self, task_id):
+        self._check_task_id(task_id)
         self.pck.restart()
 
-    def rpc_stop(self, kill_jobs):
+    def rpc_stop(self, task_id, kill_jobs):
+        self._check_task_id(task_id)
         self.pck.stop(kill_jobs)
 
-    def rpc_cancel(self):
+    def rpc_cancel(self, task_id):
+        self._check_task_id(task_id)
         self.pck.cancel()
 
-    def rpc_ping(self):
-        return self.instance_id
+    def rpc_ping(self, task_id):
+        self._check_task_id(task_id)
+        return self.task_id
 
 
 class XMLRPCServer(SimpleXMLRPCServer):
@@ -67,7 +75,7 @@ def _create_rpc_server(pck, opts):
     srv = XMLRPCServer(('::', 0))
 
     #srv.register_introspection_functions()
-    srv.register_instance(RpcMethods(pck, opts.instance_id))
+    srv.register_task(RpcMethods(pck, opts.task_id))
 
     threading.Thread(target=srv.serve_forever).start()
 
