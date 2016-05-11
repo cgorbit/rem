@@ -87,9 +87,10 @@ class ActionQueue(object):
 
 
 class TaskStateGroups(object):
-    ANY = 0
-    AFTER_DRAFT_NOT_TERMINATED = 1
-    TERMINATED = 2
+    DRAFT = 1
+    AFTER_DRAFT_NOT_TERMINATED = 2
+    TERMINATED = 3
+    ANY = 4
 
 
 class SandboxTaskStateAwaiter(object):
@@ -298,7 +299,7 @@ class RemotePacketsDispatcher(object):
                 if pck._target_stop_mode:
                     return
 
-                pck._state = TaskState.EXCEPTION
+                pck._state = TaskState.TERMINATED
                 self._exception = e
                 self._on_end_of_life()
 
@@ -487,7 +488,61 @@ class RemotePacketsDispatcher(object):
 
             pck._status_await_job_id = None
 
-            raise NotImplementedError()
+            state = self._state
+
+            assert state not in [
+                TaskState.CREATING,
+                TaskState.TERMINATED,
+                TaskState.FETCHING_RESOURCE_LIST,
+                TaskState.FETCHING_RESULT_RESOURCE
+            ]
+
+    # TODO XXX
+    # Пока в черне обрисовал
+
+            if state == TaskState.STARTING:
+                if status_group == TaskStateGroups.DRAFT:
+                    raise AssertionError()
+
+                elif status_group == TaskStateGroups.AFTER_DRAFT_NOT_TERMINATED:
+                    self._state = TaskState.STARTED
+
+                elif status_group == TaskStateGroups.TERMINATED:
+                    self._state = TaskState.FETCHING_RESOURCE_LIST #1
+                    self._start_fetch_resource_list(pck)
+
+            elif state == TaskState.CHECKING_START_ERROR:
+                # TODO drop_sched
+
+                if status_group == TaskStateGroups.DRAFT:
+                    if self._is_start_error_permanent:
+                        self._state = TaskState.TERMINATED # with error
+                        # TODO _on_end_of_life
+                    else:
+                        self._state = TaskState.STARTING
+                        self._start_start_sandbox_task(pck)
+
+                elif status_group == TaskStateGroups.AFTER_DRAFT_NOT_TERMINATED:
+                    self._state = TaskState.STARTED
+
+                elif status_group == TaskStateGroups.TERMINATED:
+                    self._state = TaskState.FETCHING_RESOURCE_LIST #2
+                    self._start_fetch_resource_list(pck)
+
+            elif state == TaskState.STARTED:
+                if status_group == TaskStateGroups.DRAFT:
+                    raise AssertionError()
+
+                elif status_group == TaskStateGroups.AFTER_DRAFT_NOT_TERMINATED:
+                    pass
+
+                elif status_group == TaskStateGroups.TERMINATED:
+                    if not pck._has_final_update():
+                        self._state = TaskState.FETCHING_RESOURCE_LIST #1
+                        self._start_fetch_resource_list(pck)
+                    else:
+                        self._state = TaskState.TERMINATED # with error
+                        # TODO _on_end_of_life
 
     def stop_packet(self, pck, kill_jobs):
         self._stop_packet(pck, StopMode.STOP if kill_jobs else StopMode.STOP_GRACEFULLY)
@@ -659,7 +714,6 @@ class StopMode(object):
 
 # Not task state actually
 class TaskState(object):
-    NONE = 0
     CREATING = 1
     STARTING = 3
     CHECKING_START_ERROR = 4 # permanent or temporary
