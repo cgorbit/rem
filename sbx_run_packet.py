@@ -7,6 +7,7 @@ import base64
 import socket
 import threading
 from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
+import rem.xmlrpc
 import rem.rem_logging
 
 import rem.sandbox_packet
@@ -38,6 +39,21 @@ class Context(object):
 rem.rem_logging.reinit_logger(Context())
 
 
+def with_task_id(f):
+    def impl(self, task_id, *args):
+        self._check_task_id(task_id)
+
+        return f(self, *args)
+
+    impl.__name__ = f.__name__
+
+    return impl
+
+
+class WrongTaskId(RuntimeError):
+    pass
+
+
 class RpcMethods(object):
     def __init__(self, pck, task_id):
         self.pck = pck
@@ -46,25 +62,25 @@ class RpcMethods(object):
     def _listMethods(self):
         return list_public_methods(self)
 
-    def _check_task_id(self, task_id): # TODO Use decorator
+    def _check_task_id(self, task_id):
         if task_id != self.task_id:
             raise WrongTaskId()
 
-    def rpc_restart(self, task_id):
-        self._check_task_id(task_id)
+    @with_task_id
+    def rpc_restart(self):
         self.pck.restart()
 
-    def rpc_stop(self, task_id, kill_jobs):
-        self._check_task_id(task_id)
+    @with_task_id
+    def rpc_stop(self, kill_jobs):
         self.pck.stop(kill_jobs)
 
-    def rpc_cancel(self, task_id):
-        self._check_task_id(task_id)
+    @with_task_id
+    def rpc_cancel(self):
         self.pck.cancel()
 
-    def rpc_ping(self, task_id):
-        self._check_task_id(task_id)
-        return self.task_id
+    @with_task_id
+    def rpc_ping(self):
+        pass
 
 
 class XMLRPCServer(SimpleXMLRPCServer):
@@ -80,6 +96,88 @@ def _create_rpc_server(pck, opts):
     threading.Thread(target=srv.serve_forever).start()
 
     return srv
+
+
+class RemNotifier(object):
+    def __init__(self, addr):
+        self._proxy = rem.xmlrpc.ServerProxy('http://' + addr)
+        self._pending_update = None
+        self._pck_finished = False
+        self._should_stop_max_time = None
+        self._lock = threading.Lock()
+        self._changed = threading.Condition(self._lock)
+        self._worker_thread = ProfiledThread(target=self._loop, name_prefix='RemNotifier')
+        self._worker_thread.start()
+
+    def stop(self, timeout=0):
+        with self._lock:
+            if self._should_stop_max_time:
+                raise RuntimeError()
+
+            self._should_stop_max_time = time.time() + timeout
+            self._changed.notify()
+
+        self._worker_thread.join()
+
+    def send_update(self, state):
+        with self._lock:
+            self._pending_update = state
+            self._changed.notify()
+
+    def notify_finished(self):
+        with self._lock:
+            self._pck_finished = True
+            self._changed.notify()
+
+    def _loop(self):
+        next_try_min_time = 0
+
+        while True:
+            with self._lock:
+                while True:
+                    now = time.time()
+
+                    if self._should_stop_max_time:
+                        if now > self._should_stop_max_time \
+                            or self._pending_update and self._pck_finished \
+                                and next_try_min_time > self._should_stop_max_time:
+                        return
+
+                    if self._pending_update or self._pck_finished:
+                        deadline = next_try_min_time
+
+                        if now > deadline:
+                            break
+
+                    else:
+                        deadline = None
+
+                    self._changed.wait(deadline - now)
+
+                update, self._pending_update = self._pending_update, None
+
+            if update:
+raise NotImplementedError() # TODO task_id
+                try:
+                    self._proxy.up...date(update)
+                except:
+                    with self._lock:
+                        if not self._pending_update:
+                            self._pending_update = update
+
+                        next_try_min_time = time.time() + self._retry_delay
+                        continue
+
+            with self._lock:
+                if not(self._pck_finished and not self._pending_update):
+                    continue
+
+raise NotImplementedError() # TODO task_id
+            try:
+                self._proxy.set_finished()
+            except:
+                next_try_min_time = time.time() + self._retry_delay
+                continue
 
 
 if __name__ == '__main__':
@@ -101,18 +199,20 @@ if __name__ == '__main__':
 
     pck.vivify_jobs_waiting_stoppers()
 
-    def on_update(state_history, detailed_status):
-        pass # TODO
+    rem_notifier = RemNotifier(opts.rem_server_addr)
 
-    pck.start(opts.work_dir, opts.io_dir, on_update)
+    rem_notifier.send_update(pck.produce_rem_update_message())
+
+    pck.start(opts.work_dir, opts.io_dir, rem_notifier.send_update)
 
     rpc_server = _create_rpc_server(pck, opts)
 
     pck.join()
-    rpc_server.shutdown()
-    rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
+    rem_notifier.notify_finished()
 
-# TODO
+    rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
+    rpc_server.shutdown()
+    rem_notifier.stop(30.0)
 
     with open(opts.result_file, 'w') as out:
-        pass # TODO
+        pickle.dump(pck.produce_rem_update_message(), out, 2)

@@ -35,29 +35,34 @@ class _ExecutorOps(object):
         return self.pck.get_io_directory()
 
     def on_state_change(self):
-    #def set_successfull_state(self):
         pck = self.pck
 
         graph = pck._graph_executor
         pck = self.pck
 
         pck._update_state(graph.state)
-        pck._last_detailed_status = graph.produce_detailed_status()
+        self._has_updates = True
 
-        if graph.state == GraphState.SUCCESSFULL:
+        if graph.state in [GraphState.SUCCESSFULL, GraphState.ERROR, GraphState.SUSPENDED] \
+            or graph.state == GraphState.TIME_WAIT \
+                and graph.get_nearest_retry_deadline() - time.time() > pck._max_time_wait:
+
             pck._finished = True
-            logging.debug('+++ set_successfull_state')
-        elif graph.state == GraphState.ERROR:
-            pck._finished = True
-            #pck._failed = True
-            logging.debug('+++ set_errored_state')
 
         pck._something_changed.notify()
 
+    #def _prepare_update(self):
+        #pck = self.pck
+
+        #pck._succeeded_jobs = graph.get_succeeded_jobs()
+        #pck._last_detailed_status = graph.produce_detailed_status()
+
+        #pck._has_updates = True
+
     def job_done_successfully(self, job_id):
-        pass # TODO Notify rem_server for job_done_tag
-        #self.pck._something_changed.notify()
-        #logging.debug('+++ job_done_successfully')
+        # TODO Notify rem_server for job_done_tag
+        self._has_updates = True
+        self.pck._something_changed.notify()
 
     def create_job_runner(self, job):
         return rem.job.JobRunner(self.pck, job) # brain damage
@@ -72,7 +77,7 @@ class Packet(object):
         self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
         self.history = []
         self._finished = False
-        #self._failed = False
+        self._has_updates = False
         self._init_non_persistent()
 
         self.state = None
@@ -182,7 +187,6 @@ class Packet(object):
                 raise RuntimeError("Already finished")
             self._cancelled = True
             self._graph_executor.cancel()
-            self._something_changed.notify()
 
 # ATW NOT USED
     def restart(self):
@@ -193,22 +197,32 @@ class Packet(object):
                 raise RuntimeError("Already cancelled")
             self._graph_executor.restart()
 
+    def produce_rem_update_message(self):
+        graph = self._graph_executor
+
+        return {
+            'history': list(self.history),
+            'detailed_status': graph.produce_detailed_status(),
+            'succeed_jobs': graph.get_succeeded_jobs(),
+        }
+
+    def _send_update(self):
+        self._on_update(self.produce_detailed_status())
+
     def _main_loop(self):
         logging.debug('+ Packet.run')
 
         while True:
             with self._lock:
-                #if self.state == PacketState.TIME_WAIT:
-                # WTF
-
-                #while self._graph_executor.can_run_jobs_right_now():
                 while self._graph_executor.state & GraphState.PENDING_JOBS:
                     self._start_one_another_job()
 
-                self._on_update(self.history, self._last_detailed_status)
+                if self._has_updates:
+                    self._send_update()
+                    self._has_updates = False
 
                 if self._finished:
-                    return
+                    break
 
                 self._something_changed.wait()
 
@@ -242,13 +256,9 @@ class Packet(object):
 
         with self._lock:
             self._graph_executor.apply_jobs_results()
-            self._something_changed.notify() # For TIME_WAIT, SUSPENDED
 
     def create_file_handles(self, job):
         return self._graph_executor.create_job_file_handles(job)
-
-
-
 
     #def __get_sbx_state__(self):
         #sdict = self.__dict__.copy()

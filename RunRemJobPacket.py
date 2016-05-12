@@ -34,11 +34,6 @@ class RunRemJobPacket(SandboxTask):
         resource_type = rt.REM_JOBPACKET_EXECUTION_SNAPSHOT
         required = False
 
-    class InstanceId(parameters.SandboxStringParameter):
-        name = "instance_id"
-        description = "instance_id"
-        required = True
-
     class RemServerAddr(parameters.SandboxStringParameter):
         name = "rem_server_addr"
         description = "rem_server_addr"
@@ -59,7 +54,6 @@ class RunRemJobPacket(SandboxTask):
         required = True
 
     input_parameters = [
-        InstanceId,
         RemServerAddr,
         Executor,
         ExecutionSnapshotData,
@@ -121,7 +115,7 @@ class RunRemJobPacket(SandboxTask):
             './executor/sbx_run_packet.py',
                 '--work-dir', 'work',
                 '--io-dir',   'io',
-                '--instance-id', self.ctx['instance_id'],
+                '--task-id', self.id, # TODO
                 '--rem-server-addr', self.ctx['rem_server_addr'],
                 '--result-file=result.json',
         ]

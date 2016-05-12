@@ -88,7 +88,7 @@ class ActionQueue(object):
 
 class TaskStateGroups(object):
     DRAFT = 1
-    AFTER_DRAFT_NOT_TERMINATED = 2
+    ACTIVE = 2
     TERMINATED = 3
     ANY = 4
 
@@ -174,7 +174,18 @@ class SandboxTaskStateAwaiter(object):
 
     @staticmethod
     def _in_status_group(self, status, group):
-        raise NotImplementedError()
+        if group == TaskStateGroups.ANY:
+            return True
+
+        if status == 'DRAFT':
+            return group == TaskStateGroups.DRAFT
+
+        elif status in ['SUCCESS', 'RELEASING', 'RELEASED', 'FAILURE', 'DELETING',
+                        'DELETED', 'NO_RES', 'EXCEPTION', 'TIMEOUT']:
+            return group == TaskStateGroups.TERMINATED
+
+        else
+            return group == TaskStateGroups.ACTIVE
 
 
 class RemotePacketsDispatcher(object):
@@ -504,7 +515,7 @@ class RemotePacketsDispatcher(object):
                 if status_group == TaskStateGroups.DRAFT:
                     raise AssertionError()
 
-                elif status_group == TaskStateGroups.AFTER_DRAFT_NOT_TERMINATED:
+                elif status_group == TaskStateGroups.ACTIVE:
                     self._state = TaskState.STARTED
 
                 elif status_group == TaskStateGroups.TERMINATED:
@@ -522,7 +533,7 @@ class RemotePacketsDispatcher(object):
                         self._state = TaskState.STARTING
                         self._start_start_sandbox_task(pck)
 
-                elif status_group == TaskStateGroups.AFTER_DRAFT_NOT_TERMINATED:
+                elif status_group == TaskStateGroups.ACTIVE:
                     self._state = TaskState.STARTED
 
                 elif status_group == TaskStateGroups.TERMINATED:
@@ -533,7 +544,7 @@ class RemotePacketsDispatcher(object):
                 if status_group == TaskStateGroups.DRAFT:
                     raise AssertionError()
 
-                elif status_group == TaskStateGroups.AFTER_DRAFT_NOT_TERMINATED:
+                elif status_group == TaskStateGroups.ACTIVE:
                     pass
 
                 elif status_group == TaskStateGroups.TERMINATED:

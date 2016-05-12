@@ -180,6 +180,7 @@ class JobGraphExecutor(Unpickable(
     def is_stopping(self):
         return False
 
+# TODO Use ids from delayed_executor as in sandbox_remote_packet
     def _register_stop_waiting(self, job_id, deadline):
         stop_id = None
         stop_waiting = lambda : self._ops.stop_waiting(stop_id) # TODO BACK_REFERENCE
@@ -196,6 +197,11 @@ class JobGraphExecutor(Unpickable(
             self.jobs_to_run.add(job_id)
 
         self.jobs_to_retry.clear()
+
+    def get_nearest_retry_deadline(self):
+        if not self.jobs_to_retry:
+            raise ValueError("No jobs to retry")
+        return min(deadline for job_id, cancel, deadline in self.jobs_to_retry.values())
 
     def stop_waiting(self, stop_id):
         descr = self.jobs_to_retry.pop(stop_id, None)
@@ -521,6 +527,7 @@ class JobGraphExecutor(Unpickable(
 
     def cancel(self): # for SandboxPacket
         self._kill_jobs_drop_results()
+        self._update_state() # FIXME XXX
 
     #def is_stopped(self):
         #return self.dont_run_new_jobs and not self.has_running_jobs()
