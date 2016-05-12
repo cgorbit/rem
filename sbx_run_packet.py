@@ -99,14 +99,19 @@ def _create_rpc_server(pck, opts):
 
 
 class RemNotifier(object):
-    def __init__(self, addr):
-        self._proxy = rem.xmlrpc.ServerProxy('http://' + addr)
+    DEFAULT_PROXY_TIMEOUT = 20.0
+
+    def __init__(self, addr, task_id, on_emergency_fail, proxy_timeout=DEFAULT_PROXY_TIMEOUT):
+        self._proxy = rem.xmlrpc.ServerProxy('http://' + addr, timeout=proxy_timeout)
+        self._on_emergency_fail = on_emergency_fail
+        self._task_id = task_id
         self._pending_update = None
         self._pck_finished = False
         self._should_stop_max_time = None
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
         self._worker_thread = ProfiledThread(target=self._loop, name_prefix='RemNotifier')
+        self._worker_thread.daemon = True # FIXME See failed[0]
         self._worker_thread.start()
 
     def stop(self, timeout=0):
@@ -128,6 +133,24 @@ class RemNotifier(object):
         with self._lock:
             self._pck_finished = True
             self._changed.notify()
+
+    def _send(self, send):
+        try:
+            send()
+        except xmlrpclib.Fault as e:
+            #if 'WrongTaskId' in e.faultString:
+                #self._on_task_id_mismatch():
+            try:
+                self._on_emergency_fail():
+            except:
+                pass
+
+            # FIXME XXX Fail in all cases here?
+            raise RuntimeError("Failed to send data to rem server: %s" % e.faultString)
+        except:
+            return False
+        else:
+            return True
 
     def _loop(self):
         next_try_min_time = 0
@@ -157,10 +180,8 @@ class RemNotifier(object):
                 update, self._pending_update = self._pending_update, None
 
             if update:
-raise NotImplementedError() # TODO task_id
-                try:
-                    self._proxy.up...date(update)
-                except:
+raise NotImplementedError("write name to sandbox_remote_packet.py")
+                if not self._send(lambda : self._proxy.up...date(self._task_id, update)):
                     with self._lock:
                         if not self._pending_update:
                             self._pending_update = update
@@ -172,12 +193,11 @@ raise NotImplementedError() # TODO task_id
                 if not(self._pck_finished and not self._pending_update):
                     continue
 
-raise NotImplementedError() # TODO task_id
-            try:
-                self._proxy.set_finished()
-            except:
+raise NotImplementedError("write name to sandbox_remote_packet.py")
+            if self._send(lambda : self._proxy.set_finished(self._task_id)):
+                return
+            else:
                 next_try_min_time = time.time() + self._retry_delay
-                continue
 
 
 if __name__ == '__main__':
@@ -199,7 +219,13 @@ if __name__ == '__main__':
 
     pck.vivify_jobs_waiting_stoppers()
 
-    rem_notifier = RemNotifier(opts.rem_server_addr)
+    failed = [False]
+
+    def on_notifier_fail():
+        failed[0] = True
+        pck.stop(kill_jobs=True)
+
+    rem_notifier = RemNotifier(opts.rem_server_addr, on_emergency_fail=on_notifier_fail)
 
     rem_notifier.send_update(pck.produce_rem_update_message())
 
@@ -208,7 +234,9 @@ if __name__ == '__main__':
     rpc_server = _create_rpc_server(pck, opts)
 
     pck.join()
-    rem_notifier.notify_finished()
+
+    if not finshed[0]:
+        rem_notifier.notify_finished()
 
     rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
     rpc_server.shutdown()
