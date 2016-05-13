@@ -327,9 +327,8 @@ class RemotePacketsDispatcher(object):
                 if pck._target_stop_mode:
                     return
 
-                pck._state = TaskState.TERMINATED
                 pck._exception = e
-                pck._on_end_of_life()
+                pck._mark_terminated()
 
         try:
             task = self._sbx_create_task(pck)
@@ -452,12 +451,7 @@ class RemotePacketsDispatcher(object):
 
     def _execute_scheduled(self, pck, id, impl):
         with pck.lock:
-            if not pck._sched:
-                if pck._does_reach_end_of_life():
-                    pck._on_end_of_life()
-                return
-
-            elif pck._sched.id != id:
+            if not pck._sched or pck._sched.id != id:
                 return
 
             pck._sched = None
@@ -507,7 +501,7 @@ class RemotePacketsDispatcher(object):
                             pck._start_packet_stop(pck)
 
             if pck._target_stop_mode != StopMode.CANCEL:
-                pck._update_graph(state)
+                pck._update_graph(state, is_final)
 
     def _on_task_status_change(self, task_id, job_id, status_group):
         #with self.lock:
@@ -551,8 +545,7 @@ class RemotePacketsDispatcher(object):
 
                 if status_group == TaskStateGroups.DRAFT:
                     if pck._is_start_error_permanent:
-                        pck._state = TaskState.TERMINATED # with error
-                        # TODO _on_end_of_life
+                        pck._mark_terminated()
                     else:
                         pck._state = TaskState.STARTING
                         self._start_start_sandbox_task(pck)
@@ -572,12 +565,11 @@ class RemotePacketsDispatcher(object):
                     pass
 
                 elif status_group == TaskStateGroups.TERMINATED:
-                    if not pck._has_final_update():
+                    if pck._has_final_update:
+                        pck._mark_terminated()
+                    else:
                         pck._state = TaskState.FETCHING_RESOURCE_LIST #1
                         self._start_fetch_resource_list(pck)
-                    else:
-                        pck._state = TaskState.TERMINATED # with error
-                        # TODO _on_end_of_life
 
     def stop_packet(self, pck, kill_jobs):
         self._stop_packet(pck, StopMode.STOP if kill_jobs else StopMode.STOP_GRACEFULLY)
@@ -592,8 +584,7 @@ class RemotePacketsDispatcher(object):
 
             def really_cancel():
                 pck._drop_sched_if_need()
-                pck._state = TaskState.TERMINATED
-                pck._on_end_of_life()
+                pck._mark_terminated()
 
             pck._target_stop_mode = stop_mode
 
@@ -786,8 +777,13 @@ class SandboxRemotePacket(object):
         self._sandbox_task_id = None
         self._sched = None
         self._peer_addr = None
+        self._has_final_update = False
 
         remote_packets_dispatcher.register_packet(self)
+
+    def _mark_terminated(self):
+        pck._state = TaskState.TERMINATED
+        self._ops._on_packet_terminated()
 
     def cancel(self):
         remote_packets_dispatcher.cancel_packet(self)
@@ -801,12 +797,13 @@ class SandboxRemotePacket(object):
     def get_result(self):
         raise NotImplementedError()
 
-    def _on_update(self, history, jobs):
+    def _update_graph(self, state, is_final):
         assert not self._cancelled
-        self._ops._on_sandbox_packet_update(history, jobs)
 
-    def _on_end_of_life(self):
-        self._ops._on_packet_terminated()
+        self.__last_state = state # TODO
+        self._has_final_update = is_final
+
+        self._ops._on_sandbox_packet_update(state, is_final)
 
     def _drop_sched_if_need(self):
         if self._sched:
@@ -870,18 +867,18 @@ class SandboxJobGraphExecutorProxy(object):
             # (WORKING | CANCELLED) || (WORKING | SUSPENDED)
 
 ########### Ops for _remote_packet
-    def _on_sandbox_packet_update(self, history, jobs_statuses):
+    def _on_sandbox_packet_update(self, state, is_final):
         with self.lock:
             if self.cancelled:
                 return
 
-            self.remote_history = history # TODO
-            self.detailed_status = jobs_statuses
+            self.__last_state = state # TODO
 
     # on sandbox task stopped + resources list fetched
     def _on_packet_terminated(self, how):
-        self._do_on_packet_terminated(how)
-        self._update_state()
+        with self.lock:
+            self._do_on_packet_terminated(how)
+            self._update_state()
 
     def _do_on_packet_terminated(self):
         def on_stop():
@@ -890,48 +887,47 @@ class SandboxJobGraphExecutorProxy(object):
             self._stop_promise = None
             self._ops.on_job_graph_becomes_null()
 
-        with self.lock:
             res = self._remote_packet.get_result()
 
-            if self.cancelled:
-                self.cancelled = False
-                self.remote_history = []
-                self.detailed_status = {}
-                on_stop()
-                return
-
-            if res.exceptioned: # TODO Rename
-                logging.warning('...')
-
-                # XXX TODO XXX Rollback history/Status to prev state
-
-                if self.do_not_run:
-                    on_stop()
-                else:
-                    self._remote_packet = self._create_remote_packet()
-
-                return
-
-            # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
-            # (TODO Support this rule in PacketBase)
-
-            if res.status == GraphState.TIME_WAIT:
-                self.time_wait_deadline = res.time_wait_deadline
-                self.time_wait_sched = \
-                    delayed_executor.schedule(self._stop_time_wait,             # TODO Fix races
-                                              deadline=self.time_wait_deadline)
-
-            elif res.status == GraphState.SUCCESSFULL:
-                self.result = True
-                self._result_resource_id = res.result_resource_id
-
-            elif res.status == GraphState.ERROR:
-                self.result = False
-
-            self._result_snapshot_resource_id = res.snapshot_id \
-                if res.status != GraphState.SUCCESSFULL else None
-
+        if self.cancelled:
+            self.cancelled = False
+            self.remote_history = []
+            self.detailed_status = {}
             on_stop()
+            return
+
+        if res.exceptioned: # TODO Rename
+            logging.warning('...')
+
+            # XXX TODO XXX Rollback history/Status to prev state
+
+            if self.do_not_run:
+                on_stop()
+            else:
+                self._remote_packet = self._create_remote_packet()
+
+            return
+
+        # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
+        # (TODO Support this rule in PacketBase)
+
+        if res.status == GraphState.TIME_WAIT:
+            self.time_wait_deadline = res.time_wait_deadline
+            self.time_wait_sched = \
+                delayed_executor.schedule(self._stop_time_wait,             # TODO Fix races
+                                            deadline=self.time_wait_deadline)
+
+        elif res.status == GraphState.SUCCESSFULL:
+            self.result = True
+            self._result_resource_id = res.result_resource_id
+
+        elif res.status == GraphState.ERROR:
+            self.result = False
+
+        self._result_snapshot_resource_id = res.snapshot_id \
+            if res.status != GraphState.SUCCESSFULL else None
+
+        on_stop()
 
     def _stop_time_wait(self):
         with self.lock:
