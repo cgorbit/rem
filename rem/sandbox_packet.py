@@ -77,6 +77,7 @@ class Packet(object):
         self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
         self.history = []
         self._finished = False
+        self._cancelled = False
         self._has_updates = False
         self._init_non_persistent()
 

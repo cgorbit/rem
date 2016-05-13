@@ -403,7 +403,9 @@ class Sharer(object):
             logging.debug("Task statuses: %s" % statuses) # TODO Comment out
 
             done = []
-            for task_id, status in statuses.iteritems():
+            for task_id in in_progress.keys():
+                status = statuses.get(task_id)
+
                 if status in noop_sandbox_statuses:
                     continue
 
@@ -413,12 +415,12 @@ class Sharer(object):
                     done.append(job)
                     logging.debug('Upload task=%d in SUCCESS for %s' % (task_id, job))
 
-                elif status == 'FAILURE':
+                elif status in ['FAILURE', 'EXCEPTION'] or status is None:
                     logging.warning("Task %d in FAILURE. Will create new task" % task_id)
                     self._schedule_retry(job, self.Action.CREATE_UPLOAD_TASK, delay=5.0)
 
                 else:
-                    logger.error("Unknown task status %s for task=%d, %s" % (status, task_id, job))
+                    logging.error("Unknown task status %s for task=%d, %s" % (status, task_id, job))
                     self._set_promise(job, None,
                         RuntimeError("Unknown task status %s for task_id=%d" % (status, task_id)))
 

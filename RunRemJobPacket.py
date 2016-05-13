@@ -119,7 +119,7 @@ class RunRemJobPacket(SandboxTask):
             './executor/sbx_run_packet.py',
                 '--work-dir', 'work',
                 '--io-dir',   'io',
-                '--task-id', self.id, # FIXME
+                '--task-id', str(self.id),
                 '--rem-server-addr', self.ctx['rem_server_addr'],
                 '--result-snapshot-file=result-snapshot',
                 #'--result-file=result.json', # FIXME Don't remember

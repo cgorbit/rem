@@ -2,6 +2,7 @@
 
 import os
 import cPickle as pickle
+import time
 import argparse
 import base64
 import socket
@@ -9,11 +10,11 @@ import threading
 from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
 import xmlrpclib
 import rem.xmlrpc
-import rem.rem_logging
 from rem.sandbox_remote_packet import WrongTaskIdError
 
 import rem.sandbox_packet
 import rem.delayed_executor
+from rem.profile import ProfiledThread
 
 
 def parse_arguments():
@@ -41,6 +42,7 @@ class Context(object):
 
 rem.rem_logging.reinit_logger(Context())
 
+from rem.rem_logging import logger as logging
 
 def with_task_id(f):
     def impl(self, task_id, *args):
@@ -91,7 +93,7 @@ def _create_rpc_server(pck, opts):
     srv = XMLRPCServer(('::', 0))
 
     #srv.register_introspection_functions()
-    srv.register_task(RpcMethods(pck, opts.task_id))
+    srv.register_instance(RpcMethods(pck, opts.task_id))
 
     threading.Thread(target=srv.serve_forever).start()
 
@@ -99,6 +101,8 @@ def _create_rpc_server(pck, opts):
 
 
 class RemNotifier(object):
+    _RETRY_DELAY = 10.0
+
     class RetriableError(RuntimeError):
         pass
 
@@ -163,7 +167,7 @@ class RemNotifier(object):
                     if not self._pending_update:
                         self._pending_update = (update, is_final)
 
-                    next_try_min_time = time.time() + self._retry_delay
+                    next_try_min_time = time.time() + self._RETRY_DELAY
 
             else:
                 if is_final:

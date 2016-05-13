@@ -203,6 +203,9 @@ class JobGraphExecutor(Unpickable(
             raise ValueError("No jobs to retry")
         return min(deadline for job_id, cancel, deadline in self.jobs_to_retry.values())
 
+    def get_succeeded_jobs(self):
+        return list(self.succeed_jobs)
+
     def stop_waiting(self, stop_id):
         descr = self.jobs_to_retry.pop(stop_id, None)
 
@@ -335,6 +338,8 @@ class JobGraphExecutor(Unpickable(
 
         runner = self._ops.create_job_runner(job)
         self._active_jobs.add(runner)
+
+        self._update_state()
 
         return runner
 
