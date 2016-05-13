@@ -103,7 +103,11 @@ class RunRemJobPacket(SandboxTask):
         os.mkdir('custom_resources')
 
         executor_path = self.sync_resource(int(self.ctx['executor_resource']))
-        os.symlink(executor_path, 'executor')
+        if False:
+            os.symlink(executor_path, 'executor')
+        else:
+            os.mkdir('executor')
+            run_process(['tar', '-C', 'executor', '-xf', executor_path])
 
         self.__init_custom_resources_param()
 

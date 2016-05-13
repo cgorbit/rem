@@ -17,6 +17,7 @@ import signal
 import argparse
 import tempfile
 import shutil
+import subprocess
 
 from rem import constants, osspec
 from rem import traced_rpc_method
@@ -880,15 +881,25 @@ def _share_sandbox_executor(ctx):
         os.chmod(dir, 0775)
         _copy_executor_files(dir)
 
+        archive_basename = 'rem_executor.tar'
+        archive_filename = dir + '/' + archive_basename
+
+        subprocess.check_call(
+            ['tar', '-C', dir, '-cf', archive_filename, 'sbx_run_packet.py', 'rem'])
+
         id = ctx.sbx_resource_sharer.share(
             'REM_JOBPACKET_EXECUTOR',
             description='%s @ %s' % (
                 os.uname()[1],
                 datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%dT%H:%M:%S')
             ),
-            name='executor',
-            filename=dir,
-            is_root=True,
+
+            #name='executor',
+            #filename=dir,
+            #is_root=True,
+            name=archive_basename,
+            filename=archive_filename,
+
             arch='linux',
             ttl=10 * 86400, # TODO
         )

@@ -159,7 +159,7 @@ class Client(object):
             self._update()
 
         def start(self):
-            self._start(self._api, id)
+            self._start(self._api, self.id)
 
         @staticmethod
         def _start(api, id):
@@ -172,7 +172,7 @@ class Client(object):
             if res['status'] == 'ERROR':
                 raise RuntimeError(res['message'])
 
-    def start_task(self, id)
+    def start_task(self, id):
         self.TaskProxy._start(self, id)
 
     def Task(self, id):

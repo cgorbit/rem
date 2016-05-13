@@ -10,6 +10,7 @@ from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
 import xmlrpclib
 import rem.xmlrpc
 import rem.rem_logging
+from rem.sandbox_remote_packet import WrongTaskIdError
 
 import rem.sandbox_packet
 import rem.delayed_executor
@@ -52,10 +53,6 @@ def with_task_id(f):
     return impl
 
 
-class WrongTaskId(RuntimeError):
-    pass
-
-
 # XXX FIXME Use queue to execute methods?
 class RpcMethods(object):
     def __init__(self, pck, task_id):
@@ -67,7 +64,7 @@ class RpcMethods(object):
 
     def _check_task_id(self, task_id):
         if task_id != self.task_id:
-            raise WrongTaskId()
+            raise WrongTaskIdError()
 
     @with_task_id
     def rpc_restart(self):
@@ -141,8 +138,8 @@ class RemNotifier(object):
 
                     if self._should_stop_max_time:
                         if now > self._should_stop_max_time \
-                            or next_try_min_time > self._should_stop_max_time:
-                        return
+                                or next_try_min_time > self._should_stop_max_time:
+                            return
 
                     if self._pending_update:
                         deadline = next_try_min_time

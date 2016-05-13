@@ -238,7 +238,7 @@ class Sharer(object):
                                 'Failed to share file %s: %s' % (job.filename, e)))
                 return
 
-            logging.debug('sky share sucessfully done for %s' % job)
+            logging.debug('sky share successfully done for %s: %s' % (job, torrent_id))
 
             with self.lock:
                 job.torrent_id = torrent_id
@@ -396,11 +396,11 @@ class Sharer(object):
             except Exception as e:
                 logging.warning("Failed to get sandbox tasks' statuses: %s" % e)
                 continue
+            finally:
+                next_poll_time = max(next_poll_time + poll_interval, time.time())
+                T('wait1_next_poll_time=%s' % next_poll_time)
 
             logging.debug("Task statuses: %s" % statuses) # TODO Comment out
-
-            next_poll_time = max(next_poll_time + poll_interval, time.time())
-            T('wait1_next_poll_time=%s' % next_poll_time)
 
             done = []
             for task_id, status in statuses.iteritems():
