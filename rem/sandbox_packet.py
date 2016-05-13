@@ -188,6 +188,9 @@ class Packet(object):
             self._cancelled = True
             self._graph_executor.cancel()
 
+    def is_cancelled(self):
+        return self._cancelled
+
 # ATW NOT USED
     def restart(self):
         with self.lock:
@@ -207,7 +210,7 @@ class Packet(object):
         }
 
     def _send_update(self):
-        self._on_update(self.produce_detailed_status())
+        self._on_update(self.produce_rem_update_message())
 
     def _main_loop(self):
         logging.debug('+ Packet.run')

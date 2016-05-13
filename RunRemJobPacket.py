@@ -115,9 +115,10 @@ class RunRemJobPacket(SandboxTask):
             './executor/sbx_run_packet.py',
                 '--work-dir', 'work',
                 '--io-dir',   'io',
-                '--task-id', self.id, # TODO
+                '--task-id', self.id, # FIXME
                 '--rem-server-addr', self.ctx['rem_server_addr'],
-                '--result-file=result.json',
+                '--result-snapshot-file=result-snapshot',
+                #'--result-file=result.json', # FIXME Don't remember
         ]
 
         if custom_resources:

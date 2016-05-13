@@ -4,10 +4,9 @@ import sys
 import time
 import base64
 import cPickle
-from SimpleXMLRPCServer import SimpleXMLRPCServer
+from rem.xmlrpc import SimpleXMLRPCServer, ServerProxy as XMLRPCServerProxy
 import threading
 from Queue import Queue as ThreadSafeQueue
-import xmlrpclib
 
 from rem.profile import ProfiledThread
 import sandbox_packet
@@ -184,7 +183,7 @@ class SandboxTaskStateAwaiter(object):
                         'DELETED', 'NO_RES', 'EXCEPTION', 'TIMEOUT']:
             return group == TaskStateGroups.TERMINATED
 
-        else
+        else:
             return group == TaskStateGroups.ACTIVE
 
 
@@ -204,8 +203,9 @@ class RemotePacketsDispatcher(object):
 
     def _create_rpc_server(self):
         srv = SimpleXMLRPCServer(self._rpc_listen_addr)
-        srv.register_function(self._rpc_ping, 'ping')
-        srv.register_function(self._rpc_set_jobs_statuses, 'set_jobs_statuses')
+        #srv.register_function(self._on_rpc_ping, 'ping') # FIXME Don't remember what for
+        srv.register_function(self._on_rpc_update_graph, 'update_graph')
+        #srv.register_function(self._on_rpc_mark_as_finished, 'mark_as_finished')
         return srv
 
         #def start(self, io_invoker, sandbox):
@@ -247,7 +247,7 @@ class RemotePacketsDispatcher(object):
     # so REM-server will register instance's remote_addr after
     # loading old backup (after server's fail)
 
-   def register_packet(self, pck):
+    def register_packet(self, pck):
         self._start_create_sandbox_task(pck)
 
 # XXX FIXME We can't identify packet by pck_id in async/delayed calls
@@ -449,15 +449,14 @@ class RemotePacketsDispatcher(object):
         # When impl stop it will set ._sched again or modify other fields of pck
         impl(pck)
 
-    def _on_graph_update(self, peer_addr, task_id, jobs, finished_status):
+    #def _on_graph_update(self, peer_addr, task_id, jobs, finished_status):
+    def _on_rpc_update_graph(self, task_id, peer_addr, state, is_final):
         pck = self.by_task_id.get(task_id)
 
         if not pck:
             raise NonExistentInstanceError()
 
         with pck.lock:
-            is_final = ...
-
             assert pck._state not in [
                 TaskState.CREATING,
                 TaskState.TERMINATED,
@@ -477,10 +476,6 @@ class RemotePacketsDispatcher(object):
 
                 if pck._target_stop_mode and not is_final:
                     pck._start_packet_stop(pck)
-
-            # TODO XXX  TODO
-            # XXX  TODO XXX   Я что-то упускаю
-            # TODO XXX  TODO
 
             if pck._target_stop_mode != StopMode.CANCEL:
                 pck._update_graph(jobs, finished_status)
