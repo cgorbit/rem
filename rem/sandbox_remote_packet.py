@@ -3,7 +3,7 @@ import os
 import sys
 import time
 import base64
-import cPickle
+import cPickle as pickle
 from rem.xmlrpc import SimpleXMLRPCServer, ServerProxy as XMLRPCServerProxy
 import threading
 from Queue import Queue as ThreadSafeQueue
@@ -14,6 +14,7 @@ import xmlrpclib
 from rem.profile import ProfiledThread
 import sandbox_packet
 import rem.sandbox as sandbox
+from rem.sandbox_tasks import TaskStateGroups, SandboxTaskStateAwaiter
 from rem_logging import logger as logging
 from rem.future import Promise
 from packet_state import PacketState
@@ -96,115 +97,6 @@ class ActionQueue(object):
                 logging.exception("")
 
 
-class TaskStateGroups(object):
-    DRAFT = 1
-    ACTIVE = 2
-    TERMINATED = 3
-    ANY = 4
-
-
-class SandboxTaskStateAwaiter(object):
-    DEFAULT_UPDATE_INTERVAL = 5.0
-
-    def __init__(self, sandbox, on_status_change, update_interval=DEFAULT_UPDATE_INTERVAL):
-        self._sandbox = sandbox
-        self._on_status_change = on_status_change
-        self._next_job_id = 1
-        self._should_stop = False
-        self._lock = threading.Lock()
-        self._something_happend = threading.Condition(self._lock)
-        self._worker_thread = None
-        self._update_interval = update_interval
-        self._incoming = {}
-
-        self._start()
-
-    def _start(self):
-        self._worker_thread = ProfiledThread(target=self._loop, name_prefix='SbxStateMon')
-        self._worker_thread.start()
-
-    def stop(self):
-        with self._lock:
-            self._should_stop = True
-            self._something_happend.notify()
-
-        self._main_thread.join()
-
-    def await(self, task_id, status_group):
-        with self._lock:
-            job_id = self._next_job_id
-            self._next_job_id += 1
-
-            was_empty = not self._incoming
-
-            self._incoming[task_id] = (job_id, status_group)
-
-            if was_empty:
-                self._something_happend.notify()
-
-        return job_id
-
-    def _loop(self):
-        running = {}
-        next_update_time = time.time() + self._update_interval
-
-        while True:
-            with self._lock:
-                while True:
-                    if self._should_stop:
-                        return
-
-                    if not self._incoming and not running:
-                        deadline = None
-                    else:
-                        now = time.time()
-                        if now > next_update_time:
-                            break
-                        deadline = next_update_time - now
-
-                    self._something_happend.wait(deadline)
-
-                new_jobs, self._incoming = self._incoming, {}
-
-            if new_jobs:
-                for task_id, (job_id, status_group) in new_jobs.items():
-                    running[task_id] = (job_id, status_group)
-
-            try:
-                statuses = self._sandbox.list_task_statuses(running.keys())
-
-            except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
-                pass
-
-            except Exception as e:
-                logging.exception("Can't fetch task statuses from Sandbox")
-
-            else:
-                for task_id, status in statuses.iteritems():
-                    job_id, status_group = running[task_id]
-
-                    if self._in_status_group(status, status_group):
-                        running.pop(task_id)
-                        self._on_status_change(task_id, job_id, status_group)
-
-            next_update_time = time.time() + self._update_interval
-
-    @staticmethod
-    def _in_status_group(status, group):
-        if group == TaskStateGroups.ANY:
-            return True
-
-        if status == 'DRAFT':
-            return group == TaskStateGroups.DRAFT
-
-        elif status in ['SUCCESS', 'RELEASING', 'RELEASED', 'FAILURE', 'DELETING',
-                        'DELETED', 'NO_RES', 'EXCEPTION', 'TIMEOUT']:
-            return group == TaskStateGroups.TERMINATED
-
-        else:
-            return group == TaskStateGroups.ACTIVE
-
-
 class RemotePacketsDispatcher(object):
     _SANDBOX_TASK_CREATION_RETRY_INTERVAL = 10.0
 
@@ -225,21 +117,19 @@ class RemotePacketsDispatcher(object):
         srv.register_function(self._on_rpc_update_graph, 'update_graph')
         return srv
 
-        #def start(self, io_invoker, sandbox):
     def start(self, ctx):
         self._executor_resource_id = ctx.sandbox_executor_resource_id
-        self._rpc_listen_addr = ('ws30-511.search.yandex.net', 8000) # TODO XXX
+        self._rpc_listen_addr = ('ws30-511.search.yandex.net', 8000) # TODO From ctx
         self._rpc_server = self._create_rpc_server()
         ProfiledThread(target=self._rpc_server.serve_forever, name_prefix='SbxRpc').start()
 
-        # Must be shared with all outer sanbox api users
-        self._sbx_invoker = ActionQueue(thread_count=10, thread_name_prefix='SbxIO')
-
         self._rpc_invoker = ActionQueue(thread_count=10, thread_name_prefix='RpcIO')
 
-        self._sandbox = sandbox.Client(ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0, debug=True)
-
-        self._status_awaiter = SandboxTaskStateAwaiter(self._sandbox, self._on_task_status_change)
+# TODO All from ctx
+        self._sbx_invoker = ActionQueue(thread_count=10, thread_name_prefix='SbxIO')
+        self._sandbox = sandbox.Client(
+            ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0, debug=True)
+        self._status_awaiter = SandboxTaskStateAwaiter(self._sandbox)
 
     def stop(self):
         raise NotImplementedError()
@@ -267,9 +157,9 @@ class RemotePacketsDispatcher(object):
     def register_packet(self, pck):
         self._start_create_sandbox_task(pck)
 
-# XXX FIXME We can't identify packet by pck_id in async/delayed calls
-#           because packet may be recreated by PacketBase
-#           (or we must cancel invokers (not only delayed_executor))
+# FIXME We can't identify packet by pck_id in async/delayed calls
+#       because packet may be recreated by PacketBase
+#       (or we must cancel invokers (not only delayed_executor))
 
     def _start_create_sandbox_task(self, pck):
         self._sbx_invoker.invoke(lambda : self._do_create_sandbox_task(pck))
@@ -284,11 +174,14 @@ class RemotePacketsDispatcher(object):
         return self._sandbox.create_task(
             'RUN_REM_JOBPACKET',
             {
+# TODO XXX Кажется, при resume'инге из _start_snapshot_resource_id нужно
+#          использовать не self._executor_resource_id,
+#          а тот executor, на котором первый раз запускался пакет
                 'executor_resource': self._executor_resource_id,
                 'snapshot_data': wrap_string(pck._start_snapshot_data, 79) \
                     if pck._start_snapshot_data \
                     else None,
-                'snapshot_resource': pck._start_snapshot_resource_id,
+                'snapshot_resource_id': pck._start_snapshot_resource_id,
                 'custom_resources': pck._custom_resources,
                 'rem_server_addr': ('%s:%d' % self._rpc_listen_addr),
                 #'instance_id': instance_id,
@@ -370,6 +263,7 @@ class RemotePacketsDispatcher(object):
 
             self.by_task_id[task.id] = pck
 
+        self._wait_task_state(pck)
         self._do_start_sandbox_task(pck)
 
     def _do_start_sandbox_task(self, pck):
@@ -381,7 +275,8 @@ class RemotePacketsDispatcher(object):
         # - final GRAPH_UPDATE
         # - STOP_GRACEFULLY/STOP/CANCEL
 
-        # XXX No task status changes may appear here, because awaiting is not racy
+    # XXX Уже неверно.
+        # No task status changes may appear here, because awaiting is not racy
         # - final GRAPH_UPDATE + task terminated
         # - task terminated wo GRAPH_UPDATE's
 
@@ -394,12 +289,13 @@ class RemotePacketsDispatcher(object):
 
                 # Here we don't know if task is really started
                 pck._is_start_error_permanent = \
-                    isinstance(e, (sandbox.NetworkError, sandbox.ServerInternalError))
+                    not isinstance(e, (sandbox.NetworkError, sandbox.ServerInternalError))
+                    # TODO
 
                 pck._state = TaskState.CHECKING_START_ERROR
                 pck._start_error = e
 
-                pck._wait_task_state(pck, TaskStateGroups.ANY)
+                #pck._wait_task_state(pck, TaskStateGroups.ANY)
 
             return
 
@@ -409,7 +305,7 @@ class RemotePacketsDispatcher(object):
 
             pck._state = TaskState.STARTED
 
-            self._wait_task_state(pck, TaskStateGroups.TERMINATED)
+            #self._wait_task_state(pck, TaskStateGroups.TERMINATED)
 
             assert not pck._peer_addr
             #if self._target_stop_mode:
@@ -422,8 +318,10 @@ class RemotePacketsDispatcher(object):
             # XXX FIXME If firewall has no holes for us,
             # we can't do STOP*, but theoretically can do CANCEL
 
-    def _wait_task_state(self, pck, status_group):
-        pck._status_await_job_id = self._status_awaiter.await(pck._sandbox_task_id, status_group)
+    def _wait_task_state(self, pck):
+        self._status_awaiter.await(
+            pck._sandbox_task_id,
+            self._on_task_status_change)
 
 # The hard way
     # must be called under lock
@@ -467,7 +365,7 @@ class RemotePacketsDispatcher(object):
             raise NonExistentInstanceError()
 
         with pck.lock:
-            # TODO
+            # FIXME
             # pck: connect
             # pck: write
             # rem: enter _on_rpc_update_graph
@@ -480,7 +378,7 @@ class RemotePacketsDispatcher(object):
                 TaskState.CREATING,
                 TaskState.TERMINATED,
                 TaskState.FETCHING_RESOURCE_LIST,
-                TaskState.FETCHING_RESULT_RESOURCE
+                TaskState.FETCHING_FINAL_UPDATE
             ]
 
             if pck._state in [TaskState.STARTING, TaskState.CHECKING_START_ERROR, TaskState.STARTED]:
@@ -503,7 +401,66 @@ class RemotePacketsDispatcher(object):
             if pck._target_stop_mode != StopMode.CANCEL:
                 pck._update_graph(state, is_final)
 
-    def _on_task_status_change(self, task_id, job_id, status_group):
+            if is_final:
+                if pck._target_stop_mode == StopMode.CANCEL \
+                    or state['state'] == GraphState.SUCCESSFULL:
+                    pck._mark_terminated()
+                else:
+                    pck._state = TaskState.FETCHING_RESOURCE_LIST
+                    self._start_fetch_resource_list(pck)
+
+    def _start_fetch_resource_list(self, pck):
+        self._sbx_invoker.invoker(lambda : self._fetch_resource_list(pck))
+
+    def _fetch_resource_list(self, pck):
+        try:
+            ans = self._sandbox.list_task_resources(pck._sandbox_task_id)
+        except:
+            logging.exception('Failed to fetch task %d resources' % pck._sandbox_task_id)
+
+            with pck.lock:
+                if pck._target_stop_mode != StopMode.CANCEL:
+                    self._schedule(pck, self._start_fetch_resource_list, self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
+
+            return
+
+        res_by_type = {
+            resource['type']: resource
+                for resource in ans['items']
+        }
+
+        with pck.lock:
+    # TODO FIXME Don't store/fetch for SUCCESSFULL?
+            pck._snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
+
+            if pck._final_state is None:
+                pck._final_update_url = res_by_type['REM_JOBPACKET_GRAPH_UPDATE']['http']['proxy']
+                pck._state = PacketState.FETCHING_FINAL_UPDATE
+                self._fetch_final_update(pck)
+            else:
+                pck._mark_terminated()
+
+    def _start_fetch_final_update(pck):
+        self._sbx_invoker.invoker(lambda : self._fetch_final_update(pck))
+
+    def _fetch_final_update(pck):
+        try:
+# TODO timeout
+            update_str = requests.get(pck._final_update_url, timeout=30.0)
+        except:
+            logging.exception('Failed to fetch %s' % pck._final_update_url)
+            self._schedule(pck, self._start_fetch_final_update, self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
+            return
+
+        update = pickle.loads(update_str)
+
+        with self.lock:
+            if pck._target_stop_mode != StopMode.CANCEL:
+                pck._update_graph(state, is_final)
+
+            pck._mark_terminated()
+
+    def _on_task_status_change(self, task_id, status_group):
         #with self.lock:
         if True:
             pck = self.by_task_id.get(task_id)
@@ -512,10 +469,9 @@ class RemotePacketsDispatcher(object):
             return
 
         with pck.lock:
-            if pck._status_await_job_id != job_id:
-                return
-
-            pck._status_await_job_id = None
+            #if pck._status_await_job_id != job_id:
+                #return
+            #pck._status_await_job_id = None
 
             state = pck._state
 
@@ -523,7 +479,7 @@ class RemotePacketsDispatcher(object):
                 TaskState.CREATING,
                 TaskState.TERMINATED,
                 TaskState.FETCHING_RESOURCE_LIST,
-                TaskState.FETCHING_RESULT_RESOURCE
+                TaskState.FETCHING_FINAL_UPDATE
             ]
 
     # TODO XXX
@@ -565,7 +521,7 @@ class RemotePacketsDispatcher(object):
                     pass
 
                 elif status_group == TaskStateGroups.TERMINATED:
-                    if pck._has_final_update:
+                    if pck._final_state is not None:
                         pck._mark_terminated()
                     else:
                         pck._state = TaskState.FETCHING_RESOURCE_LIST #1
@@ -590,7 +546,7 @@ class RemotePacketsDispatcher(object):
 
             state = pck._state
 
-            if state in [TaskState.CREATING, TaskState.FETCHING_RESOURCE_LIST, TaskState.FETCHING_RESULT_RESOURCE] \
+            if state in [TaskState.CREATING, TaskState.FETCHING_RESOURCE_LIST, TaskState.FETCHING_FINAL_UPDATE] \
                 or state == TaskState.STARTING and pck._sched:
 
                 really_cancel()
@@ -749,7 +705,7 @@ class TaskState(object):
     STARTED = 6
     TERMINATED = 7
     FETCHING_RESOURCE_LIST = 8
-    FETCHING_RESULT_RESOURCE = 9
+    FETCHING_FINAL_UPDATE = 9
 
 
 class AlreadyTerminated(RuntimeError):
@@ -777,7 +733,7 @@ class SandboxRemotePacket(object):
         self._sandbox_task_id = None
         self._sched = None
         self._peer_addr = None
-        self._has_final_update = False
+        self._final_state = False
 
         remote_packets_dispatcher.register_packet(self)
 
@@ -801,7 +757,9 @@ class SandboxRemotePacket(object):
         assert not self._cancelled
 
         self.__last_state = state # TODO
-        self._has_final_update = is_final
+
+        if is_final:
+            self._final_state = state['state']
 
         self._ops._on_sandbox_packet_update(state, is_final)
 
@@ -812,7 +770,7 @@ class SandboxRemotePacket(object):
 
 def _produce_snapshot_data(pck_id, graph):
     pck = sandbox_packet.Packet(pck_id, graph)
-    return base64.b64encode(cPickle.dumps(pck, 2))
+    return base64.b64encode(pickle.dumps(pck, 2))
 
 
 class SandboxJobGraphExecutorProxy(object):
@@ -908,6 +866,7 @@ class SandboxJobGraphExecutorProxy(object):
 
             return
 
+        # WTF?
         # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
         # (TODO Support this rule in PacketBase)
 

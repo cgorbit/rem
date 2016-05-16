@@ -9,7 +9,7 @@ import cPickle
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
 from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
-from job import Job, JobRunner
+from job import Job, JobRunner, _DEFAULT_STDERR_SUMMAY_LEN as DEFAULT_JOB_MAX_ERR_LEN
 import osspec
 import messages
 from rem_logging import logger as logging
@@ -690,6 +690,10 @@ class PacketBase(Unpickable(
             #if self.state != ImplState.UNINITIALIZED: # TODO
                 #raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
 
+        # FIXME TODO
+            if isinstance(self, SandboxPacket) and max_err_len and max_err_len > DEFAULT_JOB_MAX_ERR_LEN:
+                max_err_len = DEFAULT_JOB_MAX_ERR_LEN
+
             parents = list(set(parents + pipe_parents))
             pipe_parents = list(set(pipe_parents))
 
@@ -748,6 +752,8 @@ class PacketBase(Unpickable(
         all_tags = list(self.all_dep_tags)
 
         status = dict(name=self.name,
+# TODO
+                      sandbox_task_id=None,
                       state=self._repr_state,
                       wait=list(self.wait_dep_tags),
                       all_tags=all_tags,

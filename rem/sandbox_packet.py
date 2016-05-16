@@ -204,11 +204,17 @@ class Packet(object):
     def produce_rem_update_message(self):
         graph = self._graph_executor
 
-        return {
-            'history': list(self.history),
+        state = {
+            #'history': list(self.history), # TODO FIXME
+            'state': self.state,
             'detailed_status': graph.produce_detailed_status(),
             'succeed_jobs': graph.get_succeeded_jobs(),
         }
+
+        if graph.state == GraphState.TIME_WAIT:
+            state['nearest_retry_deadline'] = graph.get_nearest_retry_deadline()
+
+        return state
 
     def _send_update(self):
         self._on_update(self.produce_rem_update_message())
@@ -221,7 +227,7 @@ class Packet(object):
                 while self._graph_executor.state & GraphState.PENDING_JOBS:
                     self._start_one_another_job()
 
-                if self._has_updates:
+                if self._has_updates and not self._finished:
                     self._send_update()
                     self._has_updates = False
 

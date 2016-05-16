@@ -25,8 +25,9 @@ def parse_arguments():
     p.add_argument('--custom-resources', dest='custom_resources')
     p.add_argument('--task-id', dest='task_id', required=True)
     p.add_argument('--rem-server-addr', dest='rem_server_addr', required=True)
-    p.add_argument('--result-file', dest='result_file', default='/dev/stdout') # TODO FIXME
+    #p.add_argument('--result-status-file', dest='result_status_file', default='/dev/stdout')
     p.add_argument('--result-snapshot-file', dest='result_snapshot_file')
+    p.add_argument('--last-update-message-file', dest='last_update_message_file')
 
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument('--snapshot-data', dest='snapshot_data')
@@ -127,9 +128,9 @@ class RemNotifier(object):
 
         self._worker_thread.join()
 
-    def send_update(self, state, is_final):
+    def send_update(self, update, is_final=False):
         with self._lock:
-            self._pending_update = (state, is_final)
+            self._pending_update = (update, is_final)
             self._changed.notify()
 
     def _loop(self):
@@ -193,7 +194,10 @@ if __name__ == '__main__':
 
     pck.vivify_jobs_waiting_stoppers()
 
+    notifier_failed = [False]
+
     def on_notifier_fail():
+        notifier_failed[0] = True
         pck.stop(kill_jobs=True) # FIXME Or cancel (do we need snapshot resource)?
 
     proxy = rem.xmlrpc.ServerProxy('http://' + opts.rem_server_addr, timeout=20.0)
@@ -220,7 +224,7 @@ if __name__ == '__main__':
 
     rem_notifier = RemNotifier(send_update)
 
-    rem_notifier.send_update(pck.produce_rem_update_message(), is_final=False)
+    #rem_notifier.send_update(pck.produce_rem_update_message()) # FIXME
 
     pck.start(opts.work_dir, opts.io_dir, rem_notifier.send_update)
 
@@ -228,11 +232,19 @@ if __name__ == '__main__':
 
     pck.join()
 
+    last_update_message = pck.produce_rem_update_message()
+
+    rem_notifier.send_update(last_update_message, is_final=True)
+
     rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
     rpc_server.shutdown()
 
     rem_notifier.stop(30.0) # FIXME
 
-    if not pck.is_cancelled():
+    #if not pck.is_cancelled():
+    if True:
         with open(opts.result_snapshot_file, 'w') as out:
-            pickle.dump(pck.produce_rem_update_message(), out, 2)
+            pickle.dump(pck, out, 2)
+
+        with open(opts.last_update_message_file, 'w') as out:
+            pickle.dump(last_update_message, out, 2)

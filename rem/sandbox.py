@@ -76,7 +76,7 @@ class _ProxyObject(object):
 
 
 class Client(object):
-    def __init__(self, url, oauth_token, debug=False, timeout=None):
+    def __init__(self, url, oauth_token=None, debug=False, timeout=None):
         self.url = url
         self.oauth_token = oauth_token
         self.debug = debug

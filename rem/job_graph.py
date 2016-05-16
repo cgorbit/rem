@@ -200,7 +200,8 @@ class JobGraphExecutor(Unpickable(
 
     def get_nearest_retry_deadline(self):
         if not self.jobs_to_retry:
-            raise ValueError("No jobs to retry")
+            #raise ValueError("No jobs to retry")
+            return None
         return min(deadline for job_id, cancel, deadline in self.jobs_to_retry.values())
 
     def get_succeeded_jobs(self):

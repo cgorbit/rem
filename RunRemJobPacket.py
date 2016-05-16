@@ -29,8 +29,8 @@ class RunRemJobPacket(SandboxTask):
         multiline = True
 
     class ExecutionSnapshotResource(parameters.ResourceSelector):
-        name = "snapshot_resource"
-        description = "snapshot_resource"
+        name = "snapshot_resource_id"
+        description = "snapshot_resource_id"
         resource_type = rt.REM_JOBPACKET_EXECUTION_SNAPSHOT
         required = False
 
@@ -38,6 +38,8 @@ class RunRemJobPacket(SandboxTask):
         name = "rem_server_addr"
         description = "rem_server_addr"
         required = True
+
+# XXX TODO CACHE LOCALITY
 
     #class CustomResources(parameters.ListRepeater, parameters.SandboxStringParameter):
     #class CustomResources(parameters.DictRepeater, parameters.SandboxStringParameter):
@@ -97,10 +99,20 @@ class RunRemJobPacket(SandboxTask):
     def on_execute(self):
         logging.debug("on_execute work dir: %s" % os.getcwd())
 
-        os.mkdir('work')
-        os.mkdir('python')
-        os.mkdir('io')
         os.mkdir('custom_resources')
+        os.mkdir('python')
+        os.mkdir('work')
+
+        if self.ctx['snapshot_resource_id']:
+            prev_snapshot_path = self.sync_resource(int(self.ctx['snapshot_resource_id']))
+
+            for subdir in ['io', 'root']:
+                shutil.copytree(prev_snapshot_path + '/' + subdir, 'work/' + subdir)
+
+            prev_packet_snapshot_file = prev_snapshot_path + '/' + 'packet.pickle'
+        else:
+            os.mkdir('work/io')
+            os.mkdir('work/root')
 
         executor_path = self.sync_resource(int(self.ctx['executor_resource']))
         if False:
@@ -115,22 +127,25 @@ class RunRemJobPacket(SandboxTask):
         if custom_resources:
             self.__sync_custom_resources(custom_resources)
 
+        packet_snapshot_file = 'work/packet.pickle'
+        last_update_message_file = 'last_update_message.pickle'
+
         argv = [
             './executor/sbx_run_packet.py',
-                '--work-dir', 'work',
-                '--io-dir',   'io',
+                '--work-dir', 'work/root',
+                '--io-dir',   'work/io',
                 '--task-id', str(self.id),
                 '--rem-server-addr', self.ctx['rem_server_addr'],
-                '--result-snapshot-file=result-snapshot',
-                #'--result-file=result.json', # FIXME Don't remember
+                '--result-snapshot-file', packet_snapshot_file,
+                '--last-update-message-file', last_update_message_file,
+                #'--result-status-file=result.json', # FIXME Don't remember what for
         ]
 
         if custom_resources:
             argv.extend(['--custom-resources', json.dumps(custom_resources)])
 
-        if self.ctx['snapshot_resource']:
-            snapshot_resource_path = self.sync_resource(int(self.ctx['snapshot_resource']))
-            argv.extend(['--snapshot-file', snapshot_resource_path])
+        if prev_packet_snapshot_file:
+            argv.extend(['--snapshot-file', prev_packet_snapshot_file])
 
         elif self.ctx['snapshot_data']:
             argv.extend(['--snapshot-data', self.ctx['snapshot_data'].replace('\n', '')])
@@ -140,8 +155,19 @@ class RunRemJobPacket(SandboxTask):
 
         run_process(argv)
 
-        #REM_JOBPACKET_EXECUTION_SNAPSHOT
-        #REM_JOBPACKET_EXECUTION_RESULTS
+        # TODO XXX Checks (at least for snapshot_file existence)
+
+        self.create_resource(
+            '',
+            'work',
+            rt.REM_JOBPACKET_EXECUTION_SNAPSHOT)
+
+        self.create_resource(
+            '',
+            last_update_message_file,
+            rt.REM_JOBPACKET_GRAPH_UPDATE)
+
+        #rt.REM_JOBPACKET_EXECUTION_RESULTS
 
 
 __Task__ = RunRemJobPacket
