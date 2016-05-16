@@ -172,7 +172,7 @@ class RunRemJobPacket(SandboxTask):
         else:
             raise SandboxTaskFailureError()
 
-        run_process(argv)
+        run_process(argv, log_prefix='executor')
 
         # TODO XXX Checks (at least for snapshot_file existence)
 

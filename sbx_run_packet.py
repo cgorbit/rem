@@ -160,10 +160,14 @@ class RemNotifier(object):
                 update, is_final = self._pending_update
                 self._pending_update = None
 
+            logging.debug('sending_update: %s' % ((update, is_final),))
+
             try:
                 self._send_update(update, is_final)
 
             except self.RetriableError:
+                logging.exception('Failed to send update')
+
                 with self._lock:
                     if not self._pending_update:
                         self._pending_update = (update, is_final)
@@ -233,6 +237,7 @@ if __name__ == '__main__':
     rpc_server = _create_rpc_server(pck, opts)
 
     pck.join()
+    logging.debug('after_pck_join')
 
     last_update_message = pck.produce_rem_update_message()
 
@@ -240,8 +245,10 @@ if __name__ == '__main__':
 
     rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
     rpc_server.shutdown()
+    logging.debug('after_rpc_shutdown')
 
     rem_notifier.stop(30.0) # FIXME
+    logging.debug('after_rem_notifier_stop')
 
     #if not pck.is_cancelled():
     if True:
@@ -250,3 +257,5 @@ if __name__ == '__main__':
 
         with open(opts.last_update_message_file, 'w') as out:
             pickle.dump(last_update_message, out, 2)
+
+    logging.debug('after_all')

@@ -359,6 +359,8 @@ class RemotePacketsDispatcher(object):
         impl(pck)
 
     def _on_rpc_update_graph(self, task_id, peer_addr, state, is_final):
+        logging.debug('_ON_RPC_UPDATE_GRAPH: %s' % ((task_id, peer_addr, is_final, state),))
+
         pck = self.by_task_id.get(task_id)
 
         if not pck:
@@ -487,7 +489,7 @@ class RemotePacketsDispatcher(object):
 
             if state == TaskState.STARTING:
                 if status_group == TaskStateGroups.DRAFT:
-                    raise AssertionError()
+                    pass
 
                 elif status_group == TaskStateGroups.ACTIVE:
                     pck._state = TaskState.STARTED
@@ -734,6 +736,7 @@ class SandboxRemotePacket(object):
         self._sched = None
         self._peer_addr = None
         self._final_state = False
+        self._result_snapshot_resource_id = None
 
         remote_packets_dispatcher.register_packet(self)
 
