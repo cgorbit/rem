@@ -178,7 +178,7 @@ class RemNotifier(object):
 if __name__ == '__main__':
     opts = parse_arguments()
 
-    for attr in ['io_dir', 'work_dir', 'result_snapshot_file'] \
+    for attr in ['io_dir', 'work_dir', 'result_snapshot_file', 'last_update_message_file'] \
             + (['snapshot_file'] if opts.snapshot_file is not None else []):
         setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
 
@@ -200,7 +200,9 @@ if __name__ == '__main__':
         notifier_failed[0] = True
         pck.stop(kill_jobs=True) # FIXME Or cancel (do we need snapshot resource)?
 
-    proxy = rem.xmlrpc.ServerProxy('http://' + opts.rem_server_addr, timeout=20.0)
+    proxy = rem.xmlrpc.ServerProxy('http://' + opts.rem_server_addr,
+                                   allow_none=True,
+                                   timeout=20.0)
 
     def send_update(update, is_final):
         try:

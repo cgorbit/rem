@@ -431,7 +431,7 @@ class RemotePacketsDispatcher(object):
 
         with pck.lock:
     # TODO FIXME Don't store/fetch for SUCCESSFULL?
-            pck._snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
+            pck._result_snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
 
             if pck._final_state is None:
                 pck._final_update_url = res_by_type['REM_JOBPACKET_GRAPH_UPDATE']['http']['proxy']
@@ -738,7 +738,7 @@ class SandboxRemotePacket(object):
         remote_packets_dispatcher.register_packet(self)
 
     def _mark_terminated(self):
-        pck._state = TaskState.TERMINATED
+        self._state = TaskState.TERMINATED
         self._ops._on_packet_terminated()
 
     def cancel(self):
@@ -756,7 +756,7 @@ class SandboxRemotePacket(object):
     def _update_graph(self, state, is_final):
         assert not self._cancelled
 
-        self.__last_state = state # TODO
+        self._last_state = state # TODO
 
         if is_final:
             self._final_state = state['state']
@@ -783,7 +783,8 @@ class SandboxJobGraphExecutorProxy(object):
 
         self._remote_packet = None
         self._snapshot_resource_id = None
-        self._result_resource_id = None # TODO FIXME
+        #self._result_resource_id = None # TODO FIXME
+        self._result_snapshot_resource_id = None
 
         self.do_not_run = False # FIXME
         self.cancelled = False # FIXME
@@ -830,12 +831,14 @@ class SandboxJobGraphExecutorProxy(object):
             if self.cancelled:
                 return
 
-            self.__last_state = state # TODO
+# TODO XXX XXX
+            pass
+            #self._last_state = state # TODO
 
     # on sandbox task stopped + resources list fetched
-    def _on_packet_terminated(self, how):
+    def _on_packet_terminated(self):
         with self.lock:
-            self._do_on_packet_terminated(how)
+            self._do_on_packet_terminated()
             self._update_state()
 
     def _do_on_packet_terminated(self):
@@ -845,7 +848,8 @@ class SandboxJobGraphExecutorProxy(object):
             self._stop_promise = None
             self._ops.on_job_graph_becomes_null()
 
-            res = self._remote_packet.get_result()
+        #res = self._remote_packet.get_result()
+        r = self._remote_packet
 
         if self.cancelled:
             self.cancelled = False
@@ -854,37 +858,38 @@ class SandboxJobGraphExecutorProxy(object):
             on_stop()
             return
 
-        if res.exceptioned: # TODO Rename
-            logging.warning('...')
+# XXX TODO
+# Task FAILURE/EXCEPTION
+        #if res.exceptioned: # TODO Rename
+            #logging.warning('...')
 
-            # XXX TODO XXX Rollback history/Status to prev state
+            ## XXX TODO XXX Rollback history/Status to prev state
 
-            if self.do_not_run:
-                on_stop()
-            else:
-                self._remote_packet = self._create_remote_packet()
+            #if self.do_not_run:
+                #on_stop()
+            #else:
+                #self._remote_packet = self._create_remote_packet()
 
-            return
+            #return
 
         # WTF?
         # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
         # (TODO Support this rule in PacketBase)
 
-        if res.status == GraphState.TIME_WAIT:
-            self.time_wait_deadline = res.time_wait_deadline
+        if r._final_state == GraphState.TIME_WAIT:
+            self.time_wait_deadline = r._last_state['nearest_retry_deadline']
             self.time_wait_sched = \
                 delayed_executor.schedule(self._stop_time_wait,             # TODO Fix races
                                             deadline=self.time_wait_deadline)
 
-        elif res.status == GraphState.SUCCESSFULL:
+        elif r._final_state == GraphState.SUCCESSFULL:
             self.result = True
-            self._result_resource_id = res.result_resource_id
 
-        elif res.status == GraphState.ERROR:
+        elif r._final_state == GraphState.ERROR:
             self.result = False
 
-        self._result_snapshot_resource_id = res.snapshot_id \
-            if res.status != GraphState.SUCCESSFULL else None
+        self._result_snapshot_resource_id = r._result_snapshot_resource_id \
+            if r._final_state != GraphState.SUCCESSFULL else None
 
         on_stop()
 

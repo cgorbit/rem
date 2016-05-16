@@ -3,6 +3,7 @@ import threading
 
 import rem.sandbox as sandbox
 from rem.profile import ProfiledThread
+from rem_logging import logger as logging
 
 
 class TaskStateGroups(object):
@@ -48,8 +49,6 @@ class SandboxTaskStateAwaiter(object):
 
             if was_empty:
                 self._something_happend.notify()
-
-        return job_id
 
     def _loop(self):
         running = self._running

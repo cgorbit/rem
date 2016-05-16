@@ -73,28 +73,46 @@ class RunRemJobPacket(SandboxTask):
         if isinstance(custom_resources, types.StringTypes):
             custom_resources = custom_resources.strip()
 
-            self.ctx['custom_resources'] = json.loads(custom_resources) \
-                if custom_resources else None
+            if custom_resources:
+                self.ctx['custom_resources'] = list(self.__parse_custom_resources(custom_resources))
+                self.ctx['custom_resources_str'] = json.dumps(json.loads(custom_resources))
+            else:
+                self.ctx['custom_resources'] = None
+                self.ctx['custom_resources_str'] = None
+        else:
+            self.ctx['custom_resources'] = None
+            self.ctx['custom_resources_str'] = None
+
+    def __parse_custom_resources(resources):
+        for local_name, full_path in json.loads(resources).items():
+            m = re.match('^(?:sbx:)(\d+)(/.*)?$', full_path)
+            if not m:
+                raise SandboxTaskFailureError()
+
+            resource_id, in_resource_path = m.groups()
+
+            yield int(resource_id), in_resource_path, local_name
 
     def __sync_custom_resources(self, custom_resources):
         custom_resources_ids = set()
 
-        for name, full_path in custom_resources.items():
-            m = re.match('^(?:sbx:)(\d+)(/.*)?$', full_path)
-            if not m:
-                raise SandboxTaskFailureError()
-            resource_id, in_resource_path = m.groups()
-            resource_id = int(resource_id)
-
+        for resource_id, in_resource_path, local_name in custom_resources:
             custom_resources_ids.add(resource_id)
 
             os.symlink(
                 '../custom_resources/%d/%s' % (resource_id, in_resource_path),
-                'work/%s' % name)
+                'work/root/%s' % local_name)
 
         for resource_id in custom_resources_ids:
             res_real_path = self.sync_resource(resource_id)
             os.symlink(res_real_path, 'custom_resources/%d' % resource_id)
+
+    def __unlink_custom_resources(self, custom_resources):
+        for resource_id, in_resource_path, local_name in custom_resources:
+            try:
+                os.unlink('work/root/%s' % local_name)
+            except:
+                pass
 
     def on_execute(self):
         logging.debug("on_execute work dir: %s" % os.getcwd())
@@ -103,6 +121,7 @@ class RunRemJobPacket(SandboxTask):
         os.mkdir('python')
         os.mkdir('work')
 
+        prev_packet_snapshot_file = None
         if self.ctx['snapshot_resource_id']:
             prev_snapshot_path = self.sync_resource(int(self.ctx['snapshot_resource_id']))
 
@@ -142,7 +161,7 @@ class RunRemJobPacket(SandboxTask):
         ]
 
         if custom_resources:
-            argv.extend(['--custom-resources', json.dumps(custom_resources)])
+            argv.extend(['--custom-resources', self.ctx['custom_resources_str']])
 
         if prev_packet_snapshot_file:
             argv.extend(['--snapshot-file', prev_packet_snapshot_file])
@@ -156,6 +175,9 @@ class RunRemJobPacket(SandboxTask):
         run_process(argv)
 
         # TODO XXX Checks (at least for snapshot_file existence)
+
+        if custom_resources:
+            self.__unlink_custom_resources(custom_resources)
 
         self.create_resource(
             '',
