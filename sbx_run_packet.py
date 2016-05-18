@@ -10,6 +10,7 @@ import threading
 from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
 import xmlrpclib
 import rem.xmlrpc
+from rem.xmlrpc import is_xmlrpc_exception
 from rem.sandbox_remote_packet import WrongTaskIdError
 
 import rem.sandbox_packet
@@ -23,7 +24,7 @@ def parse_arguments():
     p.add_argument('--io-dir', dest='io_dir', required=True)
     p.add_argument('--work-dir', dest='work_dir', required=True)
     p.add_argument('--custom-resources', dest='custom_resources')
-    p.add_argument('--task-id', dest='task_id', required=True)
+    p.add_argument('--task-id', dest='task_id', type=int, required=True)
     p.add_argument('--rem-server-addr', dest='rem_server_addr', required=True)
     #p.add_argument('--result-status-file', dest='result_status_file', default='/dev/stdout')
     p.add_argument('--result-snapshot-file', dest='result_snapshot_file')
@@ -91,12 +92,10 @@ class XMLRPCServer(SimpleXMLRPCServer):
 
 
 def _create_rpc_server(pck, opts):
-    srv = XMLRPCServer(('::', 0))
+    srv = XMLRPCServer(('::', 0), allow_none=True)
 
     #srv.register_introspection_functions()
     srv.register_instance(RpcMethods(pck, opts.task_id))
-
-    threading.Thread(target=srv.serve_forever).start()
 
     return srv
 
@@ -204,44 +203,56 @@ if __name__ == '__main__':
         notifier_failed[0] = True
         pck.stop(kill_jobs=True) # FIXME Or cancel (do we need snapshot resource)?
 
-    proxy = rem.xmlrpc.ServerProxy('http://' + opts.rem_server_addr,
+    import xmlrpclib
+    #rem_proxy = xmlrpclib.ServerProxy('http://' + opts.rem_server_addr,
+                                   #allow_none=True,
+                                   #)
+    rem_proxy = rem.xmlrpc.ServerProxy('http://' + opts.rem_server_addr,
                                    allow_none=True,
                                    timeout=20.0)
 
     def send_update(update, is_final):
         try:
-            return proxy.update_graph(
+            return rem_proxy.update_graph(
                 opts.task_id,
-                rpc_server.server_address,
+                rpc_server.server_address[:2],
                 update,
                 is_final
             )
 
-        except xmlrpclib.Fault as e: # FIXME Fail in any case here?
-            try:
-                on_notifier_fail()
-            except:
-                logging.exception("on_notifier_fail")
-
-            raise RuntimeError("Failed to send data to rem server: %s" % e.faultString)
-
         except Exception as e:
-            raise RemNotifier.RetriableError(e.message)
+            logging.exception("on_notifier_fail")
+
+            if is_xmlrpc_exception(e, WrongTaskIdError):
+                try:
+                    on_notifier_fail()
+                except:
+                    logging.exception("on_notifier_fail")
+
+                raise RuntimeError("Failed to send data to rem server: %s" % e.faultString)
+
+            else:
+                # FIXME Actually if isinstance(e, xmlrpclib.Fault) then not retriable
+                #       but not fatal as WrongTaskIdError
+                raise RemNotifier.RetriableError(str(e))
 
     rem_notifier = RemNotifier(send_update)
 
     #rem_notifier.send_update(pck.produce_rem_update_message()) # FIXME
 
+    rpc_server = _create_rpc_server(pck, opts)
+
     pck.start(opts.work_dir, opts.io_dir, rem_notifier.send_update)
 
-    rpc_server = _create_rpc_server(pck, opts)
+    ProfiledThread(target=rpc_server.serve_forever, name_prefix='RpcServer').start()
 
     pck.join()
     logging.debug('after_pck_join')
 
     last_update_message = pck.produce_rem_update_message()
 
-    rem_notifier.send_update(last_update_message, is_final=True)
+    if not notifier_failed[0]:
+        rem_notifier.send_update(last_update_message, is_final=True)
 
     rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
     rpc_server.shutdown()

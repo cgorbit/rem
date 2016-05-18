@@ -4,7 +4,7 @@ import sys
 import time
 import base64
 import cPickle as pickle
-from rem.xmlrpc import SimpleXMLRPCServer, ServerProxy as XMLRPCServerProxy
+from rem.xmlrpc import SimpleXMLRPCServer, ServerProxy as XMLRPCServerProxy, is_xmlrpc_exception
 import threading
 from Queue import Queue as ThreadSafeQueue
 import errno
@@ -43,10 +43,6 @@ remote_packets_dispatcher = None
 
 class WrongTaskIdError(RuntimeError):
     pass
-
-
-def is_xmlrpc_exception(exc, type):
-    return isinstance(exc, xmlrpclib.Fault) and type.__name__ in exc.faultString
 
 
 def wrap_string(s, width):
@@ -112,7 +108,7 @@ class RemotePacketsDispatcher(object):
             sandbox.TaskPriority.SubClass.NORMAL)
 
     def _create_rpc_server(self):
-        srv = SimpleXMLRPCServer(self._rpc_listen_addr)
+        srv = SimpleXMLRPCServer(self._rpc_listen_addr, allow_none=True)
         #srv.register_function(self._on_rpc_ping, 'ping') # FIXME Don't remember what for
         srv.register_function(self._on_rpc_update_graph, 'update_graph')
         return srv
@@ -128,7 +124,7 @@ class RemotePacketsDispatcher(object):
 # TODO All from ctx
         self._sbx_invoker = ActionQueue(thread_count=10, thread_name_prefix='SbxIO')
         self._sandbox = sandbox.Client(
-            ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0, debug=True)
+            ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
         self._status_awaiter = SandboxTaskStateAwaiter(self._sandbox)
 
     def stop(self):
@@ -221,7 +217,7 @@ class RemotePacketsDispatcher(object):
                     return
 
                 pck._exception = e
-                pck._mark_terminated()
+                pck._mark_terminated(str(e))
 
         try:
             task = self._sbx_create_task(pck)
@@ -259,7 +255,7 @@ class RemotePacketsDispatcher(object):
             # FIXME fork locking (mallformed pck state)
             #pck._instance_id = instance_id
             pck._sandbox_task_id = task.id
-            pck._state = TaskState.STARTING
+            pck._set_state(TaskState.STARTING)
 
             self.by_task_id[task.id] = pck
 
@@ -292,7 +288,7 @@ class RemotePacketsDispatcher(object):
                     not isinstance(e, (sandbox.NetworkError, sandbox.ServerInternalError))
                     # TODO
 
-                pck._state = TaskState.CHECKING_START_ERROR
+                pck._set_state(TaskState.CHECKING_START_ERROR)
                 pck._start_error = e
 
                 #pck._wait_task_state(pck, TaskStateGroups.ANY)
@@ -303,9 +299,9 @@ class RemotePacketsDispatcher(object):
             if pck._state != TaskState.STARTING:
                 return
 
-            pck._state = TaskState.STARTED
+            pck._set_state(TaskState.STARTED, '._sandbox.start() -> ok')
 
-            #self._wait_task_state(pck, TaskStateGroups.TERMINATED)
+            #self._wait_task_state(pck, TaskStateGroups., reasonTERMINATED)
 
             assert not pck._peer_addr
             #if self._target_stop_mode:
@@ -360,11 +356,12 @@ class RemotePacketsDispatcher(object):
 
     def _on_rpc_update_graph(self, task_id, peer_addr, state, is_final):
         logging.debug('_ON_RPC_UPDATE_GRAPH: %s' % ((task_id, peer_addr, is_final, state),))
+        logging.debug('_ON_RPC_UPDATE_GRAPH[state]: %s' % (GraphState.str(state['state'])))
 
         pck = self.by_task_id.get(task_id)
 
         if not pck:
-            raise NonExistentInstanceError()
+            raise WrongTaskIdError()
 
         with pck.lock:
             # FIXME
@@ -381,11 +378,11 @@ class RemotePacketsDispatcher(object):
                 TaskState.TERMINATED,
                 TaskState.FETCHING_RESOURCE_LIST,
                 TaskState.FETCHING_FINAL_UPDATE
-            ]
+            ], "_on_rpc_update_graph not in CREATING|TERMINATED|FETCHING*"
 
             if pck._state in [TaskState.STARTING, TaskState.CHECKING_START_ERROR, TaskState.STARTED]:
                 if pck._state != TaskState.STARTED:
-                    pck._state = TaskState.STARTED
+                    pck._set_state(TaskState.STARTED, '_on_rpc_update_graph')
                     pck._drop_sched_if_need()
                     assert not pck._peer_addr
                 else:
@@ -406,9 +403,9 @@ class RemotePacketsDispatcher(object):
             if is_final:
                 if pck._target_stop_mode == StopMode.CANCEL \
                     or state['state'] == GraphState.SUCCESSFULL:
-                    pck._mark_terminated()
+                    pck._mark_terminated('_on_rpc_update_graph(SUCCESSFULL)')
                 else:
-                    pck._state = TaskState.FETCHING_RESOURCE_LIST
+                    pck._set_state(TaskState.FETCHING_RESOURCE_LIST)
                     self._start_fetch_resource_list(pck)
 
     def _start_fetch_resource_list(self, pck):
@@ -440,7 +437,7 @@ class RemotePacketsDispatcher(object):
                 pck._state = PacketState.FETCHING_FINAL_UPDATE
                 self._fetch_final_update(pck)
             else:
-                pck._mark_terminated()
+                pck._mark_terminated('_fetch_resource_list')
 
     def _start_fetch_final_update(pck):
         self._sbx_invoker.invoker(lambda : self._fetch_final_update(pck))
@@ -460,7 +457,7 @@ class RemotePacketsDispatcher(object):
             if pck._target_stop_mode != StopMode.CANCEL:
                 pck._update_graph(state, is_final)
 
-            pck._mark_terminated()
+            pck._mark_terminated('_fetch_final_update')
 
     def _on_task_status_change(self, task_id, status_group):
         #with self.lock:
@@ -477,12 +474,14 @@ class RemotePacketsDispatcher(object):
 
             state = pck._state
 
-            assert state not in [
+            #assert state not in [
+            if state in [
                 TaskState.CREATING,
                 TaskState.TERMINATED,
                 TaskState.FETCHING_RESOURCE_LIST,
                 TaskState.FETCHING_FINAL_UPDATE
-            ]
+            ]:
+                return
 
     # TODO XXX
     # Пока в черне обрисовал
@@ -492,10 +491,10 @@ class RemotePacketsDispatcher(object):
                     pass
 
                 elif status_group == TaskStateGroups.ACTIVE:
-                    pck._state = TaskState.STARTED
+                    pck._set_state(TaskState.STARTED, 'TaskStateGroups.ACTIVE')
 
                 elif status_group == TaskStateGroups.TERMINATED:
-                    pck._state = TaskState.FETCHING_RESOURCE_LIST #1
+                    pck._set_state(TaskState.FETCHING_RESOURCE_LIST) #1
                     self._start_fetch_resource_list(pck)
 
             elif state == TaskState.CHECKING_START_ERROR:
@@ -503,16 +502,16 @@ class RemotePacketsDispatcher(object):
 
                 if status_group == TaskStateGroups.DRAFT:
                     if pck._is_start_error_permanent:
-                        pck._mark_terminated()
+                        pck._mark_terminated('_is_start_error_permanent=True, DRAFT')
                     else:
-                        pck._state = TaskState.STARTING
+                        pck._set_state(TaskState.STARTING)
                         self._start_start_sandbox_task(pck)
 
                 elif status_group == TaskStateGroups.ACTIVE:
-                    pck._state = TaskState.STARTED
+                    pck._set_state(TaskState.STARTED, 'TaskStateGroups.ACTIVE')
 
                 elif status_group == TaskStateGroups.TERMINATED:
-                    pck._state = TaskState.FETCHING_RESOURCE_LIST #2
+                    pck._set_state(TaskState.FETCHING_RESOURCE_LIST) #2
                     self._start_fetch_resource_list(pck)
 
             elif state == TaskState.STARTED:
@@ -524,9 +523,9 @@ class RemotePacketsDispatcher(object):
 
                 elif status_group == TaskStateGroups.TERMINATED:
                     if pck._final_state is not None:
-                        pck._mark_terminated()
+                        pck._mark_terminated('_final_state is not None and task terminated')
                     else:
-                        pck._state = TaskState.FETCHING_RESOURCE_LIST #1
+                        pck._set_state(TaskState.FETCHING_RESOURCE_LIST) #1
                         self._start_fetch_resource_list(pck)
 
     def stop_packet(self, pck, kill_jobs):
@@ -542,7 +541,7 @@ class RemotePacketsDispatcher(object):
 
             def really_cancel():
                 pck._drop_sched_if_need()
-                pck._mark_terminated()
+                pck._mark_terminated('_stop_packet')
 
             pck._target_stop_mode = stop_mode
 
@@ -568,12 +567,17 @@ class RemotePacketsDispatcher(object):
                 raise Unreachable()
 
     def _do_stop_packet(self, pck):
+        return
+
         task_id = pck._sandbox_task_id
         stop_mode = pck._target_stop_mode
 
         proxy = rem.xmlrpc.ServerProxy(
             url='http://%s:%d' % pck._peer_addr,
             timeout=15.0) # TODO
+
+        logging.debug('_do_stop_packet(pck=%s, task=%s, stop_mode=%s' % (
+            pck.id, task_id, stop_mode))
 
         try:
             if stop_mode == StopMode.CANCEL:
@@ -709,6 +713,16 @@ class TaskState(object):
     FETCHING_RESOURCE_LIST = 8
     FETCHING_FINAL_UPDATE = 9
 
+    _NAMES = {
+        CREATING: 'CREATING',
+        STARTING: 'STARTING',
+        CHECKING_START_ERROR: 'CHECKING_START_ERROR',
+        STARTED: 'STARTED',
+        TERMINATED: 'TERMINATED',
+        FETCHING_RESOURCE_LIST: 'FETCHING_RESOURCE_LIST',
+        FETCHING_FINAL_UPDATE: 'FETCHING_FINAL_UPDATE',
+    }
+
 
 class AlreadyTerminated(RuntimeError):
     pass
@@ -740,8 +754,12 @@ class SandboxRemotePacket(object):
 
         remote_packets_dispatcher.register_packet(self)
 
-    def _mark_terminated(self):
-        self._state = TaskState.TERMINATED
+    def _set_state(self, state, reason=None):
+        self._state = state
+        logging.debug('remote-%s new state %s, reason: %s' % (self.id, TaskState._NAMES[state], reason))
+
+    def _mark_terminated(self, reason=None):
+        self._set_state(TaskState.TERMINATED, reason)
         self._ops._on_packet_terminated()
 
     def cancel(self):
@@ -757,12 +775,15 @@ class SandboxRemotePacket(object):
         raise NotImplementedError()
 
     def _update_graph(self, state, is_final):
-        assert not self._cancelled
+        assert self._target_stop_mode != StopMode.CANCEL
 
         self._last_state = state # TODO
 
         if is_final:
             self._final_state = state['state']
+
+            logging.debug('SandboxRemotePacket._final_state = %s' \
+                % GraphState.str(self._final_state))
 
         self._ops._on_sandbox_packet_update(state, is_final)
 
@@ -835,8 +856,10 @@ class SandboxJobGraphExecutorProxy(object):
                 return
 
 # TODO XXX XXX
-            pass
-            #self._last_state = state # TODO
+            self.detailed_status = state['detailed_status']
+
+            # set(map(int, state['succeed_jobs'])) # TODO
+            # state['state'] # TODO
 
     # on sandbox task stopped + resources list fetched
     def _on_packet_terminated(self):
@@ -849,7 +872,9 @@ class SandboxJobGraphExecutorProxy(object):
             self._remote_packet = None
             self._stop_promise.set()
             self._stop_promise = None
-            self._ops.on_job_graph_becomes_null()
+            #self._ops.on_job_graph_becomes_null()
+
+        assert not self.time_wait_deadline and not self.time_wait_sched
 
         #res = self._remote_packet.get_result()
         r = self._remote_packet
@@ -879,10 +904,13 @@ class SandboxJobGraphExecutorProxy(object):
         # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
         # (TODO Support this rule in PacketBase)
 
+        logging.debug('state for SandboxJobGraphExecutorProxy == %s' \
+            % GraphState.str(r._final_state))
+
         if r._final_state == GraphState.TIME_WAIT:
             self.time_wait_deadline = r._last_state['nearest_retry_deadline']
             self.time_wait_sched = \
-                delayed_executor.schedule(self._stop_time_wait,             # TODO Fix races
+                delayed_executor.schedule(self._stop_time_wait,
                                             deadline=self.time_wait_deadline)
 
         elif r._final_state == GraphState.SUCCESSFULL:
@@ -896,11 +924,15 @@ class SandboxJobGraphExecutorProxy(object):
 
         on_stop()
 
-    def _stop_time_wait(self):
+    def _stop_time_wait(self, sched_id):
         with self.lock:
-            # TODO Fix races
+            if self.time_wait_sched or self.time_wait_sched.id != sched_id:
+                return
+
             self.time_wait_deadline = None
             self.time_wait_sched = None
+
+            assert not self.cancelled
 
             if not self.do_not_run:
                 self._remote_packet = self._create_remote_packet()
@@ -913,6 +945,7 @@ class SandboxJobGraphExecutorProxy(object):
             return
 
         self.state = new
+        logging.debug('SandboxJobGraphExecutorProxy.state => %s' % GraphState.str(self.state))
         self._ops.on_state_change()
 
     def _calc_state(self):
@@ -957,6 +990,7 @@ class SandboxJobGraphExecutorProxy(object):
 
             self.do_not_run = False
 
+# XXX Don't use _stop_promise, use SandboxTaskStateAwaiter's state
             self._stop_promise = Promise()
             self._remote_packet = self._create_remote_packet()
 
@@ -972,6 +1006,10 @@ class SandboxJobGraphExecutorProxy(object):
             self.do_not_run = True
             self.cancelled = True
             self._result_snapshot_resource_id = None
+
+            if self.time_wait_sched:
+                self.time_wait_sched()
+                self.time_wait_deadline = None
 
             self._remote_packet.cancel()
             self._update_state()
@@ -1020,7 +1058,7 @@ class SandboxPacketOpsForJobGraphExecutorProxy(object):
     def create_job_runner(self, job):
         raise AssertionError()
 
-    def on_job_graph_becomes_null(self):
-        self.pck._on_job_graph_becomes_null()
+    #def on_job_graph_becomes_null(self):
+        #self.pck._update_state() # FIXME
 
 

@@ -782,6 +782,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         import sandbox_remote_packet
         d = sandbox_remote_packet.remote_packets_dispatcher = sandbox_remote_packet.RemotePacketsDispatcher()
         d.start(self.context)
+        self._remote_packets_dispatcher = d
 
         for q in self.qRef.itervalues():
             for pck in list(q.ListAllPackets()):

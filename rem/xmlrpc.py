@@ -74,3 +74,7 @@ class ServerProxy(xmlrpclib.ServerProxy):
 
     def __getattr__(self, name):
         return Method(xmlrpclib.ServerProxy.__getattr__(self, name))
+
+
+def is_xmlrpc_exception(exc, type):
+    return isinstance(exc, xmlrpclib.Fault) and type.__name__ in exc.faultString

@@ -481,6 +481,8 @@ class PacketBase(Unpickable(
                         #% (self.name, self.state, state))
 
             self.state = state
+            logging.debug("packet %s\tnew impl state %r", self.name, state)
+
             self._update_repr_state()
 
             if self.queue:

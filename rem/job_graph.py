@@ -37,6 +37,27 @@ class GraphState(object):
     SUCCESSFULL  = 0b00100000
     CANCELLED    = 0b01000000
 
+    _NAMES = {
+        PENDING_JOBS: 'PENDING_JOBS',
+        WORKING:      'WORKING',
+        TIME_WAIT:    'TIME_WAIT',
+        SUSPENDED:    'SUSPENDED',
+        ERROR:        'ERROR',
+        SUCCESSFULL:  'SUCCESSFULL',
+        CANCELLED:    'CANCELLED',
+    }
+
+    @classmethod
+    def str(cls, mask):
+        ret = cls._NAMES.get(mask)
+        if ret:
+            return ret
+
+        return '|'.join(
+            name
+                for val, name in cls._NAMES.items()
+                    if mask & val
+        )
 
 class _ActiveJobs(object):
     def __init__(self):

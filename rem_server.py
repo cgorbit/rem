@@ -735,7 +735,7 @@ def _init_fork_locking(ctx):
     set_timeout(ctx.backup_fork_lock_friendly_timeout)
 
 
-def start_daemon(ctx, sched, wait=True):
+def start_daemon(ctx, sched):
     global _context
     global _scheduler
 

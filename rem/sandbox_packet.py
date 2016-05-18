@@ -36,12 +36,11 @@ class _ExecutorOps(object):
 
     def on_state_change(self):
         pck = self.pck
-
         graph = pck._graph_executor
-        pck = self.pck
 
         pck._update_state(graph.state)
-        self._has_updates = True
+        logging.debug('pck._has_updates = True')
+        pck._has_updates = True
 
         if graph.state in [GraphState.SUCCESSFULL, GraphState.ERROR, GraphState.SUSPENDED] \
             or graph.state == GraphState.TIME_WAIT \
@@ -49,6 +48,7 @@ class _ExecutorOps(object):
 
             pck._finished = True
 
+        logging.debug('pck._something_changed.notify()')
         pck._something_changed.notify()
 
     #def _prepare_update(self):
@@ -61,7 +61,7 @@ class _ExecutorOps(object):
 
     def job_done_successfully(self, job_id):
         # TODO Notify rem_server for job_done_tag
-        self._has_updates = True
+        self.pck._has_updates = True
         self.pck._something_changed.notify()
 
     def create_job_runner(self, job):
@@ -135,7 +135,7 @@ class Packet(object):
         print >>sys.stderr, self._graph_executor.__dict__
         print >>sys.stderr, self._graph_executor.state
 
-        self._main_thread = ProfiledThread(target=self._main_loop, name_prefix='Packet')
+        self._main_thread = ProfiledThread(target=self._main_loop, name_prefix='PacketLoop')
         self._main_thread.start()
 
     def join(self):
@@ -208,7 +208,7 @@ class Packet(object):
             #'history': list(self.history), # TODO FIXME
             'state': self.state,
             'detailed_status': graph.produce_detailed_status(),
-            'succeed_jobs': graph.get_succeeded_jobs(),
+            'succeed_jobs': map(str, graph.get_succeeded_jobs()),
         }
 
         if graph.state == GraphState.TIME_WAIT:
@@ -224,17 +224,22 @@ class Packet(object):
 
         while True:
             with self._lock:
+                logging.debug('_before_job_start_loop')
                 while self._graph_executor.state & GraphState.PENDING_JOBS:
                     self._start_one_another_job()
 
+                logging.debug('_before_send_update_check: %s' % ((self._has_updates, self._finished),))
                 if self._has_updates and not self._finished:
+                    logging.debug('_before_send_update')
                     self._send_update()
                     self._has_updates = False
 
                 if self._finished:
                     break
 
+                logging.debug('_before_cond_wait')
                 self._something_changed.wait()
+                logging.debug('_after_cond_wait')
 
         logging.debug('+ exiting Packet.run')
 
