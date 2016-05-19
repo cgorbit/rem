@@ -207,7 +207,7 @@ class JobGraphExecutor(Unpickable(
         stop_waiting = lambda : self._ops.stop_waiting(stop_id) # TODO BACK_REFERENCE
         stop_id = id(stop_waiting)
 
-        cancel = delayed_executor.add(stop_waiting, deadline)
+        cancel = delayed_executor.schedule(stop_waiting, deadline)
 
         self.jobs_to_retry[stop_id] = (job_id, cancel, deadline)
 

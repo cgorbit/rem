@@ -101,8 +101,7 @@ def start():
     _instance = DelayedExecutor()
 
 
-def add(callback, deadline=None, timeout=None):
-    global _instance
+def schedule(callback, deadline=None, timeout=None):
     _instance.add(callback, deadline, timeout)
 
 

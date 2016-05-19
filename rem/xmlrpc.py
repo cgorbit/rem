@@ -78,3 +78,44 @@ class ServerProxy(xmlrpclib.ServerProxy):
 
 def is_xmlrpc_exception(exc, type):
     return isinstance(exc, xmlrpclib.Fault) and type.__name__ in exc.faultString
+
+
+class RpcUserError(Exception):
+    def __init__(self, exc):
+        self.exc = exc
+
+    def __repr__(self):
+        return repr(self.exc)
+
+    def __str__(self):
+        return str(self.exc)
+
+
+def as_rpc_user_error(from_rpc, exc):
+    return RpcUserError(exc) if from_rpc else exc
+
+
+def traced_rpc_method(level="debug"):
+    log_method = getattr(logging, level)
+    assert callable(log_method)
+
+    def traced_rpc_method(func):
+        def f(*args):
+            try:
+                return func(*args)
+            except RpcUserError:
+                _, e, tb = sys.exc_info()
+                e = e.exc
+                raise type(e), e, tb
+            except:
+                logging.exception("RPC method %s failed" % func.__name__)
+                raise
+
+        f.log_level = level
+        f.__name__ = func.__name__
+        f.__module__ = func.__module__
+
+        return f
+
+    return traced_rpc_method
+

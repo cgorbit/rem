@@ -68,22 +68,22 @@ class RpcMethods(object):
 
     def _check_task_id(self, task_id):
         if task_id != self.task_id:
-            raise WrongTaskIdError()
+            raise WrongTaskIdError("Sandbox task_id == %s, but got request for %s" % (self.task_id, task_id))
 
     @with_task_id
-    def rpc_restart(self):
+    def restart(self):
         self.pck.restart()
 
     @with_task_id
-    def rpc_stop(self, kill_jobs):
+    def stop(self, kill_jobs):
         self.pck.stop(kill_jobs)
 
     @with_task_id
-    def rpc_cancel(self):
+    def cancel(self):
         self.pck.cancel()
 
     @with_task_id
-    def rpc_ping(self):
+    def ping(self):
         pass
 
 

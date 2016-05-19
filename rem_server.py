@@ -526,6 +526,7 @@ class RemDaemon(object):
         self._started = threading.Event()
         self._should_stop = threading.Event()
         self._stopped = threading.Event()
+        self._backups_thread = None
 
         self.scheduler = scheduler
         self.api_servers = [
@@ -544,6 +545,8 @@ class RemDaemon(object):
 
         self.regWorkers = []
         self.timeWorker = None
+
+        self._backups_enabled = context.backups_enabled
 
         self._start()
 
@@ -622,9 +625,10 @@ class RemDaemon(object):
         self.scheduler.Stop2()
         logging.debug("rem-server\tjournal_stopped")
 
-        logging.debug("rem-server\tbefore_backups_thread_join")
-        self._backups_thread.join()
-        logging.debug("rem-server\tafter_backups_thread_join")
+        if self._backups_thread:
+            logging.debug("rem-server\tbefore_backups_thread_join")
+            self._backups_thread.join()
+            logging.debug("rem-server\tafter_backups_thread_join")
 
         logging.debug("%s children founded after custom kill", len(multiprocessing.active_children()))
         for proc in multiprocessing.active_children():
@@ -653,8 +657,9 @@ class RemDaemon(object):
             server.start()
         logging.debug("rem-server\tafter_rpc_workers_start")
 
-        self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")
-        self._backups_thread.start()
+        if self._backups_enabled:
+            self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")
+            self._backups_thread.start()
 
         self._run_thread = ProfiledThread(target=self._run, name_prefix="Daemon")
         self._run_thread.start()

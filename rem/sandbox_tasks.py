@@ -15,6 +15,7 @@ class TaskStateGroups(object):
 
 class SandboxTaskStateAwaiter(object):
     DEFAULT_UPDATE_INTERVAL = 5.0
+    DEFAULT_UPDATE_INTERVAL = 1.0 # TODO XXX REMOVE
 
     def __init__(self, sandbox, update_interval=DEFAULT_UPDATE_INTERVAL):
         self._sandbox = sandbox
@@ -74,7 +75,7 @@ class SandboxTaskStateAwaiter(object):
 
             if new_jobs:
                 for task_id, on_change in new_jobs.items():
-                    running[task_id] = [None, on_change]
+                    running[task_id] = [None, on_change, None]
 
             self._update()
 
@@ -94,12 +95,19 @@ class SandboxTaskStateAwaiter(object):
 
         else:
             for task_id, status in statuses.iteritems():
-                prev_status_group, on_change = running[task_id]
+                task = running[task_id]
+                prev_status_group, on_change, prev_status = task
+
+                if status != prev_status:
+                    logging.debug("task #%d change status %s -> %s" % (task_id, prev_status, status))
 
                 status_group = self._to_status_group(status)
 
                 if status_group == TaskStateGroups.TERMINATED:
                     running.pop(task_id)
+                else:
+                    task[0] = status_group
+                    task[2] = status
 
                 if prev_status_group != status_group:
                     try:

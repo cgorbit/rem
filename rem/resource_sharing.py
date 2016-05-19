@@ -187,7 +187,7 @@ class Sharer(object):
     def _schedule_retry(self, job, action, delay):
         if delay:
             self.jobs_to_retry[job.id] = action
-            delayed_executor.add(lambda id=job.id: self._initiate_retry(id), timeout=delay)
+            delayed_executor.schedule(lambda id=job.id: self._initiate_retry(id), timeout=delay)
         else:
             self._initiate_retry_inner(job.id, action)
 

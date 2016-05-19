@@ -165,7 +165,7 @@ class Packet(object):
         t.start()
 
     def stop(self, kill_jobs):
-        with self.lock:
+        with self._lock:
             if self._finished: # FIXME
                 raise RuntimeError("Already finished")
             if self._cancelled:
@@ -175,7 +175,7 @@ class Packet(object):
     # For those who changed their's minds after call to stop(kill_jobs=False)
 # ATW NOT USED
     def resume(self):
-        with self.lock:
+        with self._lock:
             if self._finished: # FIXME
                 raise RuntimeError("Already finished")
             if self._cancelled:
@@ -183,7 +183,7 @@ class Packet(object):
             self._graph_executor.disallow_to_run_jobs(kill_jobs)
 
     def cancel(self):
-        with self.lock:
+        with self._lock:
             if self._finished:
                 raise RuntimeError("Already finished")
             self._cancelled = True
@@ -194,7 +194,7 @@ class Packet(object):
 
 # ATW NOT USED
     def restart(self):
-        with self.lock:
+        with self._lock:
             if self._finished:
                 raise RuntimeError("Already finished")
             if self._cancelled:

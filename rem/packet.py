@@ -87,6 +87,8 @@ def always(ctor):
 class DummyGraphExecutor(object):
     state = GraphState.PENDING_JOBS
 
+# XXX TODO detailed_status dissapeared
+
     def is_null(self):
         return True
 
@@ -438,10 +440,10 @@ class PacketBase(Unpickable(
 
         #src = self.state
 
-        #if src in [ImplState.PENDING, ImplState.ACTIVE] and dst == ImplState.DESTROYING:
+        #if src in [ImplState.PENDING, ImplState.RUNNING] and dst == ImplState.DESTROYING:
             #return self._graph_executor.is_suspended() or self._graph_executor.is_null()
 
-        #elif src in [ImplState.PENDING, ImplState.ACTIVE] and dst == ImplState.HISTORIED:
+        #elif src in [ImplState.PENDING, ImplState.RUNNING] and dst == ImplState.HISTORIED:
             #return self._graph_executor.is_null()
 
         #elif src == ImplState.UNINITIALIZED and dst == ImplState.SUCCESSFULL:
@@ -460,12 +462,12 @@ class PacketBase(Unpickable(
 
     #def _become_pending(self):
         #assert not self.wait_dep_tags
-        #assert self.state != ImplState.ACTIVE
+        #assert self.state != ImplState.RUNNING
 
         #if not self.jobs: # FIXME and not self._graph_executor.dont_run_new_jobs:
             #state = ImplState.SUCCESSFULL
         #else:
-            #state = ImplState.ACTIVE
+            #state = ImplState.RUNNING
 
         #self._change_state(state)
 
@@ -756,6 +758,7 @@ class PacketBase(Unpickable(
         status = dict(name=self.name,
 # TODO
                       sandbox_task_id=None,
+
                       state=self._repr_state,
                       wait=list(self.wait_dep_tags),
                       all_tags=all_tags,
@@ -772,7 +775,7 @@ class PacketBase(Unpickable(
         if self.state == ImplState.BROKEN:
             extra_flags.add("can't-be-recovered")
 
-        if self._repr_state == ReprState.SUSPENDED and self.state == ImplState.ACTIVE:
+        if self._repr_state == ReprState.SUSPENDED and self.state == ImplState.RUNNING:
             extra_flags.add("manually-suspended")
 
         if extra_flags:
@@ -1090,7 +1093,7 @@ class LocalPacket(PacketBase):
         )
 
     def _can_run_jobs_right_now(self):
-        return self.state == ImplState.ACTIVE \
+        return self.state == ImplState.RUNNING \
             and self._graph_executor.can_run_jobs_right_now()
 
     def get_job_to_run(self):

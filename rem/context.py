@@ -57,6 +57,7 @@ class Context(object):
         self.backup_in_child = config.safe_getboolean("store", "backup_in_child", False)
         self.backup_child_max_working_time = config.getint("store", "backup_child_max_working_time")
         self.backup_fork_lock_friendly_timeout = config.safe_getint("store", "backup_fork_lock_friendly_timeout", None)
+        self.backups_enabled = config.safe_getboolean("store", "backups_enabled", True)
         self.journal_lifetime = config.getint("store", "journal_lifetime")
         self.binary_directory = self.prep_dir(config.get("store", "binary_dir"))
         self.binary_lifetime = config.getint("store", "binary_lifetime")

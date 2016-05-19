@@ -4,13 +4,15 @@ import sys
 import time
 import base64
 import cPickle as pickle
-from rem.xmlrpc import SimpleXMLRPCServer, ServerProxy as XMLRPCServerProxy, is_xmlrpc_exception
+from rem.xmlrpc import SimpleXMLRPCServer, ServerProxy as XMLRPCServerProxy, \
+                       is_xmlrpc_exception, traced_rpc_method
 import threading
 from Queue import Queue as ThreadSafeQueue
 import errno
 import socket
 import xmlrpclib
 
+import rem.delayed_executor as delayed_executor
 from rem.profile import ProfiledThread
 import sandbox_packet
 import rem.sandbox as sandbox
@@ -43,6 +45,14 @@ remote_packets_dispatcher = None
 
 class WrongTaskIdError(RuntimeError):
     pass
+
+
+def join_host_port(host, port):
+    logging.debug('join_host_port(%s, %s)' % (host, port))
+    if ':' in host:
+        return '[%s]:%d' % (host, port)
+    else:
+        return '%s:%d' % (host, port)
 
 
 def wrap_string(s, width):
@@ -95,6 +105,7 @@ class ActionQueue(object):
 
 class RemotePacketsDispatcher(object):
     _SANDBOX_TASK_CREATION_RETRY_INTERVAL = 10.0
+    _RPC_RESEND_INTERVAL = 20.0
 
     def __init__(self):
         #self.listen_port = listen_port
@@ -304,7 +315,7 @@ class RemotePacketsDispatcher(object):
             #self._wait_task_state(pck, TaskStateGroups., reasonTERMINATED)
 
             assert not pck._peer_addr
-            #if self._target_stop_mode:
+            #if pck._target_stop_mode:
             #    <waiting for peer addr>
             #
             #    We can't STOP* for now, because we have no _peer_addr
@@ -354,6 +365,7 @@ class RemotePacketsDispatcher(object):
         # When impl stop it will set ._sched again or modify other fields of pck
         impl(pck)
 
+    @traced_rpc_method()
     def _on_rpc_update_graph(self, task_id, peer_addr, state, is_final):
         logging.debug('_ON_RPC_UPDATE_GRAPH: %s' % ((task_id, peer_addr, is_final, state),))
         logging.debug('_ON_RPC_UPDATE_GRAPH[state]: %s' % (GraphState.str(state['state'])))
@@ -373,6 +385,8 @@ class RemotePacketsDispatcher(object):
             # rem: _on_task_status_change (enter + exit)
             # rem: _on_rpc_update_graph with self.lock <-- OOPS
 
+            logging.debug('_on_rpc_update_graph state %s' % pck._state)
+
             assert pck._state not in [
                 TaskState.CREATING,
                 TaskState.TERMINATED,
@@ -380,7 +394,9 @@ class RemotePacketsDispatcher(object):
                 TaskState.FETCHING_FINAL_UPDATE
             ], "_on_rpc_update_graph not in CREATING|TERMINATED|FETCHING*"
 
-            if pck._state in [TaskState.STARTING, TaskState.CHECKING_START_ERROR, TaskState.STARTED]:
+            if pck._state in [TaskState.STARTING,
+                              TaskState.CHECKING_START_ERROR,
+                              TaskState.STARTED]:
                 if pck._state != TaskState.STARTED:
                     pck._set_state(TaskState.STARTED, '_on_rpc_update_graph')
                     pck._drop_sched_if_need()
@@ -390,12 +406,13 @@ class RemotePacketsDispatcher(object):
 
                 if not pck._peer_addr:
                     pck._peer_addr = peer_addr
+                    logging.debug('SET pck._peer_addr = %s' % (peer_addr,))
 
                     if pck._target_stop_mode:
                         if is_final:
                             pck._sent_stop_mode = pck._target_stop_mode # FIXME
                         else:
-                            pck._start_packet_stop(pck)
+                            self._start_packet_stop(pck)
 
             if pck._target_stop_mode != StopMode.CANCEL:
                 pck._update_graph(state, is_final)
@@ -404,13 +421,15 @@ class RemotePacketsDispatcher(object):
                 if pck._target_stop_mode == StopMode.CANCEL \
                     or state['state'] == GraphState.SUCCESSFULL:
                     pck._mark_terminated('_on_rpc_update_graph(SUCCESSFULL)')
-                else:
-                    pck._set_state(TaskState.FETCHING_RESOURCE_LIST)
-                    self._start_fetch_resource_list(pck)
+                #else:
+                    # XXX WAITING for TERMINATED state
+                    #pck._set_state(TaskState.FETCHING_RESOURCE_LIST)
+                    #self._start_fetch_resource_list(pck)
 
     def _start_fetch_resource_list(self, pck):
-        self._sbx_invoker.invoker(lambda : self._fetch_resource_list(pck))
+        self._sbx_invoker.invoke(lambda : self._fetch_resource_list(pck))
 
+# TODO XXX FIXME From which task state resources are ready?
     def _fetch_resource_list(self, pck):
         try:
             ans = self._sandbox.list_task_resources(pck._sandbox_task_id)
@@ -423,10 +442,17 @@ class RemotePacketsDispatcher(object):
 
             return
 
+# XXX
+        import json
+        logging.debug('task #%s resources list answer: %s' % (pck._sandbox_task_id, json.dumps(ans, indent=3)))
+
         res_by_type = {
             resource['type']: resource
                 for resource in ans['items']
         }
+
+# XXX
+        logging.debug('task #%s res_by_type: %s' % (pck._sandbox_task_id, json.dumps(res_by_type, indent=3)))
 
         with pck.lock:
     # TODO FIXME Don't store/fetch for SUCCESSFULL?
@@ -440,7 +466,7 @@ class RemotePacketsDispatcher(object):
                 pck._mark_terminated('_fetch_resource_list')
 
     def _start_fetch_final_update(pck):
-        self._sbx_invoker.invoker(lambda : self._fetch_final_update(pck))
+        self._sbx_invoker.invoke(lambda : self._fetch_final_update(pck))
 
     def _fetch_final_update(pck):
         try:
@@ -522,11 +548,13 @@ class RemotePacketsDispatcher(object):
                     pass
 
                 elif status_group == TaskStateGroups.TERMINATED:
-                    if pck._final_state is not None:
-                        pck._mark_terminated('_final_state is not None and task terminated')
-                    else:
-                        pck._set_state(TaskState.FETCHING_RESOURCE_LIST) #1
-                        self._start_fetch_resource_list(pck)
+                    #if pck._final_state is not None:
+                        #pck._mark_terminated('_final_state is not None and task terminated')
+                    #else:
+                        #pck._set_state(TaskState.FETCHING_RESOURCE_LIST) #1
+                        #self._start_fetch_resource_list(pck)
+                    pck._set_state(TaskState.FETCHING_RESOURCE_LIST) #1
+                    self._start_fetch_resource_list(pck)
 
     def stop_packet(self, pck, kill_jobs):
         self._stop_packet(pck, StopMode.STOP if kill_jobs else StopMode.STOP_GRACEFULLY)
@@ -567,14 +595,16 @@ class RemotePacketsDispatcher(object):
                 raise Unreachable()
 
     def _do_stop_packet(self, pck):
-        return
-
         task_id = pck._sandbox_task_id
         stop_mode = pck._target_stop_mode
 
-        proxy = rem.xmlrpc.ServerProxy(
-            url='http://%s:%d' % pck._peer_addr,
-            timeout=15.0) # TODO
+# TODO
+        assert pck._peer_addr is not None
+
+        proxy = XMLRPCServerProxy(
+            uri='http://%s' % join_host_port(*pck._peer_addr),
+            timeout=15.0
+        )
 
         logging.debug('_do_stop_packet(pck=%s, task=%s, stop_mode=%s' % (
             pck.id, task_id, stop_mode))
@@ -583,7 +613,8 @@ class RemotePacketsDispatcher(object):
             if stop_mode == StopMode.CANCEL:
                 proxy.cancel(task_id)
             else:
-                proxy.stop(task_id, kill_jobs=stop_mode == StopMode.STOP)
+                kill_jobs = stop_mode == StopMode.STOP
+                proxy.stop(task_id, kill_jobs)
 
         except Exception as e:
             logging.exception("Failed to send stop to packet") # XXX For devel
@@ -615,6 +646,7 @@ class RemotePacketsDispatcher(object):
                     pck._sent_stop_mode = stop_mode
 
     def _start_packet_stop(self, pck):
+        logging.debug('_start_packet_stop(%s, %s)' % (pck.id, pck._target_stop_mode))
         self._rpc_invoker.invoke(lambda : self._do_stop_packet(pck))
 
 
