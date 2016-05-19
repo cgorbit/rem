@@ -44,7 +44,7 @@ class _ExecutorOps(object):
 
         if graph.state in [GraphState.SUCCESSFULL, GraphState.ERROR, GraphState.SUSPENDED] \
             or graph.state == GraphState.TIME_WAIT \
-                and graph.get_nearest_retry_deadline() - time.time() > pck._max_time_wait:
+                and graph.get_nearest_retry_deadline() - time.time() > pck._MAX_TIME_WAIT:
 
             pck._finished = True
 
@@ -72,13 +72,12 @@ class _ExecutorOps(object):
 
 
 class Packet(object):
+    _MAX_TIME_WAIT = 60.0 # TODO XXX XXX
+
     def __init__(self, pck_id, graph):
         self.id = pck_id
         self.name = '_TODO_packet_name_for_%s' % pck_id # TODO
         self.history = []
-        self._finished = False
-        self._cancelled = False
-        self._has_updates = False
         self._init_non_persistent()
 
         self.state = None
@@ -105,6 +104,10 @@ class Packet(object):
         self._main_thread = None
         self._job_threads = []
         self._proc_runner = None
+    # FIXME
+        self._finished = False
+        self._cancelled = False
+        self._has_updates = False
 
     def vivify_jobs_waiting_stoppers(self):
         pass # TODO XXX
@@ -119,6 +122,10 @@ class Packet(object):
         sdict.pop('_proc_runner', None)
         sdict.pop('_job_threads', None)
         sdict.pop('_on_update', None)
+    # FIXME
+        sdict.pop('_finished', None)
+        sdict.pop('_cancelled', None)
+        sdict.pop('_has_updates', None)
         return sdict
 
     def __setstate__(self, sdict):
@@ -134,6 +141,13 @@ class Packet(object):
 
         print >>sys.stderr, self._graph_executor.__dict__
         print >>sys.stderr, self._graph_executor.state
+
+# FIXME
+        with self._lock:
+            self.resume(
+            #self._graph_executor.allow_to_run_jobs(
+                reset_tries= self._graph_executor.state == GraphState.ERROR
+            )
 
         self._main_thread = ProfiledThread(target=self._main_loop, name_prefix='PacketLoop')
         self._main_thread.start()
@@ -174,13 +188,13 @@ class Packet(object):
 
     # For those who changed their's minds after call to stop(kill_jobs=False)
 # ATW NOT USED
-    def resume(self):
+    def resume(self, reset_tries=False):
         with self._lock:
             if self._finished: # FIXME
                 raise RuntimeError("Already finished")
             if self._cancelled:
                 raise RuntimeError("Already cancelled")
-            self._graph_executor.disallow_to_run_jobs(kill_jobs)
+            self._graph_executor.allow_to_run_jobs(reset_tries=reset_tries)
 
     def cancel(self):
         with self._lock:

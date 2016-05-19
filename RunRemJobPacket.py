@@ -3,6 +3,7 @@ import sys
 import json
 import re
 import types
+import shutil
 import logging
 import subprocess
 
@@ -125,10 +126,17 @@ class RunRemJobPacket(SandboxTask):
         if self.ctx['snapshot_resource_id']:
             prev_snapshot_path = self.sync_resource(int(self.ctx['snapshot_resource_id']))
 
-            for subdir in ['io', 'root']:
-                shutil.copytree(prev_snapshot_path + '/' + subdir, 'work/' + subdir)
+            if False:
+                for subdir in ['io', 'root']:
+# FIXME symlinks=True
+                    shutil.copytree(prev_snapshot_path + '/' + subdir, 'work/' + subdir)
+                prev_packet_snapshot_file = prev_snapshot_path + '/' + 'packet.pickle'
 
-            prev_packet_snapshot_file = prev_snapshot_path + '/' + 'packet.pickle'
+            else:
+                run_process(['tar', '-C', 'work', '-xf', prev_snapshot_path])
+                prev_packet_pickle_basename = 'prev_packet.pickle'
+                os.rename('work/packet.pickle', prev_packet_pickle_basename)
+                prev_packet_snapshot_file = prev_packet_pickle_basename
         else:
             os.mkdir('work/io')
             os.mkdir('work/root')
@@ -174,14 +182,16 @@ class RunRemJobPacket(SandboxTask):
 
         run_process(argv, log_prefix='executor')
 
-        # TODO XXX Checks (at least for snapshot_file existence)
-
+# XXX This actually not needed for work.tar
         if custom_resources:
             self.__unlink_custom_resources(custom_resources)
 
+        # TODO XXX Checks (at least for snapshot_file existence)
+
+        run_process(['tar', '-C', 'work', '-cf', 'work.tar', './'])
         self.create_resource(
             '',
-            'work',
+            'work.tar',
             rt.REM_JOBPACKET_EXECUTION_SNAPSHOT)
 
         self.create_resource(

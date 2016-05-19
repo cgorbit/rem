@@ -15,7 +15,8 @@ class TaskStateGroups(object):
 
 class SandboxTaskStateAwaiter(object):
     DEFAULT_UPDATE_INTERVAL = 5.0
-    DEFAULT_UPDATE_INTERVAL = 1.0 # TODO XXX REMOVE
+# TODO XXX REMOVE
+    DEFAULT_UPDATE_INTERVAL = 1.0
 
     def __init__(self, sandbox, update_interval=DEFAULT_UPDATE_INTERVAL):
         self._sandbox = sandbox

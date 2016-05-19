@@ -550,7 +550,8 @@ class JobGraphExecutor(Unpickable(
     start = restart
 
     def stop(self): # for LocalPacket
-        self._kill_jobs_drop_results()
+        #self._kill_jobs_drop_results()
+        self._graph_executor.disallow_to_run_jobs(kill_jobs)
 
     def cancel(self): # for SandboxPacket
         self._kill_jobs_drop_results()

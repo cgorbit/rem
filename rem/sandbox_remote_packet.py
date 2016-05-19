@@ -443,8 +443,8 @@ class RemotePacketsDispatcher(object):
             return
 
 # XXX
-        import json
-        logging.debug('task #%s resources list answer: %s' % (pck._sandbox_task_id, json.dumps(ans, indent=3)))
+        #import json
+        #logging.debug('task #%s resources list answer: %s' % (pck._sandbox_task_id, json.dumps(ans, indent=3)))
 
         res_by_type = {
             resource['type']: resource
@@ -452,11 +452,10 @@ class RemotePacketsDispatcher(object):
         }
 
 # XXX
-        logging.debug('task #%s res_by_type: %s' % (pck._sandbox_task_id, json.dumps(res_by_type, indent=3)))
+        #logging.debug('task #%s res_by_type: %s' % (pck._sandbox_task_id, json.dumps(res_by_type, indent=3)))
 
         with pck.lock:
-    # TODO FIXME Don't store/fetch for SUCCESSFULL?
-            pck._result_snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
+            pck._prev_snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
 
             if pck._final_state is None:
                 pck._final_update_url = res_by_type['REM_JOBPACKET_GRAPH_UPDATE']['http']['proxy']
@@ -782,7 +781,7 @@ class SandboxRemotePacket(object):
         self._sched = None
         self._peer_addr = None
         self._final_state = False
-        self._result_snapshot_resource_id = None
+        self._prev_snapshot_resource_id = None
 
         remote_packets_dispatcher.register_packet(self)
 
@@ -838,9 +837,7 @@ class SandboxJobGraphExecutorProxy(object):
         self._custom_resources = custom_resources
 
         self._remote_packet = None
-        self._snapshot_resource_id = None
-        #self._result_resource_id = None # TODO FIXME
-        self._result_snapshot_resource_id = None
+        self._prev_snapshot_resource_id = None
 
         self.do_not_run = False # FIXME
         self.cancelled = False # FIXME
@@ -863,8 +860,8 @@ class SandboxJobGraphExecutorProxy(object):
             self,
             self.pck_id,
             snapshot_data=_produce_snapshot_data(self.pck_id, self._graph) \
-                if not self._snapshot_resource_id else None,
-            snapshot_resource_id=self._snapshot_resource_id,
+                if not self._prev_snapshot_resource_id else None,
+            snapshot_resource_id=self._prev_snapshot_resource_id,
             custom_resources=self._custom_resources
         )
 
@@ -951,7 +948,7 @@ class SandboxJobGraphExecutorProxy(object):
         elif r._final_state == GraphState.ERROR:
             self.result = False
 
-        self._result_snapshot_resource_id = r._result_snapshot_resource_id \
+        self._prev_snapshot_resource_id = r._prev_snapshot_resource_id \
             if r._final_state != GraphState.SUCCESSFULL else None
 
         on_stop()
@@ -1037,7 +1034,7 @@ class SandboxJobGraphExecutorProxy(object):
 
             self.do_not_run = True
             self.cancelled = True
-            self._result_snapshot_resource_id = None
+            self._prev_snapshot_resource_id = None
 
             if self.time_wait_sched:
                 self.time_wait_sched()

@@ -196,7 +196,7 @@ class PacketBase(Unpickable(
             return ImplState.SUCCESSFULL if self.finish_status else ImplState.ERROR
 
         elif self.do_not_run:
-            assert graph.state & GraphState.SUSPENDED
+            assert graph.is_null() or graph.state & GraphState.SUSPENDED
 
             if graph.is_null():
                 return ImplState.PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого...
@@ -528,6 +528,7 @@ class PacketBase(Unpickable(
 
         self.need_to_be_removed = True
 
+        g = self._graph_executor
         if not g.is_null():
             g.cancel()
 
@@ -814,10 +815,15 @@ class PacketBase(Unpickable(
 
             #raise NotImplementedError("CHECKS") # TODO XXX
 
-            g = self._graph_executor
+# TODO XXX
+            if self.finish_status == True:
+                raise RuntimeError("Can't suspend SUCCESSFULL packet")
+# TODO XXX
 
+            self.finish_status = None
             self.do_not_run = True
 
+            g = self._graph_executor
             if not g.is_null():
                 g.stop(kill_jobs) # call always, because value of kill_jobs may change
 
@@ -904,6 +910,7 @@ class PacketBase(Unpickable(
             self.do_not_run = suspend
             self.finish_status = None
 
+            g = self._graph_executor
             if g.is_null():
                 pass # becomes PENDING
             else:
@@ -949,6 +956,7 @@ class PacketBase(Unpickable(
             self._update_done_tags(
                 lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
 
+            g = self._graph_executor
             if not g.is_null():
                 g.cancel()
 
