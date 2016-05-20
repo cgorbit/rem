@@ -65,12 +65,12 @@ class PriorityQueue(object):
         self._rollup(pos)
 
     # obsolete
-    def pop(self, key=None):
-        self._check_not_empty()
-        idx = self.revIndex.get(key, None) if key else 0
-        if idx is None:
-            return
-        return self._pop(idx)
+    #def pop(self, key=None):
+        #self._check_not_empty()
+        #idx = self.revIndex.get(key, None) if key else 0
+        #if idx is None:
+            #return
+        #return self._pop(idx)
 
     def pop_front(self):
         self._check_not_empty()
@@ -81,6 +81,14 @@ class PriorityQueue(object):
         if idx is None:
             raise KeyError()
         return self._pop(idx)
+
+    pop = pop_by_key
+
+    def discard(self, key):
+        idx = self.revIndex.get(key)
+        if idx is None:
+            return
+        self._pop(idx)
 
     def get(self, key, default=None):
         idx = self.revIndex.get(key)

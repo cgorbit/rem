@@ -195,11 +195,12 @@ class QueueBase(Unpickable(
                 return
 
             if src_queue is not None:
+                self._on_before_remove(pck)
                 src_queue.remove(pck)
 
             if dst_queue is not None:
                 dst_queue.add(pck)
-                self._on_relocate(pck)
+                self._on_after_add(pck)
 
     def is_alive(self):
         return not self.is_suspended
@@ -279,6 +280,7 @@ class LocalQueue(QueueBase):
     _PACKET_CLASS = LocalPacket
 
     def _notify_has_pending_if_need(self):
+        logging.debug('_notify_has_pending_if_need ... %s' % self.has_startable_jobs())
 # FIXME Optimize
         if self.has_startable_jobs():
             self.scheduler._on_job_pending(self)
@@ -312,7 +314,7 @@ class LocalQueue(QueueBase):
 
     def has_startable_jobs(self):
         with self.lock:
-            return self.packets_with_pending_jobs \
+            return bool(self.packets_with_pending_jobs) \
                 and len(self.working_jobs) < self.working_limit \
                 and self.is_alive()
 
@@ -338,12 +340,15 @@ class LocalQueue(QueueBase):
 
             return job
 
-    def _on_relocate(self, pck):
+    def _on_before_remove(self, pck):
+        #if pck.has_pending_jobs():
+    # TODO
+        self.packets_with_pending_jobs.discard(pck)
+
+    def _on_after_add(self, pck):
 # FIXME Optimize
         if pck.has_pending_jobs():
             self.packets_with_pending_jobs.add(pck)
-        else:
-            self.packets_with_pending_jobs.discard(pck)
 
 
 class SandboxQueue(QueueBase):
@@ -383,12 +388,15 @@ class SandboxQueue(QueueBase):
     def _on_packet_attach(self, pck):
         pass
 
-    def _on_relocate(self, pck):
+    def _on_before_remove(self, pck):
+        #else:
+    # TODO
+        self.working_packets.discard(pck)
+
+    def _on_after_add(self, pck):
 # FIXME Optimize
         if not pck._graph_executor.is_null():
             self.working_packets.add(pck)
-        else:
-            self.working_packets.discard(pck)
 
     def _on_packet_detach(self, pck):
         self.working_packets.remove(pck)

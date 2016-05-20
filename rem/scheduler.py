@@ -325,6 +325,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def _add_queue_as_non_empty_if_need(self, q):
         # this racy code may add empty queue to queues_with_jobs,
         # but it's better, than deadlock
+# XXX REMOVE
+        logging.debug('_add_queue_as_non_empty_if_need ... %s' % q.has_startable_jobs())
         if q.has_startable_jobs():
             with self.lock:
                 if q not in self.queues_with_jobs:
@@ -349,7 +351,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         if queue:
             # .get_job_to_run not under lock to prevent deadlock with Notify
-            job = queue.get_job_to_run(self.context)
+            job = queue.get_job_to_run()
             #if job:
                 #logging.debug('ThreadJobWorker get_job_to_run %s from %s' % (job, job.pck))
 
@@ -779,10 +781,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Start(self):
 # XXX
-        import sandbox_remote_packet
-        d = sandbox_remote_packet.remote_packets_dispatcher = sandbox_remote_packet.RemotePacketsDispatcher()
-        d.start(self.context)
-        self._remote_packets_dispatcher = d
+        if self.context.sandbox_api_url:
+            import sandbox_remote_packet
+            d = sandbox_remote_packet.remote_packets_dispatcher = sandbox_remote_packet.RemotePacketsDispatcher()
+            d.start(self.context)
+            self._remote_packets_dispatcher = d
+# XXX
 
         for q in self.qRef.itervalues():
             for pck in list(q.ListAllPackets()):

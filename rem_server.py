@@ -799,7 +799,10 @@ def create_scheduler(ctx, restorer=None):
 
 
 def run_server(ctx):
-    osspec.set_process_title("[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else ""))
+    if ctx.use_ekrokhalev_server_process_title:
+        osspec.set_process_title(
+            "[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else "")
+        )
 
     def logged(f, *args):
         logging.debug("rem-server\tbefore_%s" % f.__name__)

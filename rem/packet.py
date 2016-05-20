@@ -87,13 +87,16 @@ def always(ctor):
 class DummyGraphExecutor(object):
     state = GraphState.PENDING_JOBS
 
-# XXX TODO detailed_status dissapeared
+# XXX TODO detailed_status dissapeared from SandboxPacket
 
     def is_null(self):
         return True
 
     def produce_detailed_status(self):
         return {}
+
+    def get_working_jobs(self):
+        return []
 
 
 class PacketBase(Unpickable(
@@ -908,13 +911,11 @@ class PacketBase(Unpickable(
             #raise NotImplementedError("CHECKS") # TODO XXX
 
             self.do_not_run = suspend
-            self.finish_status = None
 
-            g = self._graph_executor
-            if g.is_null():
-                pass # becomes PENDING
-            else:
-                g.cancel()
+# XXX #1
+            self._graph_executor.reset()
+            self.finish_status = None
+            self._set_real_graph_executor_if_need()
 
     # TODO XXX
             #elif suspend:
@@ -956,11 +957,10 @@ class PacketBase(Unpickable(
             self._update_done_tags(
                 lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
 
-            g = self._graph_executor
-            if not g.is_null():
-                g.cancel()
-
+# XXX #2
+            self._graph_executor.reset()
             self.finish_status = None
+            self._set_real_graph_executor_if_need()
 
             self._update_state()
 
@@ -979,6 +979,11 @@ class PacketBase(Unpickable(
             #
             # FIXME This logic also may be added to local tags
 
+    def _set_real_graph_executor_if_need(self):
+        if isinstance(self._graph_executor, DummyGraphExecutor):
+            self._graph_executor = self._create_job_graph_executor()
+            self._graph_executor.init() # TODO Better
+
     def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
         with self.lock:
             self._check_can_move_beetwen_queues()
@@ -987,11 +992,10 @@ class PacketBase(Unpickable(
                 src_queue._detach_packet(self)
 
             if dst_queue:
-                dst_queue._attach_packet(self)
+                self._set_real_graph_executor_if_need()
 
-                if isinstance(self._graph_executor, DummyGraphExecutor):
-                    self._graph_executor = self._create_job_graph_executor()
-                    self._graph_executor.init() # TODO Better
+                # after _create_job_graph_executor() because of .has_pending_jobs()
+                dst_queue._attach_packet(self)
 
                 #self._graph_executor.set_runner(self.queue.runner)
 
@@ -1041,10 +1045,10 @@ class _LocalPacketJobGraphOps(object):
         self.pck._stop_waiting(stop_id)
 
     def del_working(self, job):
-        self.queue._on_job_done(self)
+        self.pck.queue._on_job_done(self)
 
     def add_working(self, job):
-        self.queue._on_job_get(self)
+        self.pck.queue._on_job_get(self)
 
     #def set_successfull_state(self):
         ##self.pck._change_state(ImplState.SUCCESSFULL)
@@ -1101,8 +1105,8 @@ class LocalPacket(PacketBase):
         )
 
     def _can_run_jobs_right_now(self):
-        return self.state == ImplState.RUNNING \
-            and self._graph_executor.can_run_jobs_right_now()
+        return self.state in [ImplState.RUNNING, ImplState.PENDING] \
+            and self._graph_executor.has_jobs_to_run()
 
     def get_job_to_run(self):
         with self.lock:

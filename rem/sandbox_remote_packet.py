@@ -910,8 +910,6 @@ class SandboxJobGraphExecutorProxy(object):
 
         if self.cancelled:
             self.cancelled = False
-            self.remote_history = []
-            self.detailed_status = {}
             on_stop()
             return
 
@@ -1027,14 +1025,32 @@ class SandboxJobGraphExecutorProxy(object):
 
             return self._stop_promise.to_future()
 
+# XXX BEAUTY
     def cancel(self):
+        self._cancel(False)
+
+# XXX BEAUTY
+    def reset(self):
+        self._cancel(True)
+
+# XXX BEAUTY
+    def _cancel(self, need_reset):
         with self.lock:
+            if need_reset:
+                self._prev_snapshot_resource_id = None
+                self.result = None
+                sel
+                self.remote_history = []
+                self.detailed_status = {}
+
             if not self._remote_packet:
+                return
+
+            if self.cancelled:
                 return
 
             self.do_not_run = True
             self.cancelled = True
-            self._prev_snapshot_resource_id = None
 
             if self.time_wait_sched:
                 self.time_wait_sched()
@@ -1072,12 +1088,6 @@ class SandboxPacketOpsForJobGraphExecutorProxy(object):
 
     def on_state_change(self):
         self.pck._on_graph_executor_state_change()
-
-    def set_successfull_state(self):
-        self.pck._change_state(PacketState.SUCCESSFULL)
-
-    def set_errored_state(self):
-        self.pck._change_state(PacketState.ERROR)
 
     def job_done_successfully(self, job_id):
         tag = self.pck.job_done_tag.get(job_id)
