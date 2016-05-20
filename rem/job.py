@@ -288,7 +288,7 @@ class JobRunner(object):
 
         except Exception as e:
             self._process_start_error = e
-            logging.debug("Failed to start %s: %s" % (job, e))
+            logging.exception("Failed to start %s: %s" % (job, e))
             return False
 
         self._process = process

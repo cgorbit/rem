@@ -132,8 +132,6 @@ class JobGraphExecutor(Unpickable(
                             _clean_state=(bool, False), # False for loading old backups
                             _active_jobs=always(_ActiveJobs),
                             created_inputs=set,
-
-                            dont_run_new_jobs=bool, # FIXME Rename with meangin invertion?
                       ) ):
     def __init__(self, ops, pck_id, graph):
         super(JobGraphExecutor, self).__init__()
@@ -178,16 +176,13 @@ class JobGraphExecutor(Unpickable(
             return GraphState.SUCCESSFULL
 
         elif has_active_jobs:
-            if self.dont_run_new_jobs or self.failed_jobs or not self.jobs_to_run:
-                return GraphState.WORKING | (self.dont_run_new_jobs and GraphState.SUSPENDED)
+            if self.failed_jobs or not self.jobs_to_run:
+                return GraphState.WORKING
             else:
                 return GraphState.WORKING | GraphState.PENDING_JOBS
 
         elif self.failed_jobs:
             return GraphState.ERROR
-
-        elif self.dont_run_new_jobs:
-            return GraphState.SUSPENDED
 
         elif self.jobs_to_run:
             return GraphState.PENDING_JOBS
@@ -198,11 +193,11 @@ class JobGraphExecutor(Unpickable(
         else:
             raise AssertionError("Unreachable: %s" % self)
 
-    def is_stopping(self):
+    def is_cancelling(self):
         return False
 
-# TODO Use ids from delayed_executor as in sandbox_remote_packet
     def _register_stop_waiting(self, job_id, deadline):
+# TODO Use ids from delayed_executor as in sandbox_remote_packet
         stop_id = None
         stop_waiting = lambda : self._ops.stop_waiting(stop_id) # TODO BACK_REFERENCE
         stop_id = id(stop_waiting)
@@ -294,10 +289,6 @@ class JobGraphExecutor(Unpickable(
             self._create_output(job.id, "err")
         )
 
-    #def _notify_can_run_jobs_if_need(self):
-        #if self.can_run_jobs_right_now():
-            #self._ops.on_can_run_jobs()
-
     def _apply_job_result(self, job, runner):
         if runner.returncode_robust == 0 and not runner.is_cancelled():
             self.succeed_jobs.add(job.id)
@@ -349,7 +340,7 @@ class JobGraphExecutor(Unpickable(
             processor(job, runner)
 
     def get_job_to_run(self):
-        if not self.can_run_jobs_right_now(): # duplicate, see LocalPacket.get_job_to_run
+        if not self._can_run_jobs_right_now(): # duplicate, see LocalPacket.get_job_to_run
             raise RuntimeError()
 
         jid = self.jobs_to_run.pop()
@@ -365,8 +356,10 @@ class JobGraphExecutor(Unpickable(
 
         return runner
 
-    def can_run_jobs_right_now(self):
-        return self.jobs_to_run and not (self.dont_run_new_jobs or self.failed_jobs)
+    def _can_run_jobs_right_now(self):
+        return bool(self.jobs_to_run and not self.failed_jobs)
+
+    has_jobs_to_run = _can_run_jobs_right_now
 
     # add_job() -- это излишняя функциональность для JobGraphExecutor
     # TODO Move back to PacketBase, create JobGraphExecutor only on first ACTIVATE
@@ -465,7 +458,6 @@ class JobGraphExecutor(Unpickable(
 
         self._init_job_deps_graph()
         self.created_inputs.clear()
-        self.dont_run_new_jobs = False
 
         #self._ops.recreate_working_directory() # FIXME
 
@@ -510,17 +502,16 @@ class JobGraphExecutor(Unpickable(
 
         return ret
 
-    def disallow_to_run_jobs(self, kill_running):
-        self.dont_run_new_jobs = True
+    #def disallow_to_run_jobs(self, kill_running):
         #self._ops.on_state_change() # maybe from PENDING to WORKABLE
-        self._update_state()
+        #self._update_state()
 
-        if kill_running:
+        #if kill_running:
             # FIXME In ideal world it's better to "apply" jobs that will be
             # finished racy just before kill(2)
-            self._kill_jobs_drop_results()
+            #self._kill_jobs_drop_results()
             #self._ops.on_state_change() # maybe from PENDING to WORKABLE
-            self._update_state()
+            #self._update_state()
 
         #self._notify_can_run_jobs_if_need()
 
@@ -531,34 +522,36 @@ class JobGraphExecutor(Unpickable(
             job.tries = 0
         #self._notify_can_run_jobs_if_need()
 
-    def allow_to_run_jobs(self, reset_tries=False):
-        if reset_tries:
-            self._reset_tries()
-        self.dont_run_new_jobs = False
-        # FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
-        #self._ops.on_state_change()
+    #def allow_to_run_jobs(self, reset_tries=False):
+        #if reset_tries:
+            #self._reset_tries()
+        ## FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
+        ##self._ops.on_state_change()
+        #self._update_state()
+        ##self._notify_can_run_jobs_if_need()
+
+    def reset_tries(self):
+        self._reset_tries()
         self._update_state()
-        #self._notify_can_run_jobs_if_need()
 
 # XXX
-    def restart(self):
+    def reset(self):
         if not self._clean_state:
             self._do_reset()
         #self._notify_can_run_jobs_if_need()
         self._update_state()
 
-    start = restart
+    #start = restart
 
-    def stop(self): # for LocalPacket
-        #self._kill_jobs_drop_results()
-        self._graph_executor.disallow_to_run_jobs(kill_jobs)
-
-    def cancel(self): # for SandboxPacket
+    def cancel_running_jobs(self): # for LocalPacket
         self._kill_jobs_drop_results()
-        self._update_state() # FIXME XXX
+        self._update_state()
 
-    #def is_stopped(self):
-        #return self.dont_run_new_jobs and not self.has_running_jobs()
+    #def cancel(self): # for SandboxPacket
+        #self._kill_jobs_drop_results()
+        #self._update_state() # FIXME XXX
+
+    #reset = cancel
 
     def is_null(self):
         return not self.has_running_jobs()
@@ -589,9 +582,6 @@ class JobGraphExecutor(Unpickable(
         self._process_jobs_results(revert_leaf)
 
     def _kill_jobs(self):
-        if self.can_run_jobs_right_now():
-            logging.error("_kill_jobs on %s when can_run_jobs_right_now() is True" % self.pck_id)
-
         active = self._active_jobs
 
         active.terminate()
@@ -605,7 +595,7 @@ class JobGraphExecutor(Unpickable(
         return bool(self.active_jobs_cache)
 
     def recover_after_backup_loading(self):
-        self.failed_jobs.clear() # FIXME
+        self.failed_jobs.clear() # FIXME Don't remember. Legacy behaviour?
         self.active_jobs_cache.clear()
         #self._init_job_deps_graph()
 

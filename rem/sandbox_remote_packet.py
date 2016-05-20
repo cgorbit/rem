@@ -367,8 +367,16 @@ class RemotePacketsDispatcher(object):
 
     @traced_rpc_method()
     def _on_rpc_update_graph(self, task_id, peer_addr, state, is_final):
-        logging.debug('_ON_RPC_UPDATE_GRAPH: %s' % ((task_id, peer_addr, is_final, state),))
-        logging.debug('_ON_RPC_UPDATE_GRAPH[state]: %s' % (GraphState.str(state['state'])))
+        import pprint
+        logging.debug('_ON_RPC_UPDATE_GRAPH[%s]: %s' % (
+            GraphState.str(state['state']),
+            pprint.pformat({
+                'task_id': task_id,
+                'peer_addr': peer_addr,
+                'is_final': is_final,
+                'state': state
+            })
+        ))
 
         pck = self.by_task_id.get(task_id)
 
@@ -554,6 +562,14 @@ class RemotePacketsDispatcher(object):
                         #self._start_fetch_resource_list(pck)
                     pck._set_state(TaskState.FETCHING_RESOURCE_LIST) #1
                     self._start_fetch_resource_list(pck)
+
+    def restart_packet(self, pck):
+        return # TODO RPC
+        raise NotImplementedError()
+
+    def resume_packet(self, pck):
+        return # TODO RPC
+        raise NotImplementedError()
 
     def stop_packet(self, pck, kill_jobs):
         self._stop_packet(pck, StopMode.STOP if kill_jobs else StopMode.STOP_GRACEFULLY)
@@ -802,6 +818,12 @@ class SandboxRemotePacket(object):
     def stop(self, kill_jobs):
         remote_packets_dispatcher.stop_packet(self, kill_jobs)
 
+    def resume(self):
+        remote_packets_dispatcher.resume_packet(self)
+
+    def restart(self):
+        remote_packets_dispatcher.restart_packet(self)
+
     def get_result(self):
         raise NotImplementedError()
 
@@ -839,7 +861,6 @@ class SandboxJobGraphExecutorProxy(object):
         self._remote_packet = None
         self._prev_snapshot_resource_id = None
 
-        self.do_not_run = False # FIXME
         self.cancelled = False # FIXME
         self.time_wait_deadline = None
         self.time_wait_sched = None
@@ -873,10 +894,13 @@ class SandboxJobGraphExecutorProxy(object):
     def produce_detailed_status(self):
         return self.detailed_status
 
-    def is_stopping(self):
-        with self.lock:
-            return (self.do_not_run or self.cancelled) and self._remote_packet
+    #def is_stopping(self):
+        #with self.lock:
+            #return self.cancelled and self._remote_packet
             # (WORKING | CANCELLED) || (WORKING | SUSPENDED)
+
+    def is_cancelling(self):
+        return self.cancelled
 
 ########### Ops for _remote_packet
     def _on_sandbox_packet_update(self, state, is_final):
@@ -913,6 +937,9 @@ class SandboxJobGraphExecutorProxy(object):
             on_stop()
             return
 
+# XXX TODO
+# XXX TODO
+# XXX TODO
 # XXX TODO
 # Task FAILURE/EXCEPTION
         #if res.exceptioned: # TODO Rename
@@ -961,8 +988,8 @@ class SandboxJobGraphExecutorProxy(object):
 
             assert not self.cancelled
 
-            if not self.do_not_run:
-                self._remote_packet = self._create_remote_packet()
+            #if not self.do_not_run:
+                #self._remote_packet = self._create_remote_packet()
 
             self._update_state()
 
@@ -982,8 +1009,8 @@ class SandboxJobGraphExecutorProxy(object):
 
                 if self.cancelled:
                     state |= GraphState.CANCELLED
-                elif self.do_not_run:
-                    state |= GraphState.SUSPENDED
+                #elif self.do_not_run:
+                    #state |= GraphState.SUSPENDED
 
                 return state
 
@@ -993,8 +1020,8 @@ class SandboxJobGraphExecutorProxy(object):
             elif self.time_wait_deadline:
                 return GraphState.TIME_WAIT
 
-            elif self.do_not_run:
-                return GraphState.SUSPENDED
+            #elif self.do_not_run:
+                #return GraphState.SUSPENDED
 
             else:
                 return GraphState.PENDING_JOBS
@@ -1002,20 +1029,30 @@ class SandboxJobGraphExecutorProxy(object):
     def stop(self, kill_jobs):
         with self.lock:
             if not self._remote_packet:
-                raise
+                #raise RuntimeError("Nothing to stop")
+                return
+
             if self.cancelled:
                 return # FIXME
 
-            self.do_not_run = True
+            #self.do_not_run = True
             self._remote_packet.stop(kill_jobs)
             self._update_state()
+
+    def try_soft_resume(self):
+        with self.lock:
+            self._remote_packet.resume()
+
+    def try_soft_restart(self):
+        with self.lock:
+            self._remote_packet.restart()
 
     def start(self):
         with self.lock:
             if self._remote_packet:
                 raise RuntimeError()
 
-            self.do_not_run = False
+            #self.do_not_run = False
 
 # XXX Don't use _stop_promise, use SandboxTaskStateAwaiter's state
             self._stop_promise = Promise()
@@ -1039,7 +1076,6 @@ class SandboxJobGraphExecutorProxy(object):
             if need_reset:
                 self._prev_snapshot_resource_id = None
                 self.result = None
-                sel
                 self.remote_history = []
                 self.detailed_status = {}
 
@@ -1049,7 +1085,7 @@ class SandboxJobGraphExecutorProxy(object):
             if self.cancelled:
                 return
 
-            self.do_not_run = True
+            #self.do_not_run = True
             self.cancelled = True
 
             if self.time_wait_sched:

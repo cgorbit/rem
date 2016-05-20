@@ -128,7 +128,7 @@ class PacketBase(Unpickable(
                            #stopping_graph=bool,
                            #need_to_start_graph=bool,
                            do_not_run=bool,
-                           need_to_be_removed=bool,
+                           destroying=bool,
                            is_broken=bool,
                           ),
                 CallbackHolder,
@@ -162,7 +162,7 @@ class PacketBase(Unpickable(
         self._update_state()
 
     def _is_executable(self):
-        return not self.is_broken and not self.need_to_be_removed
+        return not self.is_broken and not self.destroying
 
     #def _is_runnable(self):
         #return self._is_executable() and not self.wait_dep_tags and self.queue \
@@ -175,13 +175,17 @@ class PacketBase(Unpickable(
 
         graph = self._graph_executor
 
-        if self.need_to_be_removed:
-            if graph.is_null():
-                return ImplState.HISTORIED
-            else:
+    # FIXME Better
+        is_graph_remote = isinstance(self, SandboxPacket)
+
+        if self.destroying:
+            if graph.is_cancelling():
                 assert graph.state & GraphState.CANCELLED
                 assert graph.state & GraphState.WORKING
                 return ImplState.DESTROYING
+            else:
+                assert not is_graph_remote or graph.is_null()
+                return ImplState.HISTORIED
 
         elif self.is_broken:
             return ImplState.BROKEN # may be GraphState.WORKING
@@ -199,18 +203,17 @@ class PacketBase(Unpickable(
             return ImplState.SUCCESSFULL if self.finish_status else ImplState.ERROR
 
         elif self.do_not_run:
-            assert graph.is_null() or graph.state & GraphState.SUSPENDED
-
-            if graph.is_null():
-                return ImplState.PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого...
-            else:
+            if graph.is_cancelling():
                 assert graph.state & GraphState.WORKING
                 return ImplState.PAUSING
+            else:
+                assert not is_graph_remote or graph.is_null()
+                return ImplState.PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого...
                             # мы должны быть уверены, что Граф будет stop/start'ed,
                             # например, за счёт .files_modified
 
         elif not graph.is_null():
-            if graph.is_stopping():
+            if graph.is_cancelling():
                 assert graph.state & GraphState.WORKING
                 assert graph.state & GraphState.CANCELLED # FIXME | SUSPENDED
                                                           # is_stopped contains SUSPENDED and CANCELLED
@@ -225,11 +228,6 @@ class PacketBase(Unpickable(
 
         else:
             return ImplState.PENDING
-
-    def has_pending_jobs(self):
-        with self.lock:
-            return self.state in [ImplState.PENDING, ImplState.RUNNING] \
-                and self._graph_executor.state & GraphState.PENDING_JOBS
 
     def _update_state(self):
         new = self._calc_state()
@@ -508,7 +506,7 @@ class PacketBase(Unpickable(
 
             if state in [ImplState.SUCCESSFULL, ImplState.HISTORIED, ImplState.BROKEN]:
                 assert self._graph_executor.is_null() # FIXME
-                self._release_place() # will kill jobs if need
+                self._release_place()
 
     def _update_repr_state(self):
         new = self._calc_repr_state(self.state)
@@ -524,12 +522,12 @@ class PacketBase(Unpickable(
 
 
     def destroy(self):
-        if self.need_to_be_removed:
+        if self.destroying:
             return
 
         #raise NonDestroyingStateError() # TODO XXX
 
-        self.need_to_be_removed = True
+        self.destroying = True
 
         g = self._graph_executor
         if not g.is_null():
@@ -549,6 +547,7 @@ class PacketBase(Unpickable(
         state = self._graph_executor.state
 
         if state == GraphState.SUCCESSFULL:
+            assert self._graph_executor.is_null()
             self.finish_status = True
             self._graph_executor = DummyGraphExecutor()
 
@@ -819,16 +818,20 @@ class PacketBase(Unpickable(
             #raise NotImplementedError("CHECKS") # TODO XXX
 
 # TODO XXX
-            if self.finish_status == True:
-                raise RuntimeError("Can't suspend SUCCESSFULL packet")
+            if self.state in [
+                ImplState.SUCCESSFULL,
+                ImplState.BROKEN,
+                ImplState.DESTROYING,
+                ImplState.HISTORIED
+            ]:
+                raise RuntimeError()
+
+            self.finish_status = None # for ERROR
 # TODO XXX
 
-            self.finish_status = None
             self.do_not_run = True
 
-            g = self._graph_executor
-            if not g.is_null():
-                g.stop(kill_jobs) # call always, because value of kill_jobs may change
+            self._do_graph_suspend(kill_jobs)
 
             self._update_state()
 
@@ -853,12 +856,7 @@ class PacketBase(Unpickable(
 
             self.do_not_run = False
 
-            # `reset_tries' is legacy behaviour of `rpc_resume'
-            #self._graph_executor.reset_tries(reset_tries=True) # FUCK XXX OMG TODO
-
-        # TODO
-            #if not self._graph_executor.is_null():
-                #self._graph_executor.stop_stopping()
+            self._do_graph_resume()
 
             self._update_state()
 
@@ -898,6 +896,11 @@ class PacketBase(Unpickable(
         if isinstance(ref, TagBase):
             self._on_tag_reset(ref, comment)
 
+    def _reset(self):
+        self._do_graph_reset()
+        self.finish_status = None
+        self._set_real_graph_executor_if_need()
+
     def rpc_reset(self, suspend=False):
         with self.lock:
             if not self._is_executable():
@@ -912,18 +915,7 @@ class PacketBase(Unpickable(
 
             self.do_not_run = suspend
 
-# XXX #1
-            self._graph_executor.reset()
-            self.finish_status = None
-            self._set_real_graph_executor_if_need()
-
-    # TODO XXX
-            #elif suspend:
-                #g.cancel()
-            #else:
-                ## ImplState.PREV_EXECUTOR_STOP_WAIT -> must be -> ReprState.WORKABLE
-                #g.try_fast_restart() # may fail later (race with network)
-                                    ## try_fast_restart must set cancel flag in itself
+            self._reset()
 
             self._update_state()
 
@@ -931,7 +923,7 @@ class PacketBase(Unpickable(
         with self.lock:
             if not self._is_executable():
                 return
-            #if self.need_to_be_removed:
+            #if self.destroying:
                 #return
 
             # FIXME Don't even update .wait_dep_tags if not self.is_resetable
@@ -957,10 +949,7 @@ class PacketBase(Unpickable(
             self._update_done_tags(
                 lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
 
-# XXX #2
-            self._graph_executor.reset()
-            self.finish_status = None
-            self._set_real_graph_executor_if_need()
+            self._reset()
 
             self._update_state()
 
@@ -1006,7 +995,7 @@ class PacketBase(Unpickable(
         with self.lock:
             if not self.queue:
                 raise
-            if self.need_to_be_removed:
+            if self.destroying:
                 raise # FIXME j.i.c
             if not self._graph_executor.is_null():
                 raise
@@ -1017,7 +1006,7 @@ class PacketBase(Unpickable(
         with self.lock:
             if self.queue:
                 raise
-            if self.need_to_be_removed:
+            if self.destroying:
                 raise # FIXME j.i.c
             #assert self.state == ImplState.UNINITIALIZED
             self._move_to_queue(None, queue)
@@ -1078,7 +1067,7 @@ class _LocalPacketJobGraphOps(object):
         logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, job.id)
         self.pck.send_job_long_execution_notification(job)
 
-    def start_process(self, args, kwargs):
+    def start_process(self, *args, **kwargs):
         ctx = PacketCustomLogic.SchedCtx
         return ctx.run_job(*args, **kwargs)
 
@@ -1145,12 +1134,44 @@ class LocalPacket(PacketBase):
             #raise as_rpc_user_error(
                 #from_rpc, RuntimeError("Can't move packets with running jobs"))
 
-    #def _stop_graph(self):
-        #self._graph_executor.stop()
+    def has_pending_jobs(self):
+        with self.lock:
+            return self.state in [ImplState.PENDING, ImplState.RUNNING] \
+                and self._graph_executor.state & GraphState.PENDING_JOBS
+
+    def _do_graph_suspend(self, kill_jobs):
+        if kill_jobs:
+            self._graph_executor.cancel_running_jobs()
+
+    def _do_graph_resume(self):
+        self._graph_executor.reset_tries() # XXX
+
+    def _do_graph_reset(self):
+        self._graph_executor.reset()
 
 
-#SandboxPacket = sandbox_remote_packet.SandboxPacket
 class SandboxPacket(PacketBase):
+    def _do_graph_suspend(self, kill_jobs):
+        g = self._graph_executor
+        if not g.is_null(): # null in ERROR state
+            g.stop(kill_jobs)
+
+    def _do_graph_resume(self):
+        g = self._graph_executor
+
+        if not g.is_null():
+            g.try_soft_resume() # XXX reset_tries
+            # if fail -- when g._remote_packet becomes None
+            #         -- SandboxPacket becomes PENDING
+
+    def _do_graph_reset(self):
+        g = self._graph_executor
+
+        if not self.wait_dep_tags and not g.is_null():
+            g.try_soft_restart()
+        else:
+            g.reset()
+
     def run(self):
         with self.lock:
             if not self._is_executable():

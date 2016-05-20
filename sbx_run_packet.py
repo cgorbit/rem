@@ -75,6 +75,10 @@ class RpcMethods(object):
         self.pck.restart()
 
     @with_task_id
+    def resume(self):
+        self.pck.resume()
+
+    @with_task_id
     def stop(self, kill_jobs):
         self.pck.stop(kill_jobs)
 
@@ -178,6 +182,25 @@ class RemNotifier(object):
                     return
 
 
+class OnExit(object):
+    def __init__(self, code):
+        self._code = code
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, t, e, tb):
+        self._code()
+
+
+class OnDel(object):
+    def __init__(self, code):
+        self._code = code
+
+    def __del__(self):
+        self._code()
+
+
 if __name__ == '__main__':
     opts = parse_arguments()
 
@@ -187,7 +210,12 @@ if __name__ == '__main__':
 
     os.chdir(opts.work_dir)
 
+# TODO delayed_executor
+# TODO rpc_server
+# TODO rem_notifier
+
     rem.delayed_executor.start()
+    #guard = OnDel(rem.delayed_executor.stop)
 
     if opts.snapshot_file is not None:
         with open(opts.snapshot_file) as snap:
@@ -215,7 +243,7 @@ if __name__ == '__main__':
         try:
             return rem_proxy.update_graph(
                 opts.task_id,
-                rpc_server.server_address[:2],
+                tuple(rpc_server.server_address[:2]),
                 update,
                 is_final
             )
@@ -254,7 +282,7 @@ if __name__ == '__main__':
     if not notifier_failed[0]:
         rem_notifier.send_update(last_update_message, is_final=True)
 
-    rem.delayed_executor.stop() # TODO FIXME Race-condition (can run some in pck)
+    rem.delayed_executor.stop()
     rpc_server.shutdown()
     logging.debug('after_rpc_shutdown')
 
