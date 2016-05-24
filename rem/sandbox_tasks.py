@@ -29,9 +29,9 @@ class SandboxTaskStateAwaiter(object):
         self._running = {}
         self._incoming = set()
 
-        self._start()
+        #self._start()
 
-    def _start(self):
+    def start(self):
         self._worker_thread = ProfiledThread(target=self._loop, name_prefix='SbxStateMon')
         self._worker_thread.start()
 

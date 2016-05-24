@@ -27,6 +27,7 @@ from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
 from rem.profile import ProfiledThread
 from rem_logging import logger as logging
+import sandbox_remote_packet
 
 
 def _bind1st(f, arg):
@@ -146,12 +147,19 @@ class SandboxPacketsRunner(object):
     def __init__(self, pool_size):
         self._lock = PickableLock()
         self._changed = threading.Condition(self._lock)
-        #self._limit = pool_size # TODO
-        self._run_pool = pool_size # XXX TODO update after backup loading
+        self._run_pool = pool_size # May be negative
         self._should_stop = False
         self._queues = QueueList()
         self._thread = ProfiledThread(target=self._loop, name_prefix='SbxPackRunner')
+        self._start()
+
+    def _start(self):
         self._thread.start()
+
+    def stop(self):
+        with self._lock:
+            self._should_stop = True
+            self._changed.notify()
 
     def _release_running(self):
         with self._lock:
@@ -163,9 +171,7 @@ class SandboxPacketsRunner(object):
     def _loop(self):
         while True:
             with self._lock:
-                while not(
-                    self._queues and self._run_pool
-                        or self._should_stop):
+                while not(self._queues and self._run_pool > 0 or self._should_stop):
                     self._changed.wait()
 
                 if self._should_stop:
@@ -191,21 +197,17 @@ class SandboxPacketsRunner(object):
 
             del guard
 
+    # For backup vivify
+    def _alloc(self):
+        with self._lock:
+            self._run_pool -= 1
+            return self._RunningGuard(self)
+
     def on_queue_not_empty(self, q):
         with self._lock:
             if q not in self._queues:
                 self._queues.push(q)
                 self._changed.notify()
-
-    #def _on_packet_stop(self):
-        #with self._lock:
-            #self._running_count -= 1
-            #self._changed.notify()
-
-    def stop(self):
-        with self._lock:
-            self._should_stop = True
-            self._changed.notify()
 
 
 class Mailer(object):
@@ -259,7 +261,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
                            #storage with knowledge about nonassigned packets (packets that was created but not yet assigned to appropriate queue)
                            schedWatcher=SchedWatcher, #watcher for time scheduled events
                            connManager=ConnectionManager, #connections to others rems
-                           packetNamesTracker=PacketNamesStorage
+                           packetNamesTracker=PacketNamesStorage,
+                           _remote_packets_dispatcher=sandbox_remote_packet.RemotePacketsDispatcher,
                         ),
                 ICallbackAcceptor):
     BackupFilenameMatchRe = re.compile("sched-(\d+).dump$")
@@ -793,14 +796,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.schedWatcher.AddTaskT(timeout, fn, *args, **kws)
 
     def Start(self):
-# XXX
-        if self.context.sandbox_api_url:
-            import sandbox_remote_packet
-            d = sandbox_remote_packet.remote_packets_dispatcher = sandbox_remote_packet.RemotePacketsDispatcher()
-            d.start(self.context)
-            self._remote_packets_dispatcher = d
-# XXX
-
         for q in self.qRef.itervalues():
             for pck in list(q.ListAllPackets()):
                 pck.vivify_jobs_waiting_stoppers()
@@ -818,8 +813,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.connManager.Start()
         logging.debug("after_connection_manager_start")
 
-        self._sandbox_packets_runner = SandboxPacketsRunner(
-            pool_size=self.context.sandbox_task_max_count)
+        if self.context.sandbox_api_url:
+            self._sandbox_packets_runner = SandboxPacketsRunner(
+                pool_size=self.context.sandbox_task_max_count)
+
+            sandbox_remote_packet.remote_packets_dispatcher = self._remote_packets_dispatcher
+            self._remote_packets_dispatcher.start(
+                ctx=self.context,
+                alloc_guard=self._sandbox_packets_runner._alloc
+            )
 
     def Stop1(self):
         self._sandbox_packets_runner.stop()
@@ -839,7 +841,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.Stop1()
         self.Stop2()
         self.Stop3()
-        sandbox_remote_packet.remote_packets_dispatcher.stop()
+# TODO
+        self._remote_packets_dispatcher.stop()
+        sandbox_remote_packet.remote_packets_dispatcher = None
 
     def GetConnectionManager(self):
         return self.connManager

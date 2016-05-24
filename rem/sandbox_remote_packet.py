@@ -129,6 +129,9 @@ class RemotePacketsDispatcher(object):
             '_by_task_id': self._by_task_id.copy(),
         }
 
+    def __setstate__(self, sdict):
+        self._by_task_id = sdict['_by_task_id']
+
     def _create_rpc_server(self, ctx):
         srv = AsyncXMLRPCServer2(
             ctx.sandbox_rpc_server_thread_pool_size,
@@ -140,12 +143,13 @@ class RemotePacketsDispatcher(object):
 
         return srv
 
-    def start(self, ctx):
+    def start(self, ctx, alloc_guard):
         self._executor_resource_id = ctx.sandbox_executor_resource_id
         self._rpc_listen_addr = ctx.sandbox_rpc_listen_addr
-        self._rpc_server = self._create_rpc_server(ctx)
         self._sbx_task_kill_timeout = ctx.sandbox_task_kill_timeout
         self._sbx_task_owner = ctx.sandbox_task_owner
+
+        self._sandbox = ctx.sandbox_client
 
         self._rpc_invoker = ActionQueue(
             thread_count=ctx.sandbox_rpc_invoker_thread_pool_size,
@@ -155,19 +159,42 @@ class RemotePacketsDispatcher(object):
             thread_count=ctx.sandbox_invoker_thread_pool_size,
             thread_name_prefix='SbxIO')
 
-        self._sandbox = ctx.sandbox_client
-
-        #self._tasks_status_awaiter = ctx.sandbox_tasks_awaiter
         self._tasks_status_awaiter = self.TasksAwaiter(self._sandbox, self)
 
+        for pck in self._by_task_id.itervalues():
+            pck._run_guard = alloc_guard()
+            self._await_task_status(pck)
+            self._reschedule_packet(pck)
+
+        self._rpc_server = self._create_rpc_server(ctx)
+        self._tasks_status_awaiter.start()
         self._rpc_server.start()
+
+    def _reschedule_packet(self, pck):
+# TODO
+# TODO CHECK AGAIN
+# TODO
+        by_state = {
+            RemotePacketState.CREATING: self._start_create_sandbox_task,
+            RemotePacketState.STARTING: self._start_start_sandbox_task,
+            RemotePacketState.FETCHING_RESOURCE_LIST: self._start_fetch_resource_list,
+            RemotePacketState.FETCHING_FINAL_UPDATE: self._start_fetch_final_update,
+        }
+
+        action = by_state.get(pck._state)
+
+        if not action \
+                and pck._target_stop_mode != pck._sent_stop_mode \
+                and pck._state == RemotePacketState.STARTED:
+            action = self._start_packet_stop
+
+        if action:
+            action(pck)
 
     def stop(self):
         self._rpc_server.shutdown()
-        self._rpc_invoker
-        self._sbx_invoker
-
-        raise NotImplementedError()
+        self._rpc_invoker.stop()
+        self._sbx_invoker.stop()
 
 # TODO max_restarts=0
 # TODO kill_timeout=14 * 86400
@@ -245,8 +272,8 @@ class RemotePacketsDispatcher(object):
         self._by_task_id.pop(pck._sandbox_task_id)
 
     def _mark_task_fin_wait(self, pck, reason=None):
-        pck._ops._on_packet_terminated() # TODO Ugly
         pck._set_state(RemotePacketState.TASK_FIN_WAIT, reason)
+        pck._ops._on_packet_terminated() # TODO Ugly
 
     def _do_create_sandbox_task(self, pck):
         def reschedule_if_need():
@@ -309,8 +336,11 @@ class RemotePacketsDispatcher(object):
 
             self._by_task_id[task.id] = pck
 
-        self._tasks_status_awaiter.await(pck._sandbox_task_id)
+        self._await_task_status(pck)
         self._do_start_sandbox_task(pck)
+
+    def _await_task_status(self, pck):
+        self._tasks_status_awaiter.await(pck._sandbox_task_id)
 
     def _do_start_sandbox_task(self, pck):
         try:
@@ -648,6 +678,9 @@ class RemotePacketsDispatcher(object):
         self._stop_packet(pck, StopMode.CANCEL)
 
     def _stop_packet(self, pck, stop_mode):
+# TODO
+# TODO CHECK AGAIN
+# TODO
         with pck._lock:
             if pck._target_stop_mode >= stop_mode:
                 return
@@ -660,26 +693,34 @@ class RemotePacketsDispatcher(object):
 
             state = pck._state
 
-            if state in [RemotePacketState.CREATING,
-                         RemotePacketState.FETCHING_RESOURCE_LIST,
-                         RemotePacketState.FETCHING_FINAL_UPDATE] \
+            if state == RemotePacketState.ALL_DONE \
+                or state == RemotePacketState.TASK_FIN_WAIT \
+                    and pck._final_state == GraphState.SUCCESSFULL:
+                raise AlreadyTerminated()
+
+            elif state == RemotePacketState.CREATING \
                 or state == RemotePacketState.STARTING and pck._sched:
 
                 really_cancel()
 
-            elif state in [RemotePacketState.STARTING, RemotePacketState.CHECKING_START_ERROR]:
-                pass # later
+            elif stop_mode == StopMode.CANCEL \
+                and state in [
+                    RemotePacketState.FETCHING_RESOURCE_LIST,
+                    RemotePacketState.FETCHING_FINAL_UPDATE,
+                    RemotePacketState.TASK_FIN_WAIT]:
+
+                really_cancel()
 
             # FIXME
-            elif state in [RemotePacketState.TERMINATED, RemotePacketState.ALL_DONE]:
-                raise AlreadyTerminated()
-
             elif state == RemotePacketState.STARTED:
                 if pck._peer_addr:
                     self._start_packet_stop(pck)
 
-            else:
-                raise Unreachable()
+            #elif state in [RemotePacketState.STARTING, RemotePacketState.CHECKING_START_ERROR]:
+                #pass # later
+
+            #else:
+                #raise Unreachable()
 
     def _do_stop_packet(self, pck):
         task_id = pck._sandbox_task_id
@@ -879,6 +920,12 @@ class SandboxRemotePacket(object):
         #self._task_awaited = False
 
         remote_packets_dispatcher.register_packet(self)
+
+    def __getstate__(self):
+        sdict = self.__dict__.copy()
+        sdict.pop('_run_guard')
+        sdict.pop('_sched')
+        return sdict
 
     def _set_state(self, state, reason=None):
         self._state = state
