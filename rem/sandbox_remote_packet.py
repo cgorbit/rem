@@ -195,6 +195,7 @@ class RemotePacketsDispatcher(object):
         self._rpc_server.shutdown()
         self._rpc_invoker.stop()
         self._sbx_invoker.stop()
+        self._tasks_status_awaiter.stop()
 
 # TODO max_restarts=0
 # TODO kill_timeout=14 * 86400

@@ -40,7 +40,7 @@ class SandboxTaskStateAwaiter(object):
             self._should_stop = True
             self._something_happend.notify()
 
-        self._main_thread.join()
+        self._worker_thread.join()
 
     def await(self, task_id):
         with self._lock:

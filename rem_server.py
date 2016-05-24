@@ -977,6 +977,10 @@ def main():
         ctx._subprocsrv_runner.stop()
     delayed_executor.stop()
 
+    if hasattr(ctx, 'sbx_resource_sharer'):
+        ctx.sbx_resource_sharer.stop()
+        ctx.sandbox_subproc.stop()
+
     logging.debug("rem-server\texit_main")
 
 

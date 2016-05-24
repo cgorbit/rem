@@ -835,15 +835,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Stop3(self):
         self._mailer.stop()
+# TODO
+        self._remote_packets_dispatcher.stop()
+        sandbox_remote_packet.remote_packets_dispatcher = None
         PacketCustomLogic.UpdateContext(None)
 
     def Stop(self):
         self.Stop1()
         self.Stop2()
         self.Stop3()
-# TODO
-        self._remote_packets_dispatcher.stop()
-        sandbox_remote_packet.remote_packets_dispatcher = None
 
     def GetConnectionManager(self):
         return self.connManager
