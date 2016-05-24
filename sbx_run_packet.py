@@ -243,13 +243,16 @@ if __name__ == '__main__':
         try:
             return rem_proxy.update_graph(
                 opts.task_id,
-                tuple(rpc_server.server_address[:2]),
+                rpc_server_addr,
                 update,
                 is_final
             )
 
         except Exception as e:
-            logging.exception("on_notifier_fail")
+            if isinstance(e, socket.error):
+                logging.warning("on_notifier_fail: %s" % e)
+            else:
+                logging.exception("on_notifier_fail")
 
             if is_xmlrpc_exception(e, WrongTaskIdError):
                 try:
@@ -269,6 +272,7 @@ if __name__ == '__main__':
     #rem_notifier.send_update(pck.produce_rem_update_message()) # FIXME
 
     rpc_server = _create_rpc_server(pck, opts)
+    rpc_server_addr = tuple(rpc_server.server_address[:2])
 
     pck.start(opts.work_dir, opts.io_dir, rem_notifier.send_update)
 
@@ -286,7 +290,7 @@ if __name__ == '__main__':
     rpc_server.shutdown()
     logging.debug('after_rpc_shutdown')
 
-    rem_notifier.stop(30.0) # FIXME
+    rem_notifier.stop(1.0) # FIXME XXX TODO :)
     logging.debug('after_rem_notifier_stop')
 
     #if not pck.is_cancelled():

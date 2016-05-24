@@ -547,6 +547,7 @@ class RemDaemon(object):
         self.timeWorker = None
 
         self._backups_enabled = context.backups_enabled
+        self._working_job_max_count = context.working_job_max_count
 
         self._start()
 
@@ -641,7 +642,7 @@ class RemDaemon(object):
         self.scheduler.Start()
         logging.debug("rem-server\tafter_scheduler_start")
 
-        self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self.scheduler.poolSize)]
+        self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self._working_job_max_count)]
 
         self.timeWorker = TimeTicker()
         self.timeWorker.AddCallbackListener(self.scheduler.schedWatcher)
@@ -926,11 +927,31 @@ def init(ctx):
         _init_sandbox(ctx)
         ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
 
+def create_context(config):
+    ctx = Context(config)
+
+# TODO
+    ctx.sandbox_rpc_listen_addr = ('ws30-511.search.yandex.net', 8000)
+    ctx.sandbox_task_kill_timeout = 14 * 86400
+    ctx.sandbox_task_owner = 'guest'
+
+    ctx.sandbox_rpc_invoker_thread_pool_size = 10
+    ctx.sandbox_invoker_thread_pool_size = 10
+    ctx.sandbox_rpc_server_thread_pool_size = 10
+
+    ctx.sandbox_client = rem.sandbox.Client(
+        ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
+
+    #ctx.sandbox_tasks_awaiter = SandboxTaskStateAwaiter(ctx.sandbox_client)
+# TODO
+
+    return ctx
+
 
 def main():
     opts = parse_arguments()
 
-    ctx = Context(opts.config)
+    ctx = create_context(opts.config)
 
     if opts.mode == 'test':
         ctx.log_warn_level = 'debug'

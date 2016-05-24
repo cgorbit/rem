@@ -15,7 +15,7 @@ import itertools
 import threading
 
 import fork_locking
-from job import FuncJob, FuncRunner
+from job import FuncJob, SerializableFunction
 from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject
 from rem import PacketCustomLogic
 from connmanager import ConnectionManager
@@ -58,7 +58,7 @@ class SchedWatcher(Unpickable(tasks=PickableStdPriorityQueue.create,
             skipLoggingFlag = False
         if not skipLoggingFlag:
             logging.debug("new task %r scheduled on %s", fn, time.ctime(deadline))
-        self.tasks.put((deadline, (FuncRunner(fn, args, kws))))
+        self.tasks.put((deadline, (SerializableFunction(fn, args, kws))))
 
     def AddTaskT(self, timeout, fn, *args, **kws):
         self.AddTaskD(time.time() + timeout, fn, *args, **kws)
@@ -136,21 +136,35 @@ class QueueList(object):
 
 
 class SandboxPacketsRunner(object):
-    def __init__(self):
+    class _RunningGuard(object):
+        def __init__(self, parent):
+            self._parent = parent
+
+        def __del__(self):
+            self._parent._release_running()
+
+    def __init__(self, pool_size):
         self._lock = PickableLock()
         self._changed = threading.Condition(self._lock)
-        self._running_count = 0 # XXX TODO update after backup loading
-        self._limit = 200 # TODO
+        #self._limit = pool_size # TODO
+        self._run_pool = pool_size # XXX TODO update after backup loading
         self._should_stop = False
         self._queues = QueueList()
         self._thread = ProfiledThread(target=self._loop, name_prefix='SbxPackRunner')
         self._thread.start()
 
+    def _release_running(self):
+        with self._lock:
+            self._run_pool += 1
+
+            if self._run_pool == 1:
+                self._changed.notify()
+
     def _loop(self):
         while True:
             with self._lock:
                 while not(
-                    self._queues and self._running_count < self._limit \
+                    self._queues and self._run_pool
                         or self._should_stop):
                     self._changed.wait()
 
@@ -166,16 +180,16 @@ class SandboxPacketsRunner(object):
                 if q.has_startable_packets():
                     self._queues.push(q)
 
-                self._running_count += 1
+                self._run_pool -= 1
+
+            guard = self._RunningGuard(self)
 
             try:
-                stopped = pck.run()
+                pck.run(guard)
             except packet.NotWorkingStateError:
-                with self._lock:
-                    self._running_count -= 1
-                continue
+                pass
 
-            #stopped.subscribe(self._on_packet_stop)
+            del guard
 
     def on_queue_not_empty(self, q):
         with self._lock:
@@ -265,7 +279,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def UpdateContext(self, context=None):
         if context is not None:
             self.context = context
-            self.poolSize = context.thread_pool_size
             self.initBackupSystem(context)
             context.registerScheduler(self)
         self.binStorage.UpdateContext(self.context)
@@ -805,7 +818,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.connManager.Start()
         logging.debug("after_connection_manager_start")
 
-        self._sandbox_packets_runner = SandboxPacketsRunner()
+        self._sandbox_packets_runner = SandboxPacketsRunner(
+            pool_size=self.context.sandbox_task_max_count)
 
     def Stop1(self):
         self._sandbox_packets_runner.stop()

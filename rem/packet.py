@@ -1159,7 +1159,7 @@ class SandboxPacket(PacketBase):
     def _do_graph_resume(self):
         g = self._graph_executor
 
-        if not g.is_null():
+        if not g.is_null() and not self.files_modified:
             g.try_soft_resume() # XXX reset_tries
             # if fail -- when g._remote_packet becomes None
             #         -- SandboxPacket becomes PENDING
@@ -1167,17 +1167,18 @@ class SandboxPacket(PacketBase):
     def _do_graph_reset(self):
         g = self._graph_executor
 
-        if not self.wait_dep_tags and not g.is_null():
+        if not self.wait_dep_tags and not g.is_null() and not self.files_modified:
             g.try_soft_restart()
         else:
             g.reset()
 
-    def run(self):
+    def run(self, guard):
         with self.lock:
             if not self._is_executable():
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
-            stopped = self._graph_executor.start()
+            self.files_modified = False # FIXME
+            stopped = self._graph_executor.start(guard)
             self._update_state()
 
             return stopped

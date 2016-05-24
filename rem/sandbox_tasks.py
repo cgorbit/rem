@@ -10,11 +10,12 @@ class TaskStateGroups(object):
     DRAFT = 1
     ACTIVE = 2
     TERMINATED = 3
-    ANY = 4
+    #ANY = 4
 
 
 class SandboxTaskStateAwaiter(object):
     DEFAULT_UPDATE_INTERVAL = 5.0
+
 # TODO XXX REMOVE
     DEFAULT_UPDATE_INTERVAL = 1.0
 
@@ -25,8 +26,8 @@ class SandboxTaskStateAwaiter(object):
         self._something_happend = threading.Condition(self._lock)
         self._worker_thread = None
         self._update_interval = update_interval
-        self._running  = {}
-        self._incoming = {}
+        self._running = {}
+        self._incoming = set()
 
         self._start()
 
@@ -41,16 +42,20 @@ class SandboxTaskStateAwaiter(object):
 
         self._main_thread.join()
 
-    def await(self, task_id, on_change):
+    def await(self, task_id):
         with self._lock:
             was_empty = not self._incoming
 
             assert task_id not in self._incoming and task_id not in self._running
 
-            self._incoming[task_id] = on_change
+            self._incoming.add(task_id)
 
             if was_empty:
                 self._something_happend.notify()
+
+# TODO
+    def cancel_wait(self, task_id):
+        raise NotImplementedError()
 
     def _loop(self):
         running = self._running
@@ -72,11 +77,11 @@ class SandboxTaskStateAwaiter(object):
 
                     self._something_happend.wait(deadline)
 
-                new_jobs, self._incoming = self._incoming, {}
+                new_jobs, self._incoming = self._incoming, set()
 
             if new_jobs:
-                for task_id, on_change in new_jobs.items():
-                    running[task_id] = [None, on_change, None]
+                for task_id in new_jobs:
+                    running[task_id] = [None, None]
 
             self._update()
 
@@ -97,56 +102,69 @@ class SandboxTaskStateAwaiter(object):
         else:
             for task_id, status in statuses.iteritems():
                 task = running[task_id]
-                prev_status_group, on_change, prev_status = task
+                prev_status_group, prev_status = task
 
                 if status != prev_status:
                     logging.debug("task #%d change status %s -> %s" % (task_id, prev_status, status))
 
-                status_group = self._to_status_group(status)
+                status_group, can_has_res = self._interpret_status(status)
 
                 if status_group == TaskStateGroups.TERMINATED:
                     running.pop(task_id)
                 else:
                     task[0] = status_group
-                    task[2] = status
+                    task[1] = status
 
                 if prev_status_group != status_group:
                     try:
-                        on_change(task_id, status_group)
+                        self._notify(task_id, status_group, can_has_res)
                     except:
                         logging.exception("Sandbox task on_state_change handler failed for %s -> %s" \
                             % (task_id, status))
 
-    @staticmethod
-    def _to_status_group(status):
-        map = {
-            'DRAFT': TaskStateGroups.DRAFT,
+    def _notify(self, task_id, status_group, can_has_res):
+        raise NotImplementedError()
 
-            'SUCCESS':   TaskStateGroups.TERMINATED,
-            'RELEASING': TaskStateGroups.TERMINATED,
-            'RELEASED':  TaskStateGroups.TERMINATED,
-            'FAILURE':   TaskStateGroups.TERMINATED,
-            'DELETING':  TaskStateGroups.TERMINATED,
-            'DELETED':   TaskStateGroups.TERMINATED,
-            'NO_RES':    TaskStateGroups.TERMINATED,
-            'EXCEPTION': TaskStateGroups.TERMINATED,
-            'TIMEOUT':   TaskStateGroups.TERMINATED,
+    @staticmethod
+    def _interpret_status(status):
+        if status == 'DRAFT':
+            return (TaskStateGroups.DRAFT, False)
+
+        terminated = {
+            # Should have resources
+            'SUCCESS':      True,
+            'RELEASING':    True, # "impossible"
+            'NOT_RELEASED': True, # "impossible"
+            'RELEASED':     True, # "impossible"
+
+            # FIXME Resource list can't be fetched
+            'DELETING':     False,
+            'DELETED':      False,
+
+            # Can't have resources
+            'FAILURE':      False, # "impossible"
+            'NO_RES':       False,
+            'EXCEPTION':    False,
+            'TIMEOUT':      False,
         }
 
-        return map.get(status, TaskStateGroups.ACTIVE)
+        can_has_res = terminated.get(status)
+        if can_has_res is not None:
+            return (TaskStateGroups.TERMINATED, can_has_res)
 
-    #def _in_status_group(status, group):
-        #if group == TaskStateGroups.ANY:
-            #return True
+        return (TaskStateGroups.ACTIVE, False)
 
-        #if status == 'DRAFT':
-            #return group == TaskStateGroups.DRAFT
+    #def __getstate__(self):
+        #with self._lock:
+            #incoming = self._incoming.copy()
+            #running  = self._running.copy()
 
-        #elif status in ['SUCCESS', 'RELEASING', 'RELEASED', 'FAILURE', 'DELETING',
-                        #'DELETED', 'NO_RES', 'EXCEPTION', 'TIMEOUT']:
-            #return group == TaskStateGroups.TERMINATED
+        #incoming = {
+            #task_id: SerializableFunction(on_change, [], {})
+                #for task_id, on_change in incoming.iteritems()
+        #}
 
-        #else:
-            #return group == TaskStateGroups.ACTIVE
-
-
+        #running = {
+            #task_id: [prev_status_group, SerializableFunction(on_change, [], {}), prev_status]
+                #for task_id, (prev_status_group, on_change, prev_status) in running
+        #}

@@ -382,31 +382,48 @@ def GeneralizedSet(priorAttr):
 class PackSet(GeneralizedSet("priority")): pass
 
 
-class FuncRunner(object):
+class SerializableFunction(object):
     """simple function running object with cPickle support
     WARNING: this class works only with pure function and nondynamic class methods"""
 
     def __init__(self, fn, args, kws):
-        self.object = None
-        if isinstance(fn, types.MethodType):
-            self.object = fn.im_self or fn.im_class
-            self.methName = fn.im_func.func_name
-        else:
-            self.fn = fn
+        self.callable = fn
         self.args = args
         self.kws = kws
 
     def __call__(self):
-        fn = getattr(self.object, self.methName, None) if self.object else self.fn
-        if callable(fn):
-            fn(*self.args, **self.kws)
+        return self.callable(*self.args, **self.kws)
+
+    def __getstate__(self):
+        callable = self.callable
+
+        if isinstance(callable, types.MethodType):
+            callable = (
+                callable.im_self or callable.im_class,
+                callable.im_func.func_name
+            )
+
+        return (callable, self.args, self.kws)
+
+    def __setstate__(self, state):
+        (callable, args, kws) = state
+
+        if isinstance(callable, tuple):
+            self.callable = getattr(callable[0], callable[1])
         else:
-            logging.error("FuncRunner\tobject %r can't be executed", fn)
+            self.callable = callable
+
+        self.args = args
+        self.kws = kws
 
     def __str__(self):
-        return str(getattr(self.object, self.methName, None)) if self.object \
-            else str(self.fn)
+        return str(self.callable)
 
+    def get_function_wo_args(self):
+        if self.args or self.kws:
+            raise ValueError()
+
+        return self.callable
 
 class BinaryFile(Unpickable(
     links=dict,

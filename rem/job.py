@@ -6,7 +6,7 @@ import datetime
 import sys
 
 from callbacks import CallbackHolder
-from common import FuncRunner, Unpickable, safeint, nullobject, zeroint, get_None, get_False
+from common import SerializableFunction, Unpickable, safeint, nullobject, zeroint, get_None, get_False
 import osspec
 import packet
 import constants
@@ -426,7 +426,7 @@ class JobRunner(object):
 
 class FuncJob(object):
     def __init__(self, runner):
-        assert isinstance(runner, FuncRunner), "incorrent arguments for FuncJob initializing"
+        assert isinstance(runner, SerializableFunction), "incorrent arguments for FuncJob initializing"
         self.runner = runner
 
     def run(self):
