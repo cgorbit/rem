@@ -198,7 +198,7 @@ class SandboxPacketsRunner(object):
             del guard
 
     # For backup vivify
-    def _alloc(self):
+    def _acquire(self):
         with self._lock:
             self._run_pool -= 1
             return self._RunningGuard(self)
@@ -820,7 +820,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             sandbox_remote_packet.remote_packets_dispatcher = self._remote_packets_dispatcher
             self._remote_packets_dispatcher.start(
                 ctx=self.context,
-                alloc_guard=self._sandbox_packets_runner._alloc
+                alloc_guard=self._sandbox_packets_runner._acquire
             )
 
     def Stop1(self):
