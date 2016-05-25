@@ -927,8 +927,8 @@ def init(ctx):
 
     if ctx.sandbox_api_url:
         _init_sandbox(ctx)
-        ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
-        #ctx.sandbox_executor_resource_id = 926
+        #ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
+        ctx.sandbox_executor_resource_id = 926
 
 def create_context(config):
     ctx = Context(config)

@@ -545,13 +545,9 @@ class JobGraphExecutor(Unpickable(
 
     #start = restart
 
-    def cancel_running_jobs(self): # for LocalPacket
+    def cancel(self):
         self._kill_jobs_drop_results()
         self._update_state()
-
-    #def cancel(self): # for SandboxPacket
-        #self._kill_jobs_drop_results()
-        #self._update_state() # FIXME XXX
 
     #reset = cancel
 
