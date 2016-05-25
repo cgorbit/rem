@@ -104,6 +104,12 @@ class DummyGraphExecutor(object):
     def is_cancelling(self):
         return False
 
+    def vivify_jobs_waiting_stoppers(self):
+        pass
+
+    def reset(self):
+        pass
+
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,
@@ -291,9 +297,11 @@ class PacketBase(Unpickable(
         self.all_dep_tags = set(tag.GetFullname() for tag in wait_tags)
         self.wait_dep_tags = set(tag.GetFullname() for tag in wait_tags if not tag.IsLocallySet())
 
-    def _process_tag_set_event(self, tag_name):
+    def _process_tag_set_event(self, tag):
         if not self._is_executable():
             return
+
+        tag_name = tag.GetFullname()
 
         if tag_name in self.wait_dep_tags:
             self.wait_dep_tags.remove(tag_name)
