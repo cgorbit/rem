@@ -68,7 +68,7 @@ class JobGraph(object):
         for job in self.jobs.values():
             graph[job.id] = []
             for parent_id in job.parents:
-                graph[parent_id].append(job.id)
+                graph.setdefault([], parent_id).append(job.id)
 
         return graph
 
