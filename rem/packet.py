@@ -101,6 +101,9 @@ class DummyGraphExecutor(object):
     def recover_after_backup_loading(self):
         pass
 
+    def is_cancelling(self):
+        return False
+
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,
@@ -288,7 +291,7 @@ class PacketBase(Unpickable(
         self.all_dep_tags = set(tag.GetFullname() for tag in wait_tags)
         self.wait_dep_tags = set(tag.GetFullname() for tag in wait_tags if not tag.IsLocallySet())
 
-    def _process_tag_set_event(self, tag):
+    def _process_tag_set_event(self, tag_name):
         if not self._is_executable():
             return
 
@@ -999,11 +1002,13 @@ class PacketBase(Unpickable(
     def rpc_move_to_queue(self, src_queue, dst_queue):
         with self.lock:
             if not self.queue:
-                raise
+                raise RpcUserError(RuntimeError("Packet not yet attached to queue to call move"))
+
             if self.destroying:
-                raise # FIXME j.i.c
+                raise RpcUserError(RuntimeError("Packet is destroying"))
+
             if not self._graph_executor.is_null():
-                raise
+                raise RpcUserError(RuntimeError("Packet is active"))
 
             self._move_to_queue(src_queue, dst_queue, from_rpc=True)
 
