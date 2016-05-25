@@ -224,7 +224,9 @@ class PacketBase(Unpickable(
                             # мы должны быть уверены, что Граф будет stop/start'ed,
                             # например, за счёт .files_modified
 
-        elif not graph.is_null():
+# FIXME
+        elif not graph.is_null() or graph.state == GraphState.TIME_WAIT: # FIXME Костыль?
+# FIXME
             if graph.is_cancelling():
                 assert graph.state & GraphState.WORKING
                 assert graph.state & GraphState.CANCELLED # FIXME | SUSPENDED

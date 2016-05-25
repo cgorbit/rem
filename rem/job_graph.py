@@ -552,7 +552,7 @@ class JobGraphExecutor(Unpickable(
     #reset = cancel
 
     def is_null(self):
-        return not self.has_running_jobs() and not self.jobs_to_retry
+        return not self.has_running_jobs()
 
     #def need_indefinite_time_to_reset(self):
         #return False
