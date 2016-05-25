@@ -212,10 +212,10 @@ class PickableLock(object):
         return self._object.__exit__(*args)
 
     def __getstate__(self):
-        return None
+        return True
 
     def __setstate__(self, state):
-        pass
+        self._object = fork_locking.Lock()
 
 
 class PickableRLock(object):
@@ -232,10 +232,10 @@ class PickableRLock(object):
         return self._object.__exit__(*args)
 
     def __getstate__(self):
-        return None
+        return True
 
     def __setstate__(self, state):
-        pass
+        self._object = fork_locking.RLock()
 
 
 """Legacy structs for correct deserialization from old backups"""

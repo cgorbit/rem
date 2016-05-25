@@ -151,6 +151,8 @@ class JobGraphExecutor(Unpickable(
         if new == self.state:
             return
 
+        #logging.debug('JOB_GRAPH new state: %s, %s' % (GraphState.str(new), self.__dict__))
+
         self.state = new
         self._ops.on_state_change()
 
@@ -554,7 +556,7 @@ class JobGraphExecutor(Unpickable(
     #reset = cancel
 
     def is_null(self):
-        return not self.has_running_jobs()
+        return not self.has_running_jobs() and not self.jobs_to_retry
 
     #def need_indefinite_time_to_reset(self):
         #return False

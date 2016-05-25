@@ -6,7 +6,6 @@ import base64
 import cPickle as pickle
 from rem.xmlrpc import AsyncXMLRPCServer2, ServerProxy as XMLRPCServerProxy, \
                        is_xmlrpc_exception, traced_rpc_method
-import threading
 from Queue import Queue as ThreadSafeQueue
 import errno
 import socket
@@ -19,7 +18,6 @@ import sandbox_packet
 import rem.sandbox as sandbox
 from rem.sandbox_tasks import TaskStateGroups, SandboxTaskStateAwaiter
 from rem_logging import logger as logging
-from rem.future import Promise
 from job_graph import GraphState
 from rem.common import PickableLock
 
@@ -117,12 +115,8 @@ class RemotePacketsDispatcher(object):
         def _notify(self, task_id, status_group, can_has_res):
             self.__dispatcher._on_task_status_change(task_id, status_group, can_has_res)
 
-    def __init__(self):
-        self._by_task_id = {}
-
-        self._sbx_task_priority = (
-            sandbox.TaskPriority.Class.SERVICE,
-            sandbox.TaskPriority.SubClass.NORMAL)
+    def __init__(self, rhs=None):
+        self._by_task_id = rhs._by_task_id if rhs else {}
 
     def __getstate__(self):
         return {
@@ -144,6 +138,10 @@ class RemotePacketsDispatcher(object):
         return srv
 
     def start(self, ctx, alloc_guard):
+        self._sbx_task_priority = (
+            sandbox.TaskPriority.Class.SERVICE,
+            sandbox.TaskPriority.SubClass.NORMAL)
+
         self._executor_resource_id = ctx.sandbox_executor_resource_id
         self._rpc_listen_addr = ctx.sandbox_rpc_listen_addr
         self._sbx_task_kill_timeout = ctx.sandbox_task_kill_timeout
@@ -161,14 +159,20 @@ class RemotePacketsDispatcher(object):
 
         self._tasks_status_awaiter = self.TasksAwaiter(self._sandbox, self)
 
-        for pck in self._by_task_id.itervalues():
-            pck._run_guard = alloc_guard()
-            self._await_task_status(pck)
-            self._reschedule_packet(pck)
+        self._vivify_packets(alloc_guard)
 
         self._rpc_server = self._create_rpc_server(ctx)
         self._tasks_status_awaiter.start()
         self._rpc_server.start()
+
+    def _vivify_packets(self, alloc_guard):
+        logging.debug('RemotePacketsDispatcher packet count: %d' % len(self._by_task_id))
+
+        for pck in self._by_task_id.itervalues():
+            logging.debug('VIVIFY %s' % pck.id)
+            pck._run_guard = alloc_guard()
+            self._await_task_status(pck)
+            self._reschedule_packet(pck)
 
     def _reschedule_packet(self, pck):
 # TODO
@@ -189,6 +193,7 @@ class RemotePacketsDispatcher(object):
             action = self._start_packet_stop
 
         if action:
+            logging.debug('action %s' % action)
             action(pck)
 
     def stop(self):
@@ -644,7 +649,9 @@ class RemotePacketsDispatcher(object):
                         self._start_start_sandbox_task(pck)
 
                 elif state in [RemotePacketState.STARTED, RemotePacketState.TASK_FIN_WAIT]:
-                    raise AssertionError()
+# FIXME Race here between graph updates and _on_task_status_change
+                    logging.warning('_on_task_status_change(%s, %s)' % (status_group, state))
+                    #raise AssertionError()
 
             elif status_group == TaskStateGroups.ACTIVE:
 
@@ -924,8 +931,8 @@ class SandboxRemotePacket(object):
 
     def __getstate__(self):
         sdict = self.__dict__.copy()
-        sdict.pop('_run_guard')
-        sdict.pop('_sched')
+        sdict['_run_guard'] = None
+        sdict['_sched'] = None
         return sdict
 
     def _set_state(self, state, reason=None):
@@ -1046,8 +1053,6 @@ class SandboxJobGraphExecutorProxy(object):
     def _do_on_packet_terminated(self):
         def on_stop():
             self._remote_packet = None
-            self._stop_promise.set()
-            self._stop_promise = None
             #self._ops.on_job_graph_becomes_null()
 
         assert not self.time_wait_deadline and not self.time_wait_sched
@@ -1178,13 +1183,9 @@ class SandboxJobGraphExecutorProxy(object):
 
             #self.do_not_run = False
 
-# XXX Don't use _stop_promise, use SandboxTaskStateAwaiter's state
-            self._stop_promise = Promise()
             self._remote_packet = self._create_remote_packet(guard)
 
             self._update_state()
-
-            return self._stop_promise.to_future()
 
 # XXX BEAUTY
     def cancel(self):

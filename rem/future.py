@@ -23,6 +23,9 @@ class _FutureState(object):
         self._lock = threading.Lock()
         self._change_event = threading.Condition(self._lock)
 
+    def __getstate__(self):
+        raise NotImplementedError("Can't pickle _FutureState")
+
     def set(self, val=None, exc=None):
         to_run = []
 
@@ -262,6 +265,9 @@ class FutureCombinerBase(object):
 
         for idx, f in enumerate(futures):
             f.subscribe(lambda f, idx=idx: self.__on_set(f, idx))
+
+    def __getstate__(self):
+        raise NotImplementedError("Can't pickle FutureCombinerBase")
 
     def __on_set(self, f, idx):
         with self.__lock:

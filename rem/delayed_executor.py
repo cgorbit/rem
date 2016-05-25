@@ -105,8 +105,9 @@ def schedule(callback, deadline=None, timeout=None):
     _instance.add(callback, deadline, timeout)
 
 
-def stop():
+def stop(soft):
     global _instance
     if _instance:
         _instance.stop()
-        _instance = None
+        if not soft:
+            _instance = None

@@ -593,6 +593,8 @@ class RemDaemon(object):
         self._stopped.set()
 
     def _stop(self):
+        delayed_executor.stop(soft=True)
+
         logging.debug("rem-server\tenter_stop")
 
         for server in self.api_servers:
@@ -926,6 +928,7 @@ def init(ctx):
     if ctx.sandbox_api_url:
         _init_sandbox(ctx)
         ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
+        #ctx.sandbox_executor_resource_id = 926
 
 def create_context(config):
     ctx = Context(config)
@@ -975,7 +978,8 @@ def main():
 
     if ctx._subprocsrv_runner:
         ctx._subprocsrv_runner.stop()
-    delayed_executor.stop()
+
+    delayed_executor.stop(soft=False)
 
     if hasattr(ctx, 'sbx_resource_sharer'):
         ctx.sbx_resource_sharer.stop()

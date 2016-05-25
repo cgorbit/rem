@@ -267,7 +267,10 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 ICallbackAcceptor):
     BackupFilenameMatchRe = re.compile("sched-(\d+).dump$")
     UnsuccessfulBackupFilenameMatchRe = re.compile("sched-\d*.dump.tmp$")
-    SerializableFields = ["qRef", "tagRef", "binStorage", "tempStorage", "connManager"]
+    SerializableFields = [
+        "qRef", "tagRef", "binStorage", "tempStorage", "connManager",
+        "_remote_packets_dispatcher",
+    ]
     BackupFormatVersion = 2
 
     def __init__(self, context):
@@ -378,6 +381,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         logging.warning("No tasks for execution after condition waking up")
 
     def Notify(self, ref):
+# FIXME What for? Assert maybe?
         if isinstance(ref, LocalQueue):
             self._add_queue_as_non_empty_if_need(ref)
 
@@ -772,7 +776,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 self.packetNamesTracker.Add(pck.name)
                 pck.AddCallbackListener(self.packetNamesTracker)
 
-        self._add_queue_as_non_empty_if_need(q)
+        if isinstance(q, LocalQueue):
+            self._add_queue_as_non_empty_if_need(q)
 
     def AddPacketToQueue(self, qname, pck):
         queue = self._queue(qname)

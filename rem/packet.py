@@ -98,6 +98,9 @@ class DummyGraphExecutor(object):
     def get_working_jobs(self):
         return []
 
+    def recover_after_backup_loading(self):
+        pass
+
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,
@@ -250,6 +253,8 @@ class PacketBase(Unpickable(
 
             ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE, # XXX Must be WORKABLE to support fast_restart
             ImplState.RUNNING:          ReprState.WORKABLE,
+
+            ImplState.TIME_WAIT:        ReprState.WAITING,
 
             ImplState.DESTROYING:       ReprState.WORKABLE,
             ImplState.HISTORIED:        ReprState.HISTORIED,
@@ -1137,7 +1142,7 @@ class LocalPacket(PacketBase):
     def has_pending_jobs(self):
         with self.lock:
             return self.state in [ImplState.PENDING, ImplState.RUNNING] \
-                and self._graph_executor.state & GraphState.PENDING_JOBS
+                and bool(self._graph_executor.state & GraphState.PENDING_JOBS)
 
     def _do_graph_suspend(self, kill_jobs):
         if kill_jobs:
@@ -1178,10 +1183,8 @@ class SandboxPacket(PacketBase):
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
             self.files_modified = False # FIXME
-            stopped = self._graph_executor.start(guard)
+            self._graph_executor.start(guard)
             self._update_state()
-
-            return stopped
 
     def rpc_add_resource(self, name, path):
         with self.lock:

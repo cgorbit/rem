@@ -39,7 +39,7 @@ class NamedThread(threading.Thread):
 
     def _set_thread_name(self):
         set_thread_name('rem-' + self.name)
-        logging.debug('ProfiledThread name for %d is %s' % (_gettid(), self.name))
+        #logging.debug('ProfiledThread name for %d is %s' % (_gettid(), self.name))
 
     def run(self):
         self._set_thread_name()
