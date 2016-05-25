@@ -155,19 +155,23 @@ class QueueBase(Unpickable(
     def _forget_queue_old_items(self, queue, ttl):
         threshold = time.time() - ttl
 
-        old = []
-        with self.lock:
-            while queue:
+        while True:
+            with self.lock:
+                if not queue:
+                    return
+
                 pck, t = queue.peak()
 
                 if t >= threshold:
-                    break
+                    return
 
-                old.append(pck)
+            # XXX Don't use lock here to prevent deadlock
+            try:
+                pck.destroy()
 
-        # XXX Don't use lock here to prevent deadlock
-        for pck in old:
-            pck.destroy() # May throw: race with RPC calls, that may change packet state
+            # May throw: race with RPC calls, that may change packet state
+            except NonDestroyingStateError:
+                pass
 
     def relocate_packet(self, pck):
         dest_queue_name = self.VIEW_BY_STATE[pck.state]
