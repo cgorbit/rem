@@ -818,6 +818,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.connManager.Start()
         logging.debug("after_connection_manager_start")
 
+        self._sandbox_packets_runner = None
         if self.context.sandbox_api_url:
             self._sandbox_packets_runner = SandboxPacketsRunner(
                 pool_size=self.context.sandbox_task_max_count)
@@ -829,7 +830,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
             )
 
     def Stop1(self):
-        self._sandbox_packets_runner.stop()
+        if self._sandbox_packets_runner:
+            self._sandbox_packets_runner.stop()
         self.connManager.Stop()
         with self.lock:
             self.alive = False
@@ -840,8 +842,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Stop3(self):
         self._mailer.stop()
-# TODO
-        self._remote_packets_dispatcher.stop()
+# TODO Better condition
+        if self.context.sandbox_api_url:
+            self._remote_packets_dispatcher.stop()
         sandbox_remote_packet.remote_packets_dispatcher = None
         PacketCustomLogic.UpdateContext(None)
 
