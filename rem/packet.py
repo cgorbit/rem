@@ -1137,7 +1137,11 @@ class LocalPacket(PacketBase):
         self._graph_executor.on_job_done(runner)
 
         with self.lock:
-            self._graph_executor.apply_jobs_results()
+# XXX TODO
+# Адовый костыль
+# XXX TODO
+            if self.state != ImplState.SUCCESSFULL:
+                self._graph_executor.apply_jobs_results()
 
     def _create_job_file_handles(self, job):
         return self._graph_executor.create_job_file_handles(job)
@@ -1159,7 +1163,7 @@ class LocalPacket(PacketBase):
 
     def _do_graph_suspend(self, kill_jobs):
         if kill_jobs:
-            self._graph_executor.cancel_running_jobs()
+            self._graph_executor.cancel()
 
     def _do_graph_resume(self):
         self._graph_executor.reset_tries() # XXX
