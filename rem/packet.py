@@ -713,7 +713,7 @@ class PacketBase(Unpickable(
                     max_working_time, output_to_status):
         with self.lock:
             if self.queue or not self._is_executable():
-                raise
+                raise RpcUserError(RuntimeError("Can't add jobs in %s state" % self._repr_state))
             #if self.state != ImplState.UNINITIALIZED: # TODO
                 #raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
 
@@ -816,15 +816,22 @@ class PacketBase(Unpickable(
         return status
 
     def _check_add_files(self):
-        if not self._is_executable():
-            raise
-        if not self._graph_executor.is_null():
-            raise
-        #raise NotImplementedError() # TODO XXX
+        if self._is_executable() and self.do_not_run:
+            return
+        #self._graph_executor.is_null(): # FIXME
+
+        raise RpcUserError(RuntimeError("Can't add files/resources in %s state" % self._repr_state))
 
     def rpc_add_binary(self, binname, file):
         with self.lock:
+    # FIXME Move to virtual method
+            if not self.IsLocalPacket() and \
+                    not self._get_scheduler_ctx().allow_files_auto_sharing:
+                raise RpcUserError(RuntimeError("Can't add files to SandboxPacket"))
+
             self._check_add_files()
+    # FIXME Move to virtual method
+
             self.files_modified = True
             self._add_link(binname, file)
 
@@ -1204,7 +1211,8 @@ class SandboxPacket(PacketBase):
 
     def run(self, guard):
         with self.lock:
-            if not self._is_executable():
+            if self.state != ImplState.PENDING:
+            #if not self._is_executable():
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
             self.files_modified = False # FIXME

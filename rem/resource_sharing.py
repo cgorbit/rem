@@ -13,15 +13,10 @@ from future import Promise, wrap_future
 import rem.delayed_executor as delayed_executor
 
 
-def sky_share(subproc, filename, is_root):
+def sky_share(subproc, directory, files):
     out = NamedTemporaryFile('w')
 
-    if is_root:
-        dirname, basename = (filename, '.')
-    else:
-        dirname, basename = os.path.split(filename)
-
-    argv = ['sky', 'share', '-d', dirname, basename]
+    argv = ['sky', 'share', '-d', directory] + files
     logging.debug(argv)
 
     # FIXME collect STDERR
@@ -136,15 +131,15 @@ class Sharer(object):
             t.join()
 
     class Job(object):
-        def __init__(self, resource_type, name, filename, arch=None, ttl=None,
-                           is_root=False, description=None):
+        def __init__(self, resource_type, name, directory, files, arch=None, ttl=None,
+                           description=None):
             self.id = None
             self.resource_type = resource_type
             self.name = name
-            self.filename = filename
+            self.directory = directory
+            self.files = files
             self.arch = arch
             self.ttl = ttl
-            self.is_root = is_root
             self.description = description
             self.torrent_id = None
             self.upload_task_id = None
@@ -152,7 +147,7 @@ class Sharer(object):
             self.promise = Promise()
 
         def __str__(self):
-            return 'Job(%d, %s, %s)' % (self.id, self.filename, self.resource_type)
+            return 'Job(%d, %s/%s, %s)' % (self.id, self.directory, self.files, self.resource_type)
 
     class Action(object):
         SHARE_FILE         = 1
@@ -229,13 +224,14 @@ class Sharer(object):
             #except ???Error as e: # TODO
                 #pass
             except Exception as e:
-                if os.path.exists(job.filename):
+# TODO XXX better checks or collect STDERR
+                if os.path.exists(job.dir):
                     logging.warning('sky share for %s faled: %s' % (job, e))
                     schedule_retry(job)
                 else:
                     self._set_promise(job, None,
                         OSError(errno.ENOENT,
-                                'Failed to share file %s: %s' % (job.filename, e)))
+                                'Failed to share %s/%s: %s' % (job.dir, job.files, e)))
                 return
 
             logging.debug('sky share successfully done for %s: %s' % (job, torrent_id))
@@ -262,7 +258,7 @@ class Sharer(object):
 
             try:
                 with Timing('sky_share_future %d' % job.id): # ~4ms (we wait pid from subprocsrv)
-                    torrent_id = sky_share(self.subproc, job.filename, job.is_root)
+                    torrent_id = sky_share(self.subproc, job.directory, job.files)
             except:
                 logging.exception('') # TODO
                 in_progress.remove(job)

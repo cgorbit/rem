@@ -867,7 +867,7 @@ def _init_sandbox(ctx):
         ),
     )
 
-    ctx.sbx_resource_sharer = shr
+    ctx.sandbox_resource_sharer = shr
 
     shr.start()
 
@@ -898,7 +898,7 @@ def _share_sandbox_executor(ctx):
         subprocess.check_call(
             ['tar', '-C', dir, '-cf', archive_filename, 'sbx_run_packet.py', 'rem'])
 
-        id = ctx.sbx_resource_sharer.share(
+        id = ctx.sandbox_resource_sharer.share(
             'REM_JOBPACKET_EXECUTOR',
             description='%s @ %s' % (
                 os.uname()[1],
@@ -906,10 +906,12 @@ def _share_sandbox_executor(ctx):
             ),
 
             #name='executor',
-            #filename=dir,
-            #is_root=True,
+            #directory=dir,
+            #files=['.'],
+
             name=archive_basename,
-            filename=archive_filename,
+            directory=dir,
+            files=[archive_basename],
 
             arch='linux',
             ttl=10 * 86400, # TODO
@@ -928,6 +930,7 @@ def init(ctx):
     if ctx.sandbox_api_url:
         _init_sandbox(ctx)
         ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
+        #ctx.sandbox_executor_resource_id = 926
 
 def create_context(config):
     ctx = Context(config)
@@ -980,8 +983,8 @@ def main():
 
     delayed_executor.stop(soft=False)
 
-    if hasattr(ctx, 'sbx_resource_sharer'):
-        ctx.sbx_resource_sharer.stop()
+    if hasattr(ctx, 'sandbox_resource_sharer'):
+        ctx.sandbox_resource_sharer.stop()
         ctx.sandbox_subproc.stop()
 
     logging.debug("rem-server\texit_main")

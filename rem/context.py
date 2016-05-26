@@ -78,6 +78,7 @@ class Context(object):
         self.sandbox_api_token = config.safe_get("run", "sandbox_api_token", None)
         self.sandbox_task_owner = config.safe_get("run", "sandbox_task_owner", None)
         self.sandbox_task_max_count = config.safe_getint("run", "sandbox_task_max_count", 50)
+        self.allow_files_auto_sharing = config.safe_getboolean("run", "allow_files_auto_sharing", False)
         self.cloud_tags_server = config.safe_get("store", "cloud_tags_server", None)
         self.cloud_tags_masks = config.safe_get("store", "cloud_tags_masks", None)
         self.cloud_tags_masks_reload_interval = config.safe_getint("store", "cloud_tags_masks_reload_interval", 300)
