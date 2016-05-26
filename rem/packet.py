@@ -1119,6 +1119,10 @@ class NonDestroyingStateError(RuntimeError):
 
 
 class LocalPacket(PacketBase):
+    @staticmethod
+    def IsLocalPacket():
+        return True
+
     def _create_job_graph_executor(self):
         return job_graph.JobGraphExecutor(
             _LocalPacketJobGraphOps(self), # TODO Cyclic reference
@@ -1188,6 +1192,10 @@ class LocalPacket(PacketBase):
 
 
 class SandboxPacket(PacketBase):
+    @staticmethod
+    def IsLocalPacket():
+        return False
+
     def _do_graph_suspend(self, kill_jobs):
         g = self._graph_executor
         if not g.is_null(): # null in ERROR state
