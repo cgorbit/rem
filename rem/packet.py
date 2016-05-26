@@ -1018,7 +1018,7 @@ class PacketBase(Unpickable(
                 raise RpcUserError(RuntimeError("Packet is destroying"))
 
             if not self._graph_executor.is_null():
-                raise RpcUserError(RuntimeError("Packet is active"))
+                raise RpcUserError(RuntimeError("Can't move packets with running jobs"))
 
             self._move_to_queue(src_queue, dst_queue, from_rpc=True)
 
