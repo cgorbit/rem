@@ -816,22 +816,14 @@ class PacketBase(Unpickable(
         return status
 
     def _check_add_files(self):
-        if self._is_executable() and self.do_not_run:
+        if self._is_executable() or self.do_not_run:
             return
-        #self._graph_executor.is_null(): # FIXME
 
         raise RpcUserError(RuntimeError("Can't add files/resources in %s state" % self._repr_state))
 
     def rpc_add_binary(self, binname, file):
         with self.lock:
-    # FIXME Move to virtual method
-            if not self.IsLocalPacket() and \
-                    not self._get_scheduler_ctx().allow_files_auto_sharing:
-                raise RpcUserError(RuntimeError("Can't add files to SandboxPacket"))
-
             self._check_add_files()
-    # FIXME Move to virtual method
-
             self.files_modified = True
             self._add_link(binname, file)
 
@@ -1229,7 +1221,7 @@ class SandboxPacket(PacketBase):
 
     def rpc_add_resource(self, name, path):
         with self.lock:
-            self._check_add_files()
+            PacketBase._check_add_files(self)
             self.files_modified = True
             self.sbx_files[name] = path
 
@@ -1248,3 +1240,9 @@ class SandboxPacket(PacketBase):
 # DEBUG
     def create_sandbox_packet(self):
         return sandbox_packet.Packet(self.id, self.make_job_graph())
+
+    def _check_add_files(self):
+        PacketBase._check_add_files(self)
+
+        if not self._get_scheduler_ctx().allow_files_auto_sharing:
+            raise RpcUserError(RuntimeError("Can't add files to SandboxPacket"))
