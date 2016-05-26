@@ -102,10 +102,10 @@ def start():
 
 
 def schedule(callback, deadline=None, timeout=None):
-    _instance.add(callback, deadline, timeout)
+    return _instance.add(callback, deadline, timeout)
 
 
-def stop(soft):
+def stop(soft=False):
     global _instance
     if _instance:
         _instance.stop()

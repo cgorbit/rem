@@ -112,7 +112,8 @@ class Packet(object):
         self._has_updates = False
 
     def vivify_jobs_waiting_stoppers(self):
-        pass # TODO XXX
+        with self._lock:
+            self._graph_executor.vivify_jobs_waiting_stoppers()
 
     def __getstate__(self):
         sdict = self.__dict__.copy()
@@ -133,13 +134,13 @@ class Packet(object):
 
     def __setstate__(self, sdict):
         self.__dict__.update(sdict)
-        #self._init_non_persistent()
+        self._init_non_persistent()
 
     def start(self, working_directory, io_directory, on_update):
         self._on_update = on_update
         self._working_directory = working_directory
         self._io_directory = io_directory
-        self._init_non_persistent()
+        #self._init_non_persistent()
         self._proc_runner = rem.job.create_job_runner(None, None)
 
         print >>sys.stderr, self._graph_executor.__dict__

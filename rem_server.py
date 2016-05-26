@@ -37,6 +37,7 @@ import rem.subprocsrv_fallback
 import rem.job
 import rem.delayed_executor as delayed_executor
 import rem.resource_sharing
+from rem.queue import LocalQueue, SandboxQueue
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -122,15 +123,24 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
 
 @traced_rpc_method("info")
 def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPLICATE_NAMES_POLICY):
-    pck = _scheduler.tempStorage.PickPacket(pck_id)
+    queue = _scheduler.rpc_get_queue(queue_name)
+
+    pck = _scheduler.tempStorage.GetPacket(pck_id)
     if not pck:
         raise MakeNonExistedPacketException(pck_id)
+
+# FIXME XXX
+    if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
+        raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
+# FIXME XXX
+
+    _scheduler.tempStorage.PickPacket(pck_id) # pop packet
 
     packet_name = pck.name
     if packet_name_policy & (constants.DENY_DUPLICATE_NAMES_POLICY | constants.WARN_DUPLICATE_NAMES_POLICY) and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
 
-    _scheduler.AddPacketToQueue(queue_name, pck)
+    _scheduler.AddPacketToQueue(pck, queue)
 
 
 @traced_rpc_method("info")
@@ -854,11 +864,11 @@ def create_process_runners(ctx):
 
 def _init_sandbox(ctx):
     ctx.sandbox = rem.sandbox.Client(ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
-    ctx.sandbox_subproc = subprocsrv.create_runner()
+    ctx.resource_sharing_subproc = subprocsrv.create_runner()
 
 # TODO
     shr = rem.resource_sharing.Sharer(
-        subproc=ctx.sandbox_subproc,
+        subproc=ctx.resource_sharing_subproc,
         sandbox=ctx.sandbox,
         task_owner=ctx.sandbox_task_owner,
         task_priority=(
@@ -898,7 +908,7 @@ def _share_sandbox_executor(ctx):
         subprocess.check_call(
             ['tar', '-C', dir, '-cf', archive_filename, 'sbx_run_packet.py', 'rem'])
 
-        id = ctx.sandbox_resource_sharer.share(
+        res_id = ctx.sandbox_resource_sharer.share(
             'REM_JOBPACKET_EXECUTOR',
             description='%s @ %s' % (
                 os.uname()[1],
@@ -917,7 +927,7 @@ def _share_sandbox_executor(ctx):
             ttl=10 * 86400, # TODO
         )
 
-        return id.get()
+        return res_id.get()
 
 
 def init(ctx):
@@ -985,7 +995,7 @@ def main():
 
     if hasattr(ctx, 'sandbox_resource_sharer'):
         ctx.sandbox_resource_sharer.stop()
-        ctx.sandbox_subproc.stop()
+        ctx.resource_sharing_subproc.stop()
 
     logging.debug("rem-server\texit_main")
 

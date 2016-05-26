@@ -40,7 +40,7 @@ class RunRemJobPacket(SandboxTask):
         description = "rem_server_addr"
         required = True
 
-# XXX TODO CACHE LOCALITY
+# XXX TODO FIXME For CACHE LOCALITY we need to use 'native' parameters with resource ids
 
     #class CustomResources(parameters.ListRepeater, parameters.SandboxStringParameter):
     #class CustomResources(parameters.DictRepeater, parameters.SandboxStringParameter):
@@ -70,17 +70,27 @@ class RunRemJobPacket(SandboxTask):
 
     def __init_custom_resources_param(self):
         custom_resources = self.ctx['custom_resources']
+        logging.debug('__init_custom_resources_param: %s' % custom_resources)
 
         if isinstance(custom_resources, types.StringTypes):
             custom_resources = custom_resources.strip()
+            logging.debug('__init_custom_resources_param.strip(): %s' % custom_resources)
 
             if custom_resources:
+                logging.debug('if custom_resources')
                 self.ctx['custom_resources'] = list(self.__parse_custom_resources(custom_resources))
                 self.ctx['custom_resources_str'] = json.dumps(json.loads(custom_resources))
             else:
+                logging.debug('if custom_resources: else')
                 self.ctx['custom_resources'] = None
                 self.ctx['custom_resources_str'] = None
+
+        elif isinstance(custom_resources, dict):
+            logging.debug('elif dict')
+            pass
+
         else:
+            logging.debug('else')
             self.ctx['custom_resources'] = None
             self.ctx['custom_resources_str'] = None
 

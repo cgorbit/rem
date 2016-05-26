@@ -583,6 +583,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
             for pck in registrator.packets:
                 pck.vivify_done_tags_if_need(tagStorage)
+                pck.vivify_resource_sharing()
 
             self.tagRef.Restore(self.ExtractTimestampFromBackupFilename(filename) or 0)
 
@@ -779,8 +780,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         if isinstance(q, LocalQueue):
             self._add_queue_as_non_empty_if_need(q)
 
-    def AddPacketToQueue(self, qname, pck):
-        queue = self._queue(qname)
+    def AddPacketToQueue(self, pck, queue):
         self.packStorage.Add(pck)
         pck._attach_to_queue(queue)
         self.packetNamesTracker.Add(pck.name)

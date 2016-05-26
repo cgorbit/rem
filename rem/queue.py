@@ -60,7 +60,8 @@ class QueueBase(Unpickable(
         PacketState.TAGS_WAIT: "suspended",
 
         PacketState.PENDING:                 "pending",
-        PacketState.PREV_EXECUTOR_STOP_WAIT: "pending", # FIXME
+        PacketState.PREV_EXECUTOR_STOP_WAIT: "pending", # XXX FIXME XXX
+        PacketState.SHARING_FILES: "pending",
 
         PacketState.RUNNING:    "working",
         PacketState.DESTROYING: "working",

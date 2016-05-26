@@ -527,7 +527,7 @@ class RemotePacketsDispatcher(object):
 
         #logging.debug('task #%s res_by_type: %s' % (pck._sandbox_task_id, json.dumps(res_by_type, indent=3)))
 
-# TODO 
+# TODO XXX XXX Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
 
         with pck._lock:
             pck._result_snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
@@ -1109,7 +1109,7 @@ class SandboxJobGraphExecutorProxy(object):
 
     def _stop_time_wait(self, sched_id):
         with self.lock:
-            if self.time_wait_sched or self.time_wait_sched.id != sched_id:
+            if not self.time_wait_sched or self.time_wait_sched.id != sched_id:
                 return
 
             self.time_wait_deadline = None
@@ -1215,6 +1215,7 @@ class SandboxJobGraphExecutorProxy(object):
 
             if self.time_wait_sched:
                 self.time_wait_sched()
+                self.time_wait_sched = None
                 self.time_wait_deadline = None
 
             self._remote_packet.cancel()

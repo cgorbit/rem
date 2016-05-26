@@ -199,6 +199,7 @@ class Sharer(object):
 
         logging.debug('New %s' % job)
 
+        #return (job.promise.to_future(), job.id)
         return job.promise.to_future()
 
     def _set_promise(self, job, val=None, err=None):

@@ -163,6 +163,13 @@ class PacketBase(Unpickable(
         self._create_place(context)
         self.id = os.path.split(self.directory)[-1]
 
+# FIXME
+        self.files_modified = False
+        self.resources_modified = False
+
+        self.files_sharing = None
+        self.shared_files_resource_id = None
+
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
         self.priority = priority
         self.notify_emails = list(notify_emails)
@@ -223,7 +230,7 @@ class PacketBase(Unpickable(
                 assert not is_graph_remote or graph.is_null()
                 return ImplState.PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого...
                             # мы должны быть уверены, что Граф будет stop/start'ed,
-                            # например, за счёт .files_modified
+                            # например, за счёт .files_modified/.resources_modified
 
 # FIXME
         elif not graph.is_null() or graph.state == GraphState.TIME_WAIT: # FIXME Костыль?
@@ -240,6 +247,9 @@ class PacketBase(Unpickable(
             else:
                 assert graph.state & GraphState.WORKING
                 return ImplState.RUNNING # WORKING ?| PENDING
+
+        elif self.files_sharing:
+            return ImplState.SHARING_FILES
 
         else:
             return ImplState.PENDING
@@ -258,6 +268,8 @@ class PacketBase(Unpickable(
             ImplState.BROKEN:           ReprState.ERROR,
             ImplState.PENDING:          ReprState.PENDING,
             ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
+
+            ImplState.SHARING_FILES:    ReprState.PENDING,
 
             ImplState.TAGS_WAIT:        ReprState.SUSPENDED,
             ImplState.PAUSED:           ReprState.SUSPENDED,
@@ -283,6 +295,12 @@ class PacketBase(Unpickable(
         job_done_tag = sdict['job_done_tag'] = sdict['job_done_tag'].copy()
         for job_id, tag in job_done_tag.iteritems():
             job_done_tag[job_id] = tag.name
+
+# TODO Restart sharing in vivify
+        if sdict['files_sharing']:
+            sdict['files_sharing'] = True
+            sdict['files_modified'] = True
+# TODO Restart sharing in vivify
 
         return sdict
 
@@ -310,6 +328,7 @@ class PacketBase(Unpickable(
             self.wait_dep_tags.remove(tag_name)
 
             if not self.wait_dep_tags:
+                self._share_files_as_resource_if_need()
                 self._update_state()
 
     def vivify_done_tags_if_need(self, tagStorage):
@@ -319,6 +338,10 @@ class PacketBase(Unpickable(
             for jid, cur_val in self.job_done_tag.iteritems():
                 if isinstance(cur_val, str):
                     self.job_done_tag[jid] = tagStorage.AcquireTag(cur_val)
+
+    def vivify_resource_sharing(self):
+        if self.files_sharing:
+            raise NotImplementedError("Resource sharing vivify is not implemented")
 
     def vivify_jobs_waiting_stoppers(self):
         pass
@@ -569,6 +592,11 @@ class PacketBase(Unpickable(
         if state == GraphState.SUCCESSFULL:
             assert self._graph_executor.is_null()
             self.finish_status = True
+# TODO XXX
+#           We set DummyGraphExecutor in any case here, but need to store
+#           ._prev_snapshot_resource_id in self
+#           XXX NO NO NO Can't do this in TIME_WAIT!
+# TODO XXX
             self._graph_executor = DummyGraphExecutor()
 
         elif state == GraphState.ERROR:
@@ -876,6 +904,7 @@ class PacketBase(Unpickable(
             self.do_not_run = False
 
             self._do_graph_resume()
+            self._share_files_as_resource_if_need()
 
             self._update_state()
 
@@ -918,7 +947,6 @@ class PacketBase(Unpickable(
     def _reset(self):
         self._do_graph_reset()
         self.finish_status = None
-        self._set_real_graph_executor_if_need()
 
     def rpc_reset(self, suspend=False):
         with self.lock:
@@ -930,11 +958,12 @@ class PacketBase(Unpickable(
             if not self.queue:
                 return # noop
 
-            #raise NotImplementedError("CHECKS") # TODO XXX
+# XXX raise NotImplementedError("CHECKS") # TODO XXX
 
             self.do_not_run = suspend
 
             self._reset()
+            self._share_files_as_resource_if_need()
 
             self._update_state()
 
@@ -1000,8 +1029,6 @@ class PacketBase(Unpickable(
                 src_queue._detach_packet(self)
 
             if dst_queue:
-                self._set_real_graph_executor_if_need()
-
                 # after _create_job_graph_executor() because of .has_pending_jobs()
                 dst_queue._attach_packet(self)
 
@@ -1032,14 +1059,13 @@ class PacketBase(Unpickable(
             #assert self.state == ImplState.UNINITIALIZED
             self._move_to_queue(None, queue)
 
+            self._share_files_as_resource_if_need()
+
             #self._become_pending_or_wait_tags()
             self._update_state()
 
     def make_job_graph(self):
-        # Without deepcopy:
-        # .state => SUCCESSFULL
-        # ._graph_executor = DummyGraphExecutor
-        # .tries and .results in self.jobs leave modified
+        # Without deepcopy self.jobs[*].{tries,result} will be modifed
         return JobGraph(copy.deepcopy(self.jobs), self.kill_all_jobs_on_error)
 
 
@@ -1111,10 +1137,6 @@ class NonDestroyingStateError(RuntimeError):
 
 
 class LocalPacket(PacketBase):
-    @staticmethod
-    def IsLocalPacket():
-        return True
-
     def _create_job_graph_executor(self):
         return job_graph.JobGraphExecutor(
             _LocalPacketJobGraphOps(self), # TODO Cyclic reference
@@ -1122,14 +1144,17 @@ class LocalPacket(PacketBase):
             self.make_job_graph(),
         )
 
-    def _can_run_jobs_right_now(self):
-        return self.state in [ImplState.RUNNING, ImplState.PENDING] \
-            and self._graph_executor.has_jobs_to_run()
+    #def _can_run_jobs_right_now(self):
+        #return self.state in [ImplState.RUNNING, ImplState.PENDING] \
+            #and self._graph_executor.has_jobs_to_run()
 
     def get_job_to_run(self):
         with self.lock:
-            if not self._can_run_jobs_right_now():
+            #if not self._can_run_jobs_right_now():
+            if self.state not in [ImplState.RUNNING, ImplState.PENDING]:
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
+
+            self._set_real_graph_executor_if_need()
 
             runner = self._graph_executor.get_job_to_run()
             self._update_state() # FIXME in JobGraphExecutor
@@ -1184,10 +1209,6 @@ class LocalPacket(PacketBase):
 
 
 class SandboxPacket(PacketBase):
-    @staticmethod
-    def IsLocalPacket():
-        return False
-
     def _do_graph_suspend(self, kill_jobs):
         g = self._graph_executor
         if not g.is_null(): # null in ERROR state
@@ -1196,7 +1217,7 @@ class SandboxPacket(PacketBase):
     def _do_graph_resume(self):
         g = self._graph_executor
 
-        if not g.is_null() and not self.files_modified:
+        if not g.is_null() and not (self.files_modified or self.resources_modified):
             g.try_soft_resume() # XXX reset_tries
             # if fail -- when g._remote_packet becomes None
             #         -- SandboxPacket becomes PENDING
@@ -1204,10 +1225,50 @@ class SandboxPacket(PacketBase):
     def _do_graph_reset(self):
         g = self._graph_executor
 
-        if not self.wait_dep_tags and not g.is_null() and not self.files_modified:
+        if not self.wait_dep_tags and not g.is_null() and not (self.files_modified or self.resources_modified):
             g.try_soft_restart()
         else:
             g.reset()
+
+    def _share_files_as_resource_if_need(self):
+        with self.lock:
+            if self.queue and self.files_modified and not self.files_sharing:
+                self._share_files_as_resource()
+
+    def _share_files_as_resource(self):
+        with self.lock:
+            ctx = self._get_scheduler_ctx()
+            sharer = ctx.sandbox_resource_sharer
+
+# TODO XXX FIXME Not garanteed anyhow for now
+            assert self.directory
+
+            self.files_sharing = sharer.share(
+                'REM_JOBPACKET_ADDED_FILE_SET',
+                name='__auto_shared_files__',
+                directory=self.directory,
+                #files=self.bin_links.keys()
+# XXX XXX XXX Doesn't work correctly if shared directory contains single file
+                files=['.']
+            )
+
+            self.files_modified = False
+            self.files_sharing.subscribe(self._on_files_shared)
+
+            self._update_state()
+
+    def _on_files_shared(self, future):
+        with self.lock:
+            self.files_sharing = None
+
+            if self.files_modified:
+                self._share_files_as_resource()
+                return
+
+# TODO XXX Handle exception
+            self.shared_files_resource_id = future.get()
+
+            self._update_state()
 
     def run(self, guard):
         with self.lock:
@@ -1215,22 +1276,38 @@ class SandboxPacket(PacketBase):
             #if not self._is_executable():
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
-            self.files_modified = False # FIXME
+            self._set_real_graph_executor_if_need()
+
+            self.resources_modified = False
+
             self._graph_executor.start(guard)
+
             self._update_state()
 
     def rpc_add_resource(self, name, path):
         with self.lock:
             PacketBase._check_add_files(self)
-            self.files_modified = True
+            self.resources_modified = True
             self.sbx_files[name] = path
 
     def _create_job_graph_executor(self):
+        assert not self.files_modified
+
+        files = self.sbx_files.copy()
+
+        if self.shared_files_resource_id:
+            prefix = 'sbx:%d/' % self.shared_files_resource_id
+
+            for filename in self.bin_links.keys():
+                files[filename] = prefix + filename
+
+        logging.debug('_create_job_graph_executor(%s): %s' % (self.id, files))
+
         return sandbox_remote_packet.SandboxJobGraphExecutorProxy(
             sandbox_remote_packet.SandboxPacketOpsForJobGraphExecutorProxy(self),
             self.id,
             self.make_job_graph(),
-            self.sbx_files.copy(), # TODO FIXME not copy
+            files,
             #self.make_sandbox_task_params()
         )
 

@@ -164,6 +164,8 @@ class Queue(object):
                     raise DuplicatePackageNameException(e.faultString)
                 else:
                     self.conn.logger.warning(e.faultString)
+            else:
+                raise RuntimeError(e.faultString)
 
     def Suspend(self):
         """приостанавливает выполнение новых задач из очереди"""

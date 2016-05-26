@@ -3,6 +3,7 @@ class PacketState(object):
     UNINITIALIZED = 'IS_UNINITIALIZED' # jobs, files and queue not set
     TAGS_WAIT     = 'IS_TAGS_WAIT'
     PREV_EXECUTOR_STOP_WAIT = 'IS_PREV_EXECUTOR_STOP_WAIT'
+    SHARING_FILES = 'IS_SHARING_FILES'
     PENDING       = 'IS_PENDING'
     RUNNING       = 'IS_RUNNING'
     PAUSED        = 'IS_PAUSED'

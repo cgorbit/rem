@@ -1,6 +1,8 @@
 import sys
 import threading
 
+from rem.rem_logging import logger as logging
+
 
 class NotReadyError(RuntimeError):
     pass
@@ -62,14 +64,14 @@ class _FutureState(object):
             try:
                 f(future)
             except:
-                pass
+                logging.exception("Failed to future-ready callback")
 
     def _run_cancelled(self, to_run):
         for f in to_run:
             try:
                 f()
             except:
-                pass
+                logging.exception("Failed to future-cancelled callback")
 
     def _repr_inter(self):
         is_set = self._is_set
