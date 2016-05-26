@@ -6,8 +6,8 @@ import shutil
 import tempfile
 import unittest
 import remclient
+import time
 from testdir import *
-
 
 class T04(unittest.TestCase):
     """Checking for interesting boundary cases"""

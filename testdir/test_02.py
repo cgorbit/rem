@@ -222,6 +222,8 @@ class T02(unittest.TestCase):
             pckInfo.MoveToQueue(queue1, queue2)
         except xmlrpclib.Fault as e:
             self.assertTrue("Can't move packets with running jobs" in str(e))
+        else:
+            self.assertTrue(False and "Must raise")
 
         pckInfo.Stop()
 
