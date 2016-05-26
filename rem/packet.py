@@ -6,6 +6,7 @@ import time
 import shutil
 import errno
 import sys
+import copy
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
 from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
@@ -1038,7 +1039,11 @@ class PacketBase(Unpickable(
             self._update_state()
 
     def make_job_graph(self):
-        return JobGraph(self.jobs, self.kill_all_jobs_on_error)
+        # Without deepcopy:
+        # .state => SUCCESSFULL
+        # ._graph_executor = DummyGraphExecutor
+        # .tries and .results in self.jobs leave modified
+        return JobGraph(copy.deepcopy(self.jobs), self.kill_all_jobs_on_error)
 
 
 class _LocalPacketJobGraphOps(object):
