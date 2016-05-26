@@ -543,23 +543,26 @@ class PacketBase(Unpickable(
         if self.destroying:
             return
 
-        #raise NonDestroyingStateError() # TODO XXX
+        g = self._graph_executor
+
+    # No. 1
+        if not g.is_null():
+            raise NonDestroyingStateError()
 
         self.destroying = True
 
-        g = self._graph_executor
-        if not g.is_null():
-            g.cancel()
+    # or No. 2
+        #if not g.is_null():
+            #g.cancel()
 
         self._update_state()
 
-    rpc_remove = destroy # TODO XXX
-    #def rpc_remove(self):
-        #with self.lock:
-            #try:
-                #self.destroy()
-            #except NotAllowedStateChangeError:
-                #raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
+    def rpc_remove(self):
+        with self.lock:
+            try:
+                self.destroy()
+            except NonDestroyingStateError:
+                raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
 
     def _on_graph_executor_state_change(self):
         state = self._graph_executor.state
