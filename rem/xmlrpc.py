@@ -5,6 +5,7 @@ import httplib
 import struct
 import threading
 import select
+import sys
 from SimpleXMLRPCServer import SimpleXMLRPCServer as SimpleXMLRPCServerOrig
 from SocketServer import ThreadingMixIn
 import Queue as StdQueue

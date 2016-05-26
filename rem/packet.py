@@ -5,7 +5,7 @@ import os
 import time
 import shutil
 import errno
-import cPickle
+import sys
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
 from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
