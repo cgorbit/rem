@@ -546,15 +546,13 @@ class PacketBase(Unpickable(
 
         g = self._graph_executor
 
-    # No. 1
-        if not g.is_null():
+        if not(g.is_null() or self.do_not_run):
             raise NonDestroyingStateError()
 
         self.destroying = True
 
-    # or No. 2
-        #if not g.is_null():
-            #g.cancel()
+        if not g.is_null():
+            g.cancel()
 
         self._update_state()
 
