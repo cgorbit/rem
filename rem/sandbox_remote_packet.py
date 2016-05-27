@@ -990,6 +990,7 @@ class SandboxJobGraphExecutorProxy(object):
         self._custom_resources = custom_resources
 
         self._remote_packet = None
+        self._remote_state = None
         self._prev_snapshot_resource_id = None
         self._error = None
 
@@ -1036,13 +1037,14 @@ class SandboxJobGraphExecutorProxy(object):
         return self.cancelled
 
 ########### Ops for _remote_packet
-    def _on_sandbox_packet_update(self, state, is_final):
+    def _on_sandbox_packet_update(self, update, is_final):
         with self.lock:
             if self.cancelled:
                 return
 
 # TODO XXX XXX
-            self.detailed_status = state['detailed_status']
+            self.detailed_status = update['detailed_status']
+            self._remote_state = update['state']
 
             # set(map(int, state['succeed_jobs'])) # TODO
             # state['state'] # TODO
@@ -1056,6 +1058,7 @@ class SandboxJobGraphExecutorProxy(object):
     def _do_on_packet_terminated(self):
         def on_stop():
             self._remote_packet = None
+            self._remote_state = None
             #self._ops.on_job_graph_becomes_null()
 
         assert not self.time_wait_deadline and not self.time_wait_sched
@@ -1140,6 +1143,10 @@ class SandboxJobGraphExecutorProxy(object):
     def _calc_state(self):
         with self.lock:
             if self._remote_packet:
+        # XXX
+                if not self.cancelled and self._remote_state == GraphState.TIME_WAIT:
+                    return self._remote_state
+
                 state = GraphState.WORKING
 
                 if self.cancelled:
