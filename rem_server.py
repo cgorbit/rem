@@ -956,7 +956,6 @@ def create_context(config):
     ctx = Context(config)
 
 # TODO
-    ctx.sandbox_rpc_listen_addr = ('ws30-511.search.yandex.net', 8000)
     ctx.sandbox_task_kill_timeout = 14 * 86400
     ctx.sandbox_task_owner = 'guest'
 

@@ -1,6 +1,7 @@
 import os
 from ConfigParser import ConfigParser, NoOptionError
 import rem_logging
+from rem.common import parse_network_address
 
 class ConfigReader(ConfigParser):
     def safe_get(self, section, option, default=""):
@@ -50,6 +51,7 @@ class Context(object):
         self.log_backup_count = config.getint("log", "rollcount")
         self.log_warn_level = config.get("log", "warnlevel")
         self.log_to_stderr = False
+
         self.packets_directory = self.prep_dir(config.get("store", "pck_dir"))
         self.backup_directory = self.prep_dir(config.get("store", "backup_dir"))
         self.backup_period = config.getint("store", "backup_period")
@@ -58,7 +60,6 @@ class Context(object):
         self.backup_child_max_working_time = config.getint("store", "backup_child_max_working_time")
         self.backup_fork_lock_friendly_timeout = config.safe_getint("store", "backup_fork_lock_friendly_timeout", None)
         self.backups_enabled = config.safe_getboolean("store", "backups_enabled", True)
-        self.use_ekrokhalev_server_process_title = config.safe_getboolean("run", "use_ekrokhalev_server_process_title", True)
         self.journal_lifetime = config.getint("store", "journal_lifetime")
         self.binary_directory = self.prep_dir(config.get("store", "binary_dir"))
         self.binary_lifetime = config.getint("store", "binary_lifetime")
@@ -68,6 +69,8 @@ class Context(object):
         self.recent_tags_file = config.get("store", "recent_tags_file")
         self.remote_tags_db_file = config.safe_get("store", "remote_tags_db_file")
         self.fix_bin_links_at_startup = config.safe_getboolean("store", "fix_bin_links_at_startup", True)
+
+        self.use_ekrokhalev_server_process_title = config.safe_getboolean("run", "use_ekrokhalev_server_process_title", True)
         self.working_job_max_count = config.getint("run", "poolsize")
         self.subprocsrv_runner_count = config.safe_getint("run", "subprocsrv_runner_count", 0)
         self.xmlrpc_pool_size = config.safe_getint("run", "xmlrpc_poolsize", 1)
@@ -78,8 +81,19 @@ class Context(object):
         self.sandbox_api_token = config.safe_get("run", "sandbox_api_token", None)
         self.sandbox_task_owner = config.safe_get("run", "sandbox_task_owner", None)
         self.sandbox_task_max_count = config.safe_getint("run", "sandbox_task_max_count", 50)
+        self.sandbox_rpc_listen_addr = config.safe_get("run", "sandbox_rpc_listen_addr", None)
+
+        if self.sandbox_rpc_listen_addr:
+            self.sandbox_rpc_listen_addr = parse_network_address(self.sandbox_rpc_listen_addr)
+
+        if self.sandbox_api_url and not( \
+            self.sandbox_task_owner \
+            and self.sandbox_task_max_count and self.sandbox_rpc_listen_addr):
+            raise ValueError("Sandbox setup is incomplete")
+
         self.allow_files_auto_sharing = config.safe_getboolean("run", "allow_files_auto_sharing", False)
         self.all_packets_in_sandbox = config.safe_getboolean("run", "all_packets_in_sandbox", False)
+
         self.cloud_tags_server = config.safe_get("store", "cloud_tags_server", None)
         self.cloud_tags_masks = config.safe_get("store", "cloud_tags_masks", None)
         self.cloud_tags_masks_reload_interval = config.safe_getint("store", "cloud_tags_masks_reload_interval", 300)
@@ -87,6 +101,7 @@ class Context(object):
         self.tags_random_cloudiness = config.safe_getboolean("store", "tags_random_cloudiness", False)
         self.all_tags_in_cloud = config.safe_getboolean("store", "all_tags_in_cloud", False)
         self.allow_startup_tags_conversion = config.safe_getboolean("store", "allow_startup_tags_conversion", True)
+
         self.manager_port = config.getint("server", "port")
         self.manager_readonly_port = config.safe_getint("server", "readonly_port")
         self.system_port = config.safe_getint("server", "system_port")
