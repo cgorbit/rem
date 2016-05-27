@@ -404,7 +404,7 @@ class SandboxQueue(QueueBase):
             self.working_packets.add(pck)
 
     def _on_packet_detach(self, pck):
-        self.working_packets.remove(pck)
+        self.working_packets.discard(pck)
 
     #def _get_working_count(self):
         #return len(self.working_packets)

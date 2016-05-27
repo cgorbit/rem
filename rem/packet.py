@@ -780,15 +780,18 @@ class PacketBase(Unpickable(
     def History(self):
         return self.history or []
 
-    # FIXME It's better for debug to allow this call from RPC without lock
-    #       * From messages it's called under lock actually
-    def Status(self):
-        return self._status()
-
     @property
     def waitingDeadline(self):
         # TODO Using self.jobs_to_retry
         return 1
+
+    def _get_extended_state(self):
+        return (self.state, self._graph_executor.get_worker_state())
+
+    # FIXME It's better for debug to allow this call from RPC without lock
+    #       * From messages it's called under lock actually
+    def Status(self):
+        return self._status()
 
     def _status(self):
         history = self.History()
@@ -811,6 +814,7 @@ class PacketBase(Unpickable(
                       sandbox_task_id=None,
 
                       state=self._repr_state,
+                      extended_state=self._get_extended_state(),
                       wait=list(self.wait_dep_tags),
                       all_tags=all_tags,
                       result_tag=result_tag,

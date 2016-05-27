@@ -604,3 +604,6 @@ class JobGraphExecutor(Unpickable(
         for stop_id, (job_id, cancel, deadline) in jobs_to_retry.items():
             assert cancel is None
             self._register_stop_waiting(job_id, deadline)
+
+    def get_worker_state(self):
+        return self.state

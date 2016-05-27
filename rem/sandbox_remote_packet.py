@@ -929,6 +929,8 @@ class SandboxRemotePacket(object):
         self._result_snapshot_resource_id = None
         #self._task_awaited = False
 
+        self._succeeded_jobs = set()
+
         remote_packets_dispatcher.register_packet(self)
 
     def __getstate__(self):
@@ -958,18 +960,23 @@ class SandboxRemotePacket(object):
     #def get_result(self):
         #raise NotImplementedError()
 
-    def _update_graph(self, state, is_final):
+    def _update_graph(self, update, is_final):
         assert self._target_stop_mode != StopMode.CANCEL
 
-        self._last_state = state # TODO
+        self._last_update = update # TODO
+
+        succeed_jobs = set(map(int, update['succeed_jobs']))
+
+        new_succeed_jobs = succeed_jobs - self._succeeded_jobs
+        self._succeeded_jobs = succeed_jobs
 
         if is_final:
-            self._final_state = state['state']
+            self._final_state = update['state']
 
             logging.debug('SandboxRemotePacket._final_state = %s' \
                 % GraphState.str(self._final_state))
 
-        self._ops._on_sandbox_packet_update(state, is_final)
+        self._ops._on_sandbox_packet_update(update, new_succeed_jobs, is_final)
 
     def _drop_sched_if_need(self):
         if self._sched:
@@ -1037,7 +1044,7 @@ class SandboxJobGraphExecutorProxy(object):
         return self.cancelled
 
 ########### Ops for _remote_packet
-    def _on_sandbox_packet_update(self, update, is_final):
+    def _on_sandbox_packet_update(self, update, succeed_jobs, is_final):
         with self.lock:
             if self.cancelled:
                 return
@@ -1048,6 +1055,9 @@ class SandboxJobGraphExecutorProxy(object):
 
             # set(map(int, state['succeed_jobs'])) # TODO
             # state['state'] # TODO
+
+            for job_id in succeed_jobs:
+                self._ops.job_done_successfully(job_id)
 
             self._update_state()
 
@@ -1101,7 +1111,7 @@ class SandboxJobGraphExecutorProxy(object):
             self._error = r._error
 
         elif r._final_state == GraphState.TIME_WAIT:
-            self.time_wait_deadline = r._last_state['nearest_retry_deadline']
+            self.time_wait_deadline = r._last_update['nearest_retry_deadline']
             self.time_wait_sched = \
                 delayed_executor.schedule(self._stop_time_wait,
                                             deadline=self.time_wait_deadline)
@@ -1173,6 +1183,9 @@ class SandboxJobGraphExecutorProxy(object):
 
             else:
                 return GraphState.PENDING_JOBS
+
+    def get_worker_state(self):
+        return self._remote_state
 
     def stop(self, kill_jobs):
         with self.lock:
