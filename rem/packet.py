@@ -111,6 +111,9 @@ class DummyGraphExecutor(object):
     def reset(self):
         pass
 
+    def get_worker_state(self):
+        return None
+
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,
@@ -223,8 +226,8 @@ class PacketBase(Unpickable(
             return ImplState.SUCCESSFULL if self.finish_status else ImplState.ERROR
 
         elif self.do_not_run:
-            if graph.is_cancelling():
-                assert graph.state & GraphState.WORKING
+            if graph.is_stopping():
+                assert graph.state & GraphState.WORKING, "Got %s" % graph.state
                 return ImplState.PAUSING
             else:
                 assert not is_graph_remote or graph.is_null()
@@ -232,17 +235,16 @@ class PacketBase(Unpickable(
                             # мы должны быть уверены, что Граф будет stop/start'ed,
                             # например, за счёт .files_modified/.resources_modified
 
-# FIXME
-        elif not graph.is_null() or graph.state == GraphState.TIME_WAIT: # FIXME Костыль?
-# FIXME
+    # FIXME
+        elif graph.state == GraphState.TIME_WAIT:
+            return ImplState.TIME_WAIT
+
+        elif not graph.is_null():
             if graph.is_cancelling():
                 assert graph.state & GraphState.WORKING
                 assert graph.state & GraphState.CANCELLED # FIXME | SUSPENDED
                                                           # is_stopped contains SUSPENDED and CANCELLED
                 return ImplState.PREV_EXECUTOR_STOP_WAIT
-
-            elif graph.state == GraphState.TIME_WAIT:
-                return ImplState.TIME_WAIT
 
             else:
                 assert graph.state & GraphState.WORKING

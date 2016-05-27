@@ -1002,6 +1002,8 @@ class SandboxJobGraphExecutorProxy(object):
         self._error = None
 
         self.cancelled = False # FIXME
+        self.stopping = False # FIXME
+
         self.time_wait_deadline = None
         self.time_wait_sched = None
         self.result = None
@@ -1043,6 +1045,9 @@ class SandboxJobGraphExecutorProxy(object):
     def is_cancelling(self):
         return self.cancelled
 
+    def is_stopping(self):
+        return self.stopping
+
 ########### Ops for _remote_packet
     def _on_sandbox_packet_update(self, update, succeed_jobs, is_final):
         with self.lock:
@@ -1078,13 +1083,13 @@ class SandboxJobGraphExecutorProxy(object):
         #res = self._remote_packet.get_result()
         r = self._remote_packet
 
+        self.stopping = False
+
         if self.cancelled:
             self.cancelled = False
             on_stop()
             return
 
-# XXX TODO
-# XXX TODO
 # XXX TODO
 # XXX TODO
 # Task FAILURE/EXCEPTION
@@ -1093,12 +1098,6 @@ class SandboxJobGraphExecutorProxy(object):
 
             ## XXX TODO XXX Rollback history/Status to prev state
 
-            #if self.do_not_run:
-                #on_stop()
-            #else:
-                #self._remote_packet = self._create_remote_packet()
-
-            #return
 
         # WTF?
         # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
@@ -1196,6 +1195,7 @@ class SandboxJobGraphExecutorProxy(object):
             if self.cancelled:
                 return # FIXME
 
+            self.stopping = True
             #self.do_not_run = True
             self._remote_packet.stop(kill_jobs)
             self._update_state()
