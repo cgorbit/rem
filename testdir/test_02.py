@@ -10,6 +10,9 @@ import xmlrpclib
 import remclient
 from testdir import *
 
+from rem.packet_state import PacketState
+from rem.job_graph import GraphState
+
 
 class T02(unittest.TestCase):
     """Checking common server functionality"""
@@ -113,7 +116,7 @@ class T02(unittest.TestCase):
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
         logging.info("packet %s(%s) added to queue %s, waiting until doing", pckname, pck.id, TestingQueue.Get())
         pckInfo = self.connector.PacketInfo(pck)
-        self.assertEqual(WaitForExecution(pckInfo, "WAITING"), "WAITING")
+        self.assertEqual(WaitForExecution(pckInfo, ["WAITING", "ERROR", "SUCCESSFULL"]), "WAITING")
         self.assertEqual(len(pckInfo.jobs), 2)
         self.assertEqual(WaitForExecution(pckInfo), "ERROR")
         pckInfo.Delete()
@@ -145,6 +148,7 @@ class T02(unittest.TestCase):
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
         pckInfo.Delete()
 
+# XXX TODO Implement RPC for SandboxPacket
     def testSuspendKillJobsNew(self):
         def contains(lst, val):
             #logging.info(lst)
@@ -216,6 +220,12 @@ class T02(unittest.TestCase):
 
         pckInfo = self.connector.PacketInfo(pck.id)
 
+        working_state = [PacketState.RUNNING, GraphState.WORKING]
+
+        self.assertEqual(
+            WaitForExecution(pckInfo, [working_state]),
+            working_state)
+
         pckInfo.Suspend()
 
         try:
@@ -226,6 +236,12 @@ class T02(unittest.TestCase):
             self.assertTrue(False and "Must raise")
 
         pckInfo.Stop()
+
+        paused_state = [PacketState.PAUSED, None]
+
+        self.assertEqual(
+            WaitForExecution(pckInfo, [paused_state]),
+            paused_state)
 
         pckInfo.MoveToQueue(queue1, queue2)
         pckInfo.MoveToQueue(queue2, queue2)
@@ -243,7 +259,7 @@ class T02(unittest.TestCase):
         queue2 = LmtTestQueue.Get()
         self.connector.Queue(queue1).AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
-        time.sleep(2.0)
+        self.assertEqual(WaitForExecution(pckInfo), "ERROR")
         pckInfo.MoveToQueue(queue1, queue2)
         pckInfo.MoveToQueue(queue2, queue2)
 

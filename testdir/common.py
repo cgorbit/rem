@@ -26,20 +26,22 @@ Config = SharedValue()
 def _toPacketInfoIfNeed(pck):
     return pck.conn.PacketInfo(pck) if isinstance(pck, remclient.JobPacket) else pck
 
-def WaitForExecution(pck, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
+def WaitForExecution(pck, fin_states=["SUCCESSFULL", "ERROR"], timeout=1.0):
+    use_extended_state = isinstance(fin_states[0], list)
+
     while True:
         pck.update()
-        cur_state = pck.state
+        cur_state = pck.extended_state if use_extended_state else pck.state
 
         if cur_state in fin_states:
-            break
+            return cur_state
 
         logging.info("packet %s state: %s" % (pck.pck_id, cur_state))
         time.sleep(timeout)
 
-    return cur_state
+    raise
 
-def WaitForStates(some, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
+def WaitForStates(some, fin_states=["SUCCESSFULL", "ERROR"], timeout=1.0):
     if isinstance(some, list):
         return WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, timeout)
     else:
@@ -50,7 +52,7 @@ def PrintPacketResults(pckInfo):
         print job.shell, "\n".join(r.data for r in job.results)
 
 
-def WaitForExecutionList(pckList, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
+def WaitForExecutionList(pckList, fin_states=["SUCCESSFULL", "ERROR"], timeout=1.0):
     while True:
         remclient.JobPacketInfo.multiupdate(pckList)
         waitPckCount = sum(1 for pck in pckList if pck.state not in fin_states)
