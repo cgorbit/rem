@@ -275,7 +275,9 @@ class RemotePacketsDispatcher(object):
         pck._set_state(RemotePacketState.ALL_DONE, reason)
         pck._run_guard = None # j.i.c
         #self._tasks_status_awaiter.cancel_wait(pck._sandbox_task_id) # TODO XXX NotImplementedError
-        self._by_task_id.pop(pck._sandbox_task_id)
+
+        if pck._sandbox_task_id:
+            self._by_task_id.pop(pck._sandbox_task_id)
 
     def _mark_task_fin_wait(self, pck, reason=None):
         pck._set_state(RemotePacketState.TASK_FIN_WAIT, reason)
@@ -989,6 +991,7 @@ class SandboxJobGraphExecutorProxy(object):
 
         self._remote_packet = None
         self._prev_snapshot_resource_id = None
+        self._error = None
 
         self.cancelled = False # FIXME
         self.time_wait_deadline = None
@@ -1089,7 +1092,10 @@ class SandboxJobGraphExecutorProxy(object):
         logging.debug('state for SandboxJobGraphExecutorProxy == %s' \
             % None if r._final_state is None else GraphState.str(r._final_state))
 
-        if r._final_state == GraphState.TIME_WAIT:
+        if r._error:
+            self._error = r._error
+
+        elif r._final_state == GraphState.TIME_WAIT:
             self.time_wait_deadline = r._last_state['nearest_retry_deadline']
             self.time_wait_sched = \
                 delayed_executor.schedule(self._stop_time_wait,
@@ -1145,6 +1151,10 @@ class SandboxJobGraphExecutorProxy(object):
 
             elif self.result is not None:
                 return GraphState.SUCCESSFULL if self.result else GraphState.ERROR
+
+            elif self._error:
+# TODO XXX
+                return GraphState.ERROR
 
             elif self.time_wait_deadline:
                 return GraphState.TIME_WAIT

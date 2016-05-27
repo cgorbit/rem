@@ -310,6 +310,7 @@ class Sharer(object):
 
         return task
 
+# XXX SINGLE THREAD, NOT PRODUCTION-READY!
     # FIXME Run several _upload_loop workers?
     def _upload_loop(self):
         while not self.should_stop:
@@ -334,6 +335,7 @@ class Sharer(object):
                 continue
 
             if not task:
+# XXX TODO Not restarted actually
                 self._schedule_retry(job, self.Action.CREATE_UPLOAD_TASK, delay=10.0)
                 continue
 
