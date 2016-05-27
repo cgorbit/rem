@@ -1049,6 +1049,8 @@ class SandboxJobGraphExecutorProxy(object):
             # set(map(int, state['succeed_jobs'])) # TODO
             # state['state'] # TODO
 
+            self._update_state()
+
     # on sandbox task stopped + resources list fetched
     def _on_packet_terminated(self):
         with self.lock:
