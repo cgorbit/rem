@@ -6,6 +6,7 @@ import types
 import shutil
 import logging
 import subprocess
+import base64
 
 from projects import resource_types as rt
 from sandboxsdk.channel import channel
@@ -158,6 +159,19 @@ class RunRemJobPacket(SandboxTask):
                 prev_packet_pickle_basename = 'prev_packet.pickle'
                 os.rename('work/packet.pickle', prev_packet_pickle_basename)
                 prev_packet_snapshot_file = prev_packet_pickle_basename
+
+        # snapshot_data may be E2BIG for execve
+        elif self.ctx['snapshot_data']:
+# TODO DRY
+# TODO DRY
+# TODO DRY
+            prev_packet_snapshot_file = 'prev_packet.pickle'
+
+            with open(prev_packet_snapshot_file, 'w') as out:
+                out.write(
+                    base64.b64decode(
+                        self.ctx['snapshot_data'].replace('\n', '')))
+
         else:
             os.mkdir('work/io')
             os.mkdir('work/root')
@@ -197,8 +211,8 @@ class RunRemJobPacket(SandboxTask):
         if prev_packet_snapshot_file:
             argv.extend(['--snapshot-file', prev_packet_snapshot_file])
 
-        elif self.ctx['snapshot_data']:
-            argv.extend(['--snapshot-data', self.ctx['snapshot_data'].replace('\n', '')])
+        #elif self.ctx['snapshot_data']:
+            #argv.extend(['--snapshot-data', self.ctx['snapshot_data'].replace('\n', '')])
 
         else:
             raise SandboxTaskFailureError()
