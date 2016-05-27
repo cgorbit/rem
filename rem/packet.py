@@ -1243,6 +1243,10 @@ class SandboxPacket(PacketBase):
 # TODO XXX FIXME Not garanteed anyhow for now
             assert self.directory
 
+            # Force REMOTE_COPY_RESOURCE to create directory even if len(self.bin_links) == 1
+            with open(self.directory + '/.force_multiple_files', 'w'):
+                pass
+
             self.files_sharing = sharer.share(
                 'REM_JOBPACKET_ADDED_FILE_SET',
                 name='__auto_shared_files__',
