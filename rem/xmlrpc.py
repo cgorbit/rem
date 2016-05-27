@@ -127,6 +127,8 @@ class AsyncXMLRPCServer2(SimpleXMLRPCServer):
             logging.error("XMLRPCServer: socket error")
             return
 
+        self._incoming.put(request)
+
     def shutdown(self):
         self.__should_stop = True
         self.__is_stopped.wait()
