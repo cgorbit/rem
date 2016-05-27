@@ -318,7 +318,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         return False
 
     def _create_queue(self, name):
-        cls = SandboxQueue if name.startswith('sbx:') else LocalQueue
+        cls = SandboxQueue if self.context.all_packets_in_sandbox or name.startswith('sbx:') \
+             else LocalQueue
 
         q = cls(name)
         self.qRef[name] = q
