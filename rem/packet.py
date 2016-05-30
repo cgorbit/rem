@@ -114,6 +114,9 @@ class DummyGraphExecutor(object):
     def reset(self):
         pass
 
+    def reset_tries(self):
+        pass
+
     def get_worker_state(self):
         return None
 
