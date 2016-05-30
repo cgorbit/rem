@@ -85,6 +85,8 @@ def always(ctor):
     return always
 
 
+# FIXME Fuck DummyGraphExecutor, use None?
+
 class DummyGraphExecutor(object):
     state = GraphState.PENDING_JOBS
 
@@ -1288,6 +1290,7 @@ class SandboxPacket(PacketBase):
 
 # TODO XXX Handle exception
             self.shared_files_resource_id = future.get()
+            self.resources_modified = True # FIXME
 
             self._update_state()
 
@@ -1297,7 +1300,14 @@ class SandboxPacket(PacketBase):
             #if not self._is_executable():
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
-            self._set_real_graph_executor_if_need()
+# XXX XXX XXX XXX XXX XXX XXX XXX XXX
+            if self.resources_modified and not isinstance(self._graph_executor, DummyGraphExecutor):
+                self._graph_executor._custom_resources = self._produce_job_graph_executor_custom_resources()
+            else:
+                self._graph_executor = self._create_job_graph_executor()
+                self._graph_executor.init() # TODO Better
+# XXX XXX XXX XXX XXX XXX XXX XXX XXX
+            #self._set_real_graph_executor_if_need()
 
             self.resources_modified = False
 
@@ -1311,16 +1321,24 @@ class SandboxPacket(PacketBase):
             self.resources_modified = True
             self.sbx_files[name] = path
 
-    def _create_job_graph_executor(self):
+    def _produce_job_graph_executor_custom_resources(self):
         assert not self.files_modified
 
-        files = self.sbx_files.copy()
+        files = self.sbx_files
 
         if self.shared_files_resource_id:
+            files = files.copy()
+
             prefix = 'sbx:%d/' % self.shared_files_resource_id
 
             for filename in self.bin_links.keys():
                 files[filename] = prefix + filename
+
+        return files
+
+    def _create_job_graph_executor(self):
+        assert not self.files_modified
+        files = self._produce_job_graph_executor_custom_resources()
 
         logging.debug('_create_job_graph_executor(%s): %s' % (self.id, files))
 

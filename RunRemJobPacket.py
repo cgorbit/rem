@@ -201,7 +201,10 @@ class RunRemJobPacket(SandboxTask):
         ]
 
         if custom_resources:
-            argv.extend(['--custom-resources', json.dumps(self.ctx['custom_resources'])])
+            orig = self.ctx['custom_resources']
+            if orig[0] == '=':
+                orig = orig[1:]
+            argv.extend(['--custom-resources', json.dumps(orig)])
 
         if prev_packet_snapshot_file:
             argv.extend(['--snapshot-file', prev_packet_snapshot_file])
