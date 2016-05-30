@@ -198,6 +198,9 @@ class JobGraphExecutor(Unpickable(
     def is_cancelling(self):
         return False
 
+    def is_stopping(self):
+        return False
+
     def _register_stop_waiting(self, job_id, deadline):
 # TODO Use ids from delayed_executor as in sandbox_remote_packet
         stop_id = None

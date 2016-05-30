@@ -105,6 +105,9 @@ class DummyGraphExecutor(object):
     def is_cancelling(self):
         return False
 
+    def is_stopping(self):
+        return False
+
     def vivify_jobs_waiting_stoppers(self):
         pass
 
