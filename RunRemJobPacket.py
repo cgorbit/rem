@@ -70,25 +70,20 @@ class RunRemJobPacket(SandboxTask):
         return '', None, 1
 
     def __init_custom_resources_param(self, resources):
-        logging.debug('__init_custom_resources_param: %s' % resources)
-
         if isinstance(resources, types.StringTypes):
             resources = resources.strip()
-            logging.debug('__init_custom_resources_param.strip(): %s' % resources)
 
             if resources:
-                logging.debug('if custom_resources')
+                if resources[0] == '=':
+                    resources = resources[1:]
                 return list(self.__parse_custom_resources(json.loads(resources)))
             else:
-                logging.debug('if custom_resources: else')
                 return None
 
         elif isinstance(resources, dict):
-            logging.debug('elif dict')
             return list(self.__parse_custom_resources(resources))
 
         else:
-            logging.debug('else')
             return None
 
     @staticmethod
@@ -165,14 +160,14 @@ class RunRemJobPacket(SandboxTask):
 # TODO DRY
 # TODO DRY
 # TODO DRY
-            prev_packet_snapshot_file = 'prev_packet.pickle'
+            prev_packet_snapshot_file = 'initial_snapshot.pickle'
 
             with open(prev_packet_snapshot_file, 'w') as out:
                 out.write(
                     base64.b64decode(
                         self.ctx['snapshot_data'].replace('\n', '')))
 
-        else:
+
             os.mkdir('work/io')
             os.mkdir('work/root')
 

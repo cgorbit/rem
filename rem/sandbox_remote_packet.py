@@ -10,6 +10,7 @@ from Queue import Queue as ThreadSafeQueue
 import errno
 import socket
 import xmlrpclib
+import json
 
 import requests
 import rem.delayed_executor as delayed_executor
@@ -215,9 +216,6 @@ class RemotePacketsDispatcher(object):
     # for packets that dont' communicate with us for a 'long time'
 
     # XXX TODO
-    # Send instance_id in requests to instance as assert
-
-    # XXX TODO
     # Instance must also ping server (if server doesn't ping instance)
     # so REM-server will register instance's remote_addr after
     # loading old backup (after server's fail)
@@ -242,29 +240,67 @@ class RemotePacketsDispatcher(object):
         return self._sandbox.create_task(
             'RUN_REM_JOBPACKET',
             {
-# TODO XXX Кажется, при resume'инге из _start_snapshot_resource_id нужно
-#          использовать не self._executor_resource_id,
-#          а тот executor, на котором первый раз запускался пакет
+                'rem_server_addr': ('%s:%d' % self._rpc_listen_addr),
                 'executor_resource': self._executor_resource_id,
                 'snapshot_data': wrap_string(pck._start_snapshot_data, 79) \
                     if pck._start_snapshot_data \
                     else None,
                 'snapshot_resource_id': pck._start_snapshot_resource_id,
-                'custom_resources': pck._custom_resources,
-                'rem_server_addr': ('%s:%d' % self._rpc_listen_addr),
-                #'instance_id': instance_id,
+                # '=' to prevent '[object Object]' rendering of parameter on Sandbox task page
+                'custom_resources': '=' + json.dumps(pck._custom_resources, indent=3),
             }
         )
 
+# XXX ACHTUNG
+# XXX ACHTUNG
+# XXX ACHTUNG
+# XXX ACHTUNG
+# XXX ACHTUNG
     def _sbx_update_task(self, pck, task):
+        real_pck = pck._ops._ops.pck
+        prev_task_id = pck._ops._prev_task_id
+
+        jobs = {
+            job.id: {
+                'command': job.shell,
+                'parents': job.parents,
+                'pipe_parents': job.inputs,
+                'max_try_count': job.max_try_count,
+                #'max_working_time': job.max_working_time,
+                #retry_delay = retry_delay
+                #pipe_fail = pipe_fail
+            }
+                for job in real_pck.jobs.itervalues()
+        }
+
+        description = '''pck_id: {pck_id}
+pck_name: {pck_name}
+rem_server: {rem_host}:{rem_port}
+prev_history: {history}
+prev_task: {prev_task}
+
+{job_graph}
+'''.format(
+
+            rem_host=self._rpc_listen_addr[0],
+            rem_port=self._rpc_listen_addr[1],
+            prev_task=prev_task_id,
+
+            pck_id=pck.id,
+            pck_name=real_pck.name,
+            #pck_name_timestamp_descr=' (1464601024 == 2016-05-30T12:37:20)', # TODO
+            history=real_pck.history[:-13], # TODO
+
+            job_graph=json.dumps(jobs, indent=3),
+        )
+
         task.update(
             max_restarts=0,
             kill_timeout=self._sbx_task_kill_timeout,
             owner=self._sbx_task_owner,
             priority=self._sbx_task_priority,
             notifications=[],
-            description='%s @ %s\n%s\n%s' % (
-                None, self._rpc_listen_addr, '_pck_name_TODO_', '_jobs_graph_TODO_')
+            description=description,
             #fail_on_any_error=True, # FIXME What?
         )
 
@@ -338,7 +374,6 @@ class RemotePacketsDispatcher(object):
                 return
 
             # FIXME fork locking (mallformed pck state)
-            #pck._instance_id = instance_id
             pck._sandbox_task_id = task.id
             pck._set_state(RemotePacketState.STARTING)
 
@@ -997,6 +1032,7 @@ class SandboxJobGraphExecutorProxy(object):
         self._custom_resources = custom_resources
 
         self._remote_packet = None
+        self._prev_task_id = None
         self._remote_state = None
         self._prev_snapshot_resource_id = None
         self._error = None
@@ -1012,7 +1048,6 @@ class SandboxJobGraphExecutorProxy(object):
         self.remote_history = [] # TODO
         self.detailed_status = {}
         self.state = None
-        #self.state = ReprState.PENDING
         #self.history = [] # XXX TODO Непонятно вообще как с этим быть
 
     def init(self):
@@ -1074,6 +1109,7 @@ class SandboxJobGraphExecutorProxy(object):
 
     def _do_on_packet_terminated(self):
         def on_stop():
+            self._prev_task_id = self._remote_packet._sandbox_task_id
             self._remote_packet = None
             self._remote_state = None
             #self._ops.on_job_graph_becomes_null()

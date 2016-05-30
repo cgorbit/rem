@@ -1071,6 +1071,7 @@ class PacketBase(Unpickable(
             self._update_state()
 
     def make_job_graph(self):
+# FIXME def Job.reset(self): self.tries = 0; self.results = []; self.cached_working_time = None
         # Without deepcopy self.jobs[*].{tries,result} will be modifed
         return JobGraph(copy.deepcopy(self.jobs), self.kill_all_jobs_on_error)
 
