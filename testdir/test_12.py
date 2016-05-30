@@ -33,7 +33,6 @@ class T12(unittest.TestCase):
                 wait_tags=[],
                 notify_emails=self.notifyEmails
             )
-            pck.AddJob(shell='true')
             pck.AddFiles({'test.bin': filePath})
             queue.AddPacket(pck)
 
@@ -64,6 +63,7 @@ class T12(unittest.TestCase):
             logging.info('Adding %d packages using checksum cache: %f seconds' % (repeat_count, time.time() - start))
 
             self.connector.checksumDbPath = None
-        finally:
+        except Exception:
             logging.exception("something wrong during test")
+        finally:
             hugeFile.close()

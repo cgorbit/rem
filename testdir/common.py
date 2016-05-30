@@ -4,10 +4,13 @@ import os.path
 import subprocess
 import remclient
 import random
+import unittest
 
 __all__ = ["PrintPacketResults", "TestingQueue", "LmtTestQueue", "Config",
            "WaitForExecution", "WaitForStates", "WaitForExecutionList", "PrintCurrentWorkingJobs",
-           "ServiceTemporaryShutdown", "RestartService", "RemServerWrapper"]
+           "ServiceTemporaryShutdown", "RestartService", "RemServerWrapper",
+           "TestCase"
+           ]
 
 
 class SharedValue(object):
@@ -191,3 +194,8 @@ class RemServerWrapper(object):
 
         def AsNative(self, rem):
             return rem.connector.Tag(self.local_name_for(rem))
+
+
+class TestCase(unittest.TestCase):
+    def _is_sandbox_only_setup(self):
+        return bool(self.connector.proxy.get_config()['all_packets_in_sandbox'])

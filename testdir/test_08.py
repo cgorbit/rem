@@ -1,7 +1,6 @@
 import logging
 import hashlib
 import time
-import unittest
 import os
 import tempfile
 
@@ -9,7 +8,7 @@ import remclient
 from testdir import *
 
 
-class T08(unittest.TestCase):
+class T08(TestCase):
     """Check restarting tag"""
 
     def setUp(self):
@@ -168,6 +167,12 @@ class T08(unittest.TestCase):
     def testRestoringNonexistingFile(self):
         """Restoring file from bin directory which has been removed
         packet should change state to WAITING"""
+
+        # sandbox resource will be created for the 1st packet run
+        # and original files remove will not affect 2nd run
+        if self._is_sandbox_only_setup():
+            return
+
         tag = "tag-start-%.0f" % time.time()
         pck = self.connector.Packet("pck-restore-file", wait_tags=[tag])
         with tempfile.NamedTemporaryFile(dir=".") as script_printer:

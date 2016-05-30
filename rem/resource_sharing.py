@@ -226,13 +226,13 @@ class Sharer(object):
                 #pass
             except Exception as e:
 # TODO XXX better checks or collect STDERR
-                if os.path.exists(job.dir):
+                if os.path.exists(job.directory):
                     logging.warning('sky share for %s faled: %s' % (job, e))
                     schedule_retry(job)
                 else:
                     self._set_promise(job, None,
                         OSError(errno.ENOENT,
-                                'Failed to share %s/%s: %s' % (job.dir, job.files, e)))
+                                'Failed to share %s/%s: %s' % (job.directory, job.files, e)))
                 return
 
             logging.debug('sky share successfully done for %s: %s' % (job, torrent_id))

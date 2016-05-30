@@ -3,10 +3,10 @@ import logging
 import threading
 import time
 import remclient
-from testdir import Config, WaitForExecution
+from testdir import Config, WaitForExecution, TestCase
 
 
-class T09(unittest.TestCase):
+class T09(TestCase):
     """Race conditions and deadlocks"""
 
     def setUp(self):
@@ -22,6 +22,9 @@ class T09(unittest.TestCase):
             The first one creates packet which sets some tag.
             The second one creates packet depending on the same tag.
             The aim is to check the following error: two tag-object with the same name are created on server"""
+
+        if self._is_sandbox_only_setup():
+            return
 
         class ClientThread(threading.Thread):
 

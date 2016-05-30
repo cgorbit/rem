@@ -1,6 +1,7 @@
 import unittest
 import logging
 import remclient
+import time
 from testdir import *
 
 

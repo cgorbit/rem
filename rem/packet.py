@@ -1251,7 +1251,7 @@ class SandboxPacket(PacketBase):
 
     def _share_files_as_resource_if_need(self):
         with self.lock:
-            if self.queue and self.files_modified and not self.files_sharing:
+            if self.queue and self.files_modified and not self.files_sharing and self.jobs:
                 self._share_files_as_resource()
 
     def _share_files_as_resource(self):

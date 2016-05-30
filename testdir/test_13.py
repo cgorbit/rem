@@ -1,7 +1,7 @@
 import time
 from testdir import *
 
-class T13(unittest.TestCase):
+class T13(TestCase):
     """test max_working_time"""
 
     def setUp(self):

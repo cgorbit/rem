@@ -9,7 +9,7 @@ import remclient
 import time
 from testdir import *
 
-class T04(unittest.TestCase):
+class T04(TestCase):
     """Checking for interesting boundary cases"""
 
     def setUp(self):
@@ -71,6 +71,9 @@ class T04(unittest.TestCase):
         pckInfo.Delete()
 
     def testManyPackets(self):
+        if self._is_sandbox_only_setup():
+            return
+
         tm = time.time()
         tgPrfx = "chain-%.0f" % tm
         strtTag = "chain-start-%.0f" % tm
@@ -135,8 +138,15 @@ class T04(unittest.TestCase):
         pckInfo.Delete()
 
     def testCleanWorked(self):
+        proxy = self.connector
+
         for qname in (TestingQueue.Get(), LmtTestQueue.Get()):
-            q = self.connector.Queue(qname)
+            q = proxy.Queue(qname)
+
+            pck = proxy.Packet('plug-pck-%.6f' % time.time())
+            q.AddPacket(pck)
+            self.assertEqual(WaitForExecution(proxy.PacketInfo(pck)), "SUCCESSFULL")
+
             pckList = q.ListPackets("worked")
             pckList = remclient.JobPacketInfo.multiupdate(pckList)
             for pck in pckList:
@@ -144,6 +154,7 @@ class T04(unittest.TestCase):
                     pck.Delete()
                 except:
                     logging.error("can't delete packet '%s'", pck.pck_id)
+
             print q.Status()
 
     def testRemoveWorking(self):

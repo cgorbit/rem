@@ -436,6 +436,17 @@ def get_backupable_state():
 def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
 
+
+@traced_rpc_method("debug")
+def get_config():
+    NoneType = type(None)
+    return {
+        key: value
+            for key, value in _context.__dict__.items()
+                if isinstance(value, (int, str, float, bool, NoneType))
+    }
+
+
 class ApiServer(object):
     def __init__(self, port, poolsize, scheduler, allow_backup_method=False, readonly=False):
         self.scheduler = scheduler
@@ -468,6 +479,7 @@ class ApiServer(object):
             check_tags,
             create_packet,
             get_backupable_state,
+            get_config,
             get_dependent_packets_for_tag,
             get_tag_local_state,
             list_cloud_tags_masks,
