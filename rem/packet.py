@@ -1214,6 +1214,10 @@ class LocalPacket(PacketBase):
     def _do_graph_reset(self):
         self._graph_executor.reset()
 
+# TODO Rename
+    def _share_files_as_resource_if_need(self):
+        pass
+
 
 class SandboxPacket(PacketBase):
     def _do_graph_suspend(self, kill_jobs):
