@@ -178,10 +178,10 @@ class JobGraphExecutor(Unpickable(
             return GraphState.SUCCESSFULL
 
         elif has_active_jobs:
-            if self.failed_jobs or not self.jobs_to_run:
-                return GraphState.WORKING
-            else:
-                return GraphState.WORKING | GraphState.PENDING_JOBS
+            ret = GraphState.WORKING
+            if not self.failed_jobs and self.jobs_to_run:
+                ret |= GraphState.PENDING_JOBS
+            return ret
 
         elif self.failed_jobs:
             return GraphState.ERROR
