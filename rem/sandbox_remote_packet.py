@@ -24,23 +24,6 @@ from rem.common import PickableLock
 
 remote_packets_dispatcher = None
 
-###########################
-            # create
-        # indef
-
-            # update
-        # indef
-
-            # start
-# from now on we must do both:
-# 1. check task status (maybe not from now actually)
-# 2. be ready for rpc requests
-        # indef
-
-            # really started on some host
-        # indef
-
-            # we get know that it started on some host
 
 class WrongTaskIdError(RuntimeError):
     pass
@@ -206,7 +189,8 @@ class RemotePacketsDispatcher(object):
 # TODO max_restarts=0
 # TODO kill_timeout=14 * 86400
 # FIXME fail_on_any_error=False XXX А на каких он не падает?
-# FIXME С одной стороны хочется hidden, но тогда Рома не сможет позырить
+
+# TODO Создать рботного пользователя FIXME Правда ли никто не сможет ручками перезапускать?
 
 # XXX
 # 1. Может ли таск порестартоваться даже при max_restarts=0

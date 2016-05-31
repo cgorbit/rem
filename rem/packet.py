@@ -152,8 +152,6 @@ class PacketBase(Unpickable(
 
                            history=list,
 
-                           #stopping_graph=bool,
-                           #need_to_start_graph=bool,
                            do_not_run=bool,
                            destroying=bool,
                            is_broken=bool,
@@ -170,7 +168,6 @@ class PacketBase(Unpickable(
         self.directory = None
         self.queue = None
         self.finish_status = None
-        #self.time_wait_deadline = None
 
         self._graph_executor = DummyGraphExecutor()
 
@@ -192,16 +189,10 @@ class PacketBase(Unpickable(
 
         self._set_waiting_tags(wait_tags)
 
-        #self.state = ImplState.UNINITIALIZED
         self._update_state()
 
     def _is_executable(self):
         return not self.is_broken and not self.destroying
-
-    #def _is_runnable(self):
-        #return self._is_executable() and not self.wait_dep_tags and self.queue \
-            #and self.jobs and self.finish_status is None \
-            #and self._graph_executor.is_null()
 
 # TODO Test this code offline with mask
     def _calc_state(self):
@@ -209,16 +200,13 @@ class PacketBase(Unpickable(
 
         graph = self._graph_executor
 
-    # FIXME Better
-        is_graph_remote = isinstance(self, SandboxPacket)
-
         if self.destroying:
             if graph.is_cancelling():
                 assert graph.state & GraphState.CANCELLED
                 assert graph.state & GraphState.WORKING
                 return ImplState.DESTROYING
             else:
-                assert not is_graph_remote or graph.is_null()
+                assert graph.is_null()
                 return ImplState.HISTORIED
 
         elif self.is_broken:
@@ -241,7 +229,7 @@ class PacketBase(Unpickable(
                 assert graph.state & GraphState.WORKING, "Got %s" % graph.state
                 return ImplState.PAUSING
             else:
-                assert not is_graph_remote or graph.is_null()
+                assert graph.is_null()
                 return ImplState.PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого...
                             # мы должны быть уверены, что Граф будет stop/start'ed,
                             # например, за счёт .files_modified/.resources_modified
@@ -309,11 +297,9 @@ class PacketBase(Unpickable(
         for job_id, tag in job_done_tag.iteritems():
             job_done_tag[job_id] = tag.name
 
-# TODO Restart sharing in vivify
         if sdict['files_sharing']:
             sdict['files_sharing'] = True
             sdict['files_modified'] = True
-# TODO Restart sharing in vivify
 
         return sdict
 
@@ -352,6 +338,7 @@ class PacketBase(Unpickable(
                 if isinstance(cur_val, str):
                     self.job_done_tag[jid] = tagStorage.AcquireTag(cur_val)
 
+    # XXX allow_files_auto_sharing is for Tests/Debug
     def vivify_resource_sharing(self):
         if self.files_sharing:
             raise NotImplementedError("Resource sharing vivify is not implemented")
@@ -491,53 +478,8 @@ class PacketBase(Unpickable(
         with file:
             return file.read()
 
-    #def _can_change_state(self, dst):
-        #raise NotImplementedError()
-
-        #src = self.state
-
-        #if src in [ImplState.PENDING, ImplState.RUNNING] and dst == ImplState.DESTROYING:
-            #return self._graph_executor.is_suspended() or self._graph_executor.is_null()
-
-        #elif src in [ImplState.PENDING, ImplState.RUNNING] and dst == ImplState.HISTORIED:
-            #return self._graph_executor.is_null()
-
-        #elif src == ImplState.UNINITIALIZED and dst == ImplState.SUCCESSFULL:
-            #return not self.jobs and not self.wait_dep_tags
-
-        #elif src == ImplState.TAGS_WAIT and dst == ImplState.SUCCESSFULL:
-            #return not self.jobs
-
-        #return dst in ImplState.allowed[src]
-
-    #def _become_pending_or_wait_tags(self):
-        #if self.wait_dep_tags:
-            #self._change_state(ImplState.TAGS_WAIT)
-        #else:
-            #self._become_pending()
-
-    #def _become_pending(self):
-        #assert not self.wait_dep_tags
-        #assert self.state != ImplState.RUNNING
-
-        #if not self.jobs: # FIXME and not self._graph_executor.dont_run_new_jobs:
-            #state = ImplState.SUCCESSFULL
-        #else:
-            #state = ImplState.RUNNING
-
-        #self._change_state(state)
-
     def _change_state(self, state):
         with self.lock:
-            #if state == self.state:
-                #logging.warning("packet %s useless state change to current %s" % (self.id, state))
-                #return
-
-            #if not self._can_change_state(state):
-                #raise NotAllowedStateChangeError(
-                    #"packet %s\tincorrect state change request %r => %r" \
-                        #% (self.name, self.state, state))
-
             self.state = state
             logging.debug("packet %s\tnew impl state %r", self.name, state)
 
@@ -574,7 +516,6 @@ class PacketBase(Unpickable(
         logging.debug("packet %s\tnew state %r", self.name, new)
 
         # TODO logging.debug("packet %s\twaiting for %s sec", self.name, delay)
-
 
     def destroy(self):
         if self.destroying:

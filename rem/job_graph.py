@@ -236,16 +236,9 @@ class JobGraphExecutor(Unpickable(
 
         job_id = descr[0]
 
-        had_to_run = bool(self.jobs_to_run)
         self.jobs_to_run.add(job_id)
 
-        #if not had_to_run:
-            #self._ops.on_state_change() # TODO BACK_REFERENCE
-            #self._update_state()
-
         self._update_state()
-
-        #self._notify_can_run_jobs_if_need()
 
     def _format_io_filename(self, (direction, job_id)):
         return '%s/%s-%s' % (self._ops.get_io_directory(), direction, job_id)
@@ -312,21 +305,9 @@ class JobGraphExecutor(Unpickable(
         else:
             self.failed_jobs.add(job.id)
 
-            # Чтобы не вводить в заблуждение get_job_to_run
-            #self._ops.on_state_change() # XXX assert in _calc_state
-
             if self.kill_all_jobs_on_error:
                 self._kill_jobs_drop_results()
 
-        #if len(self.succeed_jobs) == len(self.jobs):
-            #self._ops.set_successfull_state()
-        ## we can't start new jobs on _kill_jobs_drop_results=False
-        #elif not self.active_jobs_cache and self.failed_jobs:
-            #self._ops.set_errored_state()
-        #else:
-            #self._ops.on_state_change()
-
-        #self._notify_can_run_jobs_if_need()
         self._update_state()
 
     def get_working_jobs(self):
@@ -436,8 +417,6 @@ class JobGraphExecutor(Unpickable(
                     if not self.wait_job_deps[jid] and jid not in jobs_to_retry
             )
 
-            #self._notify_can_run_jobs_if_need() # Don't call it here
-
     # jobs
     # jobs_graph        = edges
     # wait_job_deps     = waitJobs
@@ -507,46 +486,20 @@ class JobGraphExecutor(Unpickable(
 
         return ret
 
-    #def disallow_to_run_jobs(self, kill_running):
-        #self._ops.on_state_change() # maybe from PENDING to WORKABLE
-        #self._update_state()
-
-        #if kill_running:
-            # FIXME In ideal world it's better to "apply" jobs that will be
-            # finished racy just before kill(2)
-            #self._kill_jobs_drop_results()
-            #self._ops.on_state_change() # maybe from PENDING to WORKABLE
-            #self._update_state()
-
-        #self._notify_can_run_jobs_if_need()
-
     def _reset_tries(self):
         self.jobs_to_run.update(self.failed_jobs)
         self.failed_jobs.clear()
         for job in self.jobs.values():
             job.tries = 0
-        #self._notify_can_run_jobs_if_need()
-
-    #def allow_to_run_jobs(self, reset_tries=False):
-        #if reset_tries:
-            #self._reset_tries()
-        ## FIXME NO_JOBS_SUSPENDED_MUST_NOT_BECOME_SUCESSFULL?
-        ##self._ops.on_state_change()
-        #self._update_state()
-        ##self._notify_can_run_jobs_if_need()
 
     def reset_tries(self):
         self._reset_tries()
         self._update_state()
 
-# XXX
     def reset(self):
         if not self._clean_state:
             self._do_reset()
-        #self._notify_can_run_jobs_if_need()
         self._update_state()
-
-    #start = restart
 
     def cancel(self):
         self._kill_jobs_drop_results()
