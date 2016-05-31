@@ -162,7 +162,6 @@ class JobGraphExecutor(Unpickable(
         sdict.pop('active_jobs_cache', None)
 
         sdict['jobs_to_retry'] = {
-            #job_id: deadline for job_id, cancel, deadline in sdict['jobs_to_retry'].values()
             stop_id: (job_id, None, deadline)
                 for stop_id, (job_id, cancel, deadline) in sdict['jobs_to_retry'].items()
         }
@@ -196,9 +195,6 @@ class JobGraphExecutor(Unpickable(
             raise AssertionError("Unreachable: %s" % self)
 
     def is_cancelling(self):
-        return False
-
-    def is_stopping(self):
         return False
 
     def _register_stop_waiting(self, job_id, deadline):

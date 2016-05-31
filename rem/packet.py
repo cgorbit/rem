@@ -225,7 +225,7 @@ class PacketBase(Unpickable(
             return ImplState.SUCCESSFULL if self.finish_status else ImplState.ERROR
 
         elif self.do_not_run:
-            if graph.is_stopping():
+            if self._is_graph_stopping():
                 assert graph.state & GraphState.WORKING, "Got %s" % graph.state
                 return ImplState.PAUSING
             else:
@@ -1175,6 +1175,9 @@ class LocalPacket(PacketBase):
     def _do_graph_reset(self):
         self._graph_executor.reset()
 
+    def _is_graph_stopping(self):
+        return not self._graph_executor.is_null() and self.do_not_run
+
 # TODO Rename
     def _share_files_as_resource_if_need(self):
         pass
@@ -1202,6 +1205,13 @@ class SandboxPacket(PacketBase):
         else:
             g.reset()
 
+    def _is_graph_stopping(self):
+        return self._graph_executor.is_stopping()
+
+    # For production-ready:
+    #   1. write rem.storages.sharer_cache around rem.resource_sharing
+    #   2. share all small files of packet in single resource
+    #      and big files in different resources
     def _share_files_as_resource_if_need(self):
         with self.lock:
             if self.queue and self.files_modified and not self.files_sharing and self.jobs:
