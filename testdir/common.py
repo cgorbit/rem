@@ -5,11 +5,12 @@ import subprocess
 import remclient
 import random
 import unittest
+import types
 
 __all__ = ["PrintPacketResults", "TestingQueue", "LmtTestQueue", "Config",
            "WaitForExecution", "WaitForStates", "WaitForExecutionList", "PrintCurrentWorkingJobs",
            "ServiceTemporaryShutdown", "RestartService", "RemServerWrapper",
-           "TestCase"
+           "TestCase", "AnyExecutionState"
            ]
 
 
@@ -29,12 +30,37 @@ Config = SharedValue()
 def _toPacketInfoIfNeed(pck):
     return pck.conn.PacketInfo(pck) if isinstance(pck, remclient.JobPacket) else pck
 
+AnyExecutionState = object()
+
 def WaitForExecution(pck, fin_states=["SUCCESSFULL", "ERROR"], use_extended_states=False, poll_interval=1.0):
+    if use_extended_states:
+        def extend_state(st):
+            return st + [AnyExecutionState] * (3 - len(st))
+
+        if not isinstance(fin_states, types.FunctionType):
+            fin_states = map(extend_state, fin_states)
+
+        def get_state(pck):
+            return pck.extended_state
+
+        def cmp_state(lhs, rhs):
+            return all(map(lambda (a, b): AnyExecutionState in [a, b] or a == b, zip(lhs, rhs)))
+    else:
+        def get_state(pck):
+            return pck.state
+
+        def cmp_state(lhs, rhs):
+            return lhs == rhs
+
     while True:
         pck.update()
-        cur_state = pck.extended_state[0] if use_extended_states else pck.state
+        cur_state = get_state(pck)
 
-        if cur_state in fin_states:
+        if isinstance(fin_states, types.FunctionType):
+            if fin_states(cur_state):
+                return cur_state
+
+        elif any(cmp_state(cur_state, i) for i in fin_states):
             return cur_state
 
         logging.info("packet %s state: %s" % (pck.pck_id, cur_state))

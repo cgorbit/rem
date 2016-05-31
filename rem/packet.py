@@ -799,7 +799,11 @@ class PacketBase(Unpickable(
         return 1
 
     def _get_extended_state(self):
-        return (self.state, self._graph_executor.get_worker_state())
+        g = self._graph_executor
+
+        return (self.state,
+                g.state,
+                g.get_worker_state())
 
     # FIXME It's better for debug to allow this call from RPC without lock
     #       * From messages it's called under lock actually

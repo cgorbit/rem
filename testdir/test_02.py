@@ -148,7 +148,6 @@ class T02(unittest.TestCase):
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
         pckInfo.Delete()
 
-# XXX TODO Implement RPC for SandboxPacket
     def testSuspendKillJobsNew(self):
         def contains(lst, val):
             #logging.info(lst)
@@ -167,6 +166,15 @@ class T02(unittest.TestCase):
         def check(res):
             self.assertEqual(contains(list_processes(), uniq_id), res)
 
+        def wait(state):
+            WaitForExecution(pck, [state], use_extended_states=True),
+
+        def wait_suspended():
+            wait([PacketState.PAUSED])
+
+        def wait_working():
+            wait([PacketState.RUNNING, AnyExecutionState, GraphState.WORKING])
+
         pckname = "suspend-kill-%.f" % time.time()
         pck = self.connector.Packet(pckname, time.time())
         pck.AddJob("sleep 10 && echo %s" % uniq_id)
@@ -174,19 +182,22 @@ class T02(unittest.TestCase):
 
         pck = self.connector.PacketInfo(pck.id)
 
+        wait_working()
+        check(True)
+
         pck.Stop()
-        sleep()
+        wait_suspended()
         check(False)
 
         pck.Resume()
-        sleep()
+        wait_working()
         check(True)
 
         pck.Suspend()
         check(True)
 
         pck.Stop()
-        sleep()
+        wait_suspended()
         check(False)
 
         pck.Delete()
@@ -220,9 +231,12 @@ class T02(unittest.TestCase):
 
         pckInfo = self.connector.PacketInfo(pck.id)
 
-        self.assertEqual(
-            WaitForExecution(pckInfo, [PacketState.RUNNING], use_extended_states=True),
-            PacketState.RUNNING)
+        self.assertTrue(
+            WaitForExecution(
+                pckInfo,
+                [[PacketState.RUNNING, AnyExecutionState, GraphState.WORKING]],
+                use_extended_states=True
+            )[0] == PacketState.RUNNING)
 
         pckInfo.Suspend()
 
@@ -235,9 +249,12 @@ class T02(unittest.TestCase):
 
         pckInfo.Stop()
 
-        self.assertEqual(
-            WaitForExecution(pckInfo, [PacketState.PAUSED], use_extended_states=True),
-            PacketState.PAUSED)
+        self.assertTrue(
+            WaitForExecution(
+                pckInfo,
+                [[PacketState.PAUSED]],
+                use_extended_states=True
+            )[0] == PacketState.PAUSED)
 
         pckInfo.MoveToQueue(queue1, queue2)
         pckInfo.MoveToQueue(queue2, queue2)

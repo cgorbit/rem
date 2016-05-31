@@ -24,11 +24,11 @@ class T05(unittest.TestCase):
         self.assertEqual(pckInfo.state, "SUSPENDED")
 
         self.connector.Tag(tagname).Set()
-        WaitForExecution(pckInfo, "WORKABLE")
+        WaitForExecution(pckInfo, ["WORKABLE"])
 
         self.connector.Tag(tagname).Unset()
         pckInfo.Suspend()
-        WaitForExecution(pckInfo, "SUSPENDED")
+        WaitForExecution(pckInfo, ["SUSPENDED"])
 
         self.connector.Tag(tagname).Set()
         time.sleep(2)
@@ -48,5 +48,5 @@ class T05(unittest.TestCase):
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
         print [job.__dict__ for job in pckInfo.jobs]
-        WaitForExecution(pckInfo, "SUCCESSFULL")
+        WaitForExecution(pckInfo, ["SUCCESSFULL"])
         pckInfo.Delete()
