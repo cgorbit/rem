@@ -341,6 +341,7 @@ class LocalQueue(QueueBase):
             try:
                 job = pck.get_job_to_run()
             except NotWorkingStateError: # because of race
+                logging.debug('NotWorkingStateError idling')
                 continue
 
             return job

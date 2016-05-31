@@ -122,6 +122,9 @@ class DummyGraphExecutor(object):
     def get_worker_state(self):
         return None
 
+    def has_jobs_to_run(self):
+        raise NotImplementedError()
+
 
 class PacketBase(Unpickable(
                            lock=PickableRLock,
@@ -1159,17 +1162,27 @@ class LocalPacket(PacketBase):
             self.make_job_graph(),
         )
 
+    def has_pending_jobs(self):
+        with self.lock:
+            return self.state in [ImplState.PENDING, ImplState.RUNNING] \
+                and bool(self._graph_executor.state & GraphState.PENDING_JOBS)
+# XXX Compare this 2 funcs
     #def _can_run_jobs_right_now(self):
         #return self.state in [ImplState.RUNNING, ImplState.PENDING] \
             #and self._graph_executor.has_jobs_to_run()
 
     def get_job_to_run(self):
         with self.lock:
-            #if not self._can_run_jobs_right_now():
-            if self.state not in [ImplState.RUNNING, ImplState.PENDING]:
+            def _raise():
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
+            if self.state not in [ImplState.RUNNING, ImplState.PENDING]:
+                _raise()
+
             self._set_real_graph_executor_if_need()
+
+            if not self._graph_executor.has_jobs_to_run():
+                _raise()
 
             runner = self._graph_executor.get_job_to_run()
             self._update_state() # FIXME in JobGraphExecutor
@@ -1206,11 +1219,6 @@ class LocalPacket(PacketBase):
         #if self._graph_executor.has_running_jobs():
             #raise as_rpc_user_error(
                 #from_rpc, RuntimeError("Can't move packets with running jobs"))
-
-    def has_pending_jobs(self):
-        with self.lock:
-            return self.state in [ImplState.PENDING, ImplState.RUNNING] \
-                and bool(self._graph_executor.state & GraphState.PENDING_JOBS)
 
     def _do_graph_suspend(self, kill_jobs):
         if kill_jobs:
