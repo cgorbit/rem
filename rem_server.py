@@ -904,7 +904,7 @@ def _copy_executor_files(dir):
     if code_root == '':
         code_root = '.'
 
-    shutil.copy(code_root + '/sbx_run_packet.py', dir + '/')
+    shutil.copy(code_root + '/run_sandbox_packet.py', dir + '/')
 
     shutil.copytree(
         code_root + '/rem',
@@ -922,7 +922,7 @@ def _share_sandbox_executor(ctx):
         archive_filename = dir + '/' + archive_basename
 
         subprocess.check_call(
-            ['tar', '-C', dir, '-cf', archive_filename, 'sbx_run_packet.py', 'rem'])
+            ['tar', '-C', dir, '-cf', archive_filename, 'run_sandbox_packet.py', 'rem'])
 
         res_id = ctx.sandbox_resource_sharer.share(
             'REM_JOBPACKET_EXECUTOR',
