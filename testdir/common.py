@@ -29,33 +29,31 @@ Config = SharedValue()
 def _toPacketInfoIfNeed(pck):
     return pck.conn.PacketInfo(pck) if isinstance(pck, remclient.JobPacket) else pck
 
-def WaitForExecution(pck, fin_states=["SUCCESSFULL", "ERROR"], timeout=1.0):
-    use_extended_state = isinstance(fin_states[0], list)
-
+def WaitForExecution(pck, fin_states=["SUCCESSFULL", "ERROR"], use_extended_states=False, poll_interval=1.0):
     while True:
         pck.update()
-        cur_state = pck.extended_state if use_extended_state else pck.state
+        cur_state = pck.extended_state[0] if use_extended_states else pck.state
 
         if cur_state in fin_states:
             return cur_state
 
         logging.info("packet %s state: %s" % (pck.pck_id, cur_state))
-        time.sleep(timeout)
+        time.sleep(poll_interval)
 
     raise
 
-def WaitForStates(some, fin_states=["SUCCESSFULL", "ERROR"], timeout=1.0):
+def WaitForStates(some, fin_states=["SUCCESSFULL", "ERROR"], poll_interval=1.0):
     if isinstance(some, list):
-        return WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, timeout)
+        return WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, poll_interval)
     else:
-        return WaitForExecution(_toPacketInfoIfNeed(some), fin_states, timeout)
+        return WaitForExecution(_toPacketInfoIfNeed(some), fin_states, poll_interval)
 
 def PrintPacketResults(pckInfo):
     for job in pckInfo.jobs:
         print job.shell, "\n".join(r.data for r in job.results)
 
 
-def WaitForExecutionList(pckList, fin_states=["SUCCESSFULL", "ERROR"], timeout=1.0):
+def WaitForExecutionList(pckList, fin_states=["SUCCESSFULL", "ERROR"], poll_interval=1.0):
     while True:
         remclient.JobPacketInfo.multiupdate(pckList)
         waitPckCount = sum(1 for pck in pckList if pck.state not in fin_states)
@@ -69,7 +67,7 @@ def WaitForExecutionList(pckList, fin_states=["SUCCESSFULL", "ERROR"], timeout=1
         if waitPckCount == 0:
             return [pck.state for pck in pckList]
 
-        time.sleep(timeout)
+        time.sleep(poll_interval)
 
 
 def PrintCurrentWorkingJobs(queue):

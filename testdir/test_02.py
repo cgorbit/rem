@@ -220,11 +220,9 @@ class T02(unittest.TestCase):
 
         pckInfo = self.connector.PacketInfo(pck.id)
 
-        working_state = [PacketState.RUNNING, GraphState.WORKING]
-
         self.assertEqual(
-            WaitForExecution(pckInfo, [working_state]),
-            working_state)
+            WaitForExecution(pckInfo, [PacketState.RUNNING], use_extended_states=True),
+            PacketState.RUNNING)
 
         pckInfo.Suspend()
 
@@ -237,11 +235,9 @@ class T02(unittest.TestCase):
 
         pckInfo.Stop()
 
-        paused_state = [PacketState.PAUSED, None]
-
         self.assertEqual(
-            WaitForExecution(pckInfo, [paused_state]),
-            paused_state)
+            WaitForExecution(pckInfo, [PacketState.PAUSED], use_extended_states=True),
+            PacketState.PAUSED)
 
         pckInfo.MoveToQueue(queue1, queue2)
         pckInfo.MoveToQueue(queue2, queue2)
