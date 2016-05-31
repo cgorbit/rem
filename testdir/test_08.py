@@ -28,7 +28,7 @@ class T08(TestCase):
         time.sleep(0.1)
         self.connector.Tag(tag).Reset()
         self.connector.Tag(tag).Set()
-        self.assertEqual(WaitForExecution(pckInfo, timeout=1.0), "SUCCESSFULL")
+        self.assertEqual(WaitForExecution(pckInfo, poll_interval=1.0), "SUCCESSFULL")
         pckInfo.Delete()
 
     def testSuccessfullPacket(self):
@@ -43,14 +43,14 @@ class T08(TestCase):
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck2)
         pckInfo2 = self.connector.PacketInfo(pck2.id)
 
-        self.assertEqual(WaitForExecution(pckInfo1, timeout=1.0), "SUCCESSFULL")
+        self.assertEqual(WaitForExecution(pckInfo1, poll_interval=1.0), "SUCCESSFULL")
 
         self.connector.Tag(tag).Reset()
         time.sleep(2)
         self.assertNotEqual(pckInfo2.state, "SUCCESSFULL")
         self.connector.Tag(tag).Set()
         time.sleep(1)
-        WaitForExecutionList([pckInfo1, pckInfo2], timeout=1.0)
+        WaitForExecutionList([pckInfo1, pckInfo2], poll_interval=1.0)
         time.sleep(1)
         logging.info("%s %s", pckInfo1.pck_id, pckInfo2.pck_id)
         time.sleep(1)
@@ -73,7 +73,7 @@ class T08(TestCase):
                 with pck_setup as child_pck:
                     child_pck.AddJob("false", tries=1)
 
-                self.assertEqual(WaitForStates(child_pck, timeout=1.0), "ERROR")
+                self.assertEqual(WaitForStates(child_pck, poll_interval=1.0), "ERROR")
             child_tag.Set()
             parent_tag.Unset()
 
@@ -83,7 +83,7 @@ class T08(TestCase):
 
             pck = rem.PacketInfo(pck)
 
-            self.assertEqual(WaitForStates(pck, timeout=1.0), "ERROR" if add_files else "SUCCESSFULL")
+            self.assertEqual(WaitForStates(pck, poll_interval=1.0), "ERROR" if add_files else "SUCCESSFULL")
 
             pck.Restart(
                 files=['/bin/true'] if add_files else None,
@@ -99,7 +99,7 @@ class T08(TestCase):
                 WaitForStates(
                     pck,
                     ['SUCCESSFULL', 'ERROR', state_to_wait],
-                    timeout=1.0
+                    poll_interval=1.0
                 ),
                 state_to_wait
             )
@@ -107,7 +107,7 @@ class T08(TestCase):
             if suspend:
                 pck.Resume()
 
-            self.assertEqual(WaitForStates(pck, timeout=1.0), "SUCCESSFULL")
+            self.assertEqual(WaitForStates(pck, poll_interval=1.0), "SUCCESSFULL")
 
             self.assertTrue(bool(reset_tag) != bool(child_tag.IsSet()))
 
@@ -207,5 +207,5 @@ class T08(TestCase):
         pckInfo = self.connector.PacketInfo(pck.id)
         pckInfo.Restart()
         self.connector.Tag(tag2).Set()
-        self.assertEqual(WaitForExecution(pckInfo, timeout=1.0), "SUCCESSFULL")
+        self.assertEqual(WaitForExecution(pckInfo, poll_interval=1.0), "SUCCESSFULL")
         pckInfo.Delete()

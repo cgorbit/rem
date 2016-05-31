@@ -32,7 +32,7 @@ def _toPacketInfoIfNeed(pck):
 
 AnyExecutionState = object()
 
-def WaitForExecution(pck, fin_states=["SUCCESSFULL", "ERROR"], use_extended_states=False, poll_interval=1.0):
+def WaitForExecution(pck, fin_states=["SUCCESSFULL", "ERROR"], poll_interval=1.0, use_extended_states=False):
     if use_extended_states:
         def extend_state(st):
             return st + [AnyExecutionState] * (3 - len(st))

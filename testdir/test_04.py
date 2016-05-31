@@ -89,7 +89,7 @@ class T04(TestCase):
             pckList.append(pck)
         self.connector.Tag(strtTag).Set()
         pckInfo = self.connector.PacketInfo(pckList[-1].id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=10.0), "SUCCESSFULL")
+        self.assertEqual(WaitForExecution(pckInfo, poll_interval=10.0), "SUCCESSFULL")
         for pck in pckList:
             self.connector.PacketInfo(pck.id).Delete()
 
@@ -101,7 +101,7 @@ class T04(TestCase):
             pck.AddJob("echo -n . >&2")
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=2.0), "SUCCESSFULL")
+        self.assertEqual(WaitForExecution(pckInfo, poll_interval=2.0), "SUCCESSFULL")
         pckInfo.Delete()
 
     def testManyParallelSequentialJobs(self):
@@ -117,7 +117,7 @@ class T04(TestCase):
 
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=2.0), "SUCCESSFULL")
+        self.assertEqual(WaitForExecution(pckInfo, poll_interval=2.0), "SUCCESSFULL")
         pckInfo.Delete()
 
     def testSingleJobWaitingManyParallelJobs(self):
@@ -134,7 +134,7 @@ class T04(TestCase):
 
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
-        self.assertEqual(WaitForExecution(pckInfo, timeout=2.0), "SUCCESSFULL")
+        self.assertEqual(WaitForExecution(pckInfo, poll_interval=2.0), "SUCCESSFULL")
         pckInfo.Delete()
 
     def testCleanWorked(self):
