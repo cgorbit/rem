@@ -190,7 +190,7 @@ class RunRemJobPacket(SandboxTask):
         last_update_message_file = 'last_update_message.pickle'
 
         argv = [
-            './executor/sbx_run_packet.py',
+            './executor/run_sandbox_packet.py',
                 '--work-dir', 'work/root',
                 '--io-dir',   'work/io',
                 '--task-id', str(self.id),
