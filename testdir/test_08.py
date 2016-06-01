@@ -7,6 +7,9 @@ import tempfile
 import remclient
 from testdir import *
 
+from rem.packet_state import PacketState
+from rem.job_graph import GraphState
+
 
 class T08(TestCase):
     """Check restarting tag"""
@@ -21,14 +24,28 @@ class T08(TestCase):
         """Test for jobs with retries=1"""
         tag = "tag-one-try-%.0f" % time.time()
         pck = self.connector.Packet("pck-one-try", wait_tags=[tag])
-        j1 = pck.AddJob("sleep 1", tries=1)
+        j1 = pck.AddJob("sleep 5", tries=1)
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
+
         self.connector.Tag(tag).Set()
-        time.sleep(0.1)
+        self.assertEqual(
+            WaitForExecution(pckInfo,
+                             [
+                                [PacketState.RUNNING, AnyExecutionState, GraphState.WORKING],
+                                [PacketState.SUCCESSFULL],
+                                [PacketState.ERROR]
+                             ],
+                             use_extended_states=True,
+                             poll_interval=1.0)[0],
+            PacketState.RUNNING)
+
         self.connector.Tag(tag).Reset()
+        self.assertEqual(WaitForExecution(pckInfo, ["SUSPENDED", "SUCCESSFULL", "ERROR"], poll_interval=1.0), "SUSPENDED")
+
         self.connector.Tag(tag).Set()
         self.assertEqual(WaitForExecution(pckInfo, poll_interval=1.0), "SUCCESSFULL")
+
         pckInfo.Delete()
 
     def testSuccessfullPacket(self):

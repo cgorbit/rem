@@ -181,6 +181,7 @@ class SandboxPacketsRunner(object):
 
                 pck = q.get_packet_to_run()
                 if not pck:
+                    logging.debug('NotWorkingStateError idling')
                     continue
 
                 if q.has_startable_packets():
@@ -279,6 +280,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.tagRef.PreInit()
         self.ObjectRegistratorClass = ObjectRegistrator if context.register_objects_creation \
                                                       else FakeObjectRegistrator
+        self._sandbox_packets_runner = None
         if context.use_memory_profiler:
             self.initProfiler()
 
@@ -864,7 +866,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.Notify(queue)
 
     def _on_packet_pending(self, queue):
-        self._sandbox_packets_runner.on_queue_not_empty(queue)
+        if self._sandbox_packets_runner:
+            self._sandbox_packets_runner.on_queue_not_empty(queue)
 
     def send_email_async(self, rcpt, (subj, body)):
         self._mailer.send_async(rcpt, subj, body)

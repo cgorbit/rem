@@ -59,9 +59,10 @@ class QueueBase(Unpickable(
         PacketState.PAUSING:   "suspended",
         PacketState.TAGS_WAIT: "suspended",
 
+        # pending used to run SandboxPacket's
         PacketState.PENDING:                 "pending",
-        PacketState.PREV_EXECUTOR_STOP_WAIT: "pending", # XXX FIXME XXX
-        PacketState.SHARING_FILES: "pending",
+        PacketState.PREV_EXECUTOR_STOP_WAIT: "suspended", # FIXME
+        PacketState.SHARING_FILES: "suspended", # FIXME
 
         PacketState.RUNNING:    "working",
         PacketState.DESTROYING: "working",
