@@ -1,21 +1,21 @@
 import os
-import sys
 import json
 import re
 import types
 import shutil
 import logging
-import subprocess
 import base64
 
 from projects import resource_types as rt
-from sandboxsdk.channel import channel
 from sandboxsdk.task import SandboxTask
 from sandboxsdk.process import run_process
 from sandboxsdk import parameters
+from sandboxsdk.errors import SandboxTaskFailureError
 
 
 class RunRemJobPacket(SandboxTask):
+    '''REM job-packet executor'''
+
     type = 'RUN_REM_JOBPACKET'
 
     class Executor(parameters.ResourceSelector):
@@ -44,12 +44,14 @@ class RunRemJobPacket(SandboxTask):
     class CustomResourcesDescr(parameters.SandboxStringParameter):
         name = "custom_resources"
         multiline = True
+        description = "custom resources"
         required = False
 
     # For cache-locality of resources
     class CustomResources(parameters.ResourceSelector):
         name = "custom_resources_locality_enforcer"
         resource_type = None
+        description = "custom resources"
         multiple = True
         required = False
 
@@ -204,7 +206,7 @@ class RunRemJobPacket(SandboxTask):
                 '--rem-server-addr', self.ctx['rem_server_addr'],
                 '--result-snapshot-file', packet_snapshot_file,
                 '--last-update-message-file', last_update_message_file,
-                # FIXME This option was to ensure that 
+                # FIXME This option was to ensure that
                 #'--result-status-file=result.json',
         ]
 
