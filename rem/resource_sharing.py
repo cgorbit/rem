@@ -180,11 +180,16 @@ class Sharer(object):
             self._initiate_retry_inner(job_id, action)
 
     def _schedule_retry(self, job, action, delay):
-        if delay:
-            self.jobs_to_retry[job.id] = action
-            delayed_executor.schedule(lambda id=job.id: self._initiate_retry(id), timeout=delay)
-        else:
-            self._initiate_retry_inner(job.id, action)
+        with self.lock:
+            if delay:
+                self.jobs_to_retry[job.id] = action
+
+                delayed_executor.schedule(
+                    # Unfortunatly delayed_executor has magic about arg count
+                    lambda _, id=job.id: self._initiate_retry(id),
+                    timeout=delay)
+            else:
+                self._initiate_retry_inner(job.id, action)
 
     def share(self, *args, **kwargs):
         job = self.Job(*args, **kwargs)
