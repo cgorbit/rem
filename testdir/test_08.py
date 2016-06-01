@@ -64,13 +64,17 @@ class T08(TestCase):
 
         self.connector.Tag(tag).Reset()
         time.sleep(2)
+        pckInfo2.update()
         self.assertNotEqual(pckInfo2.state, "SUCCESSFULL")
+
         self.connector.Tag(tag).Set()
         time.sleep(1)
         WaitForExecutionList([pckInfo1, pckInfo2], poll_interval=1.0)
+
         time.sleep(1)
         logging.info("%s %s", pckInfo1.pck_id, pckInfo2.pck_id)
         time.sleep(1)
+
         # for pck in [pckInfo1, pckInfo2]:
         # # self.assertEqual(pck.state, "SUCCESSFULL")
         # pck.Delete()
