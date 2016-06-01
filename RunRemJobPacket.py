@@ -41,14 +41,16 @@ class RunRemJobPacket(SandboxTask):
         description = "rem_server_addr"
         required = True
 
-# XXX TODO FIXME For _cache locality_ we MUST use 'native' parameters with resource ids
-
-    #class CustomResources(parameters.ListRepeater, parameters.SandboxStringParameter):
-    #class CustomResources(parameters.DictRepeater, parameters.SandboxStringParameter):
-    class CustomResources(parameters.SandboxStringParameter):
+    class CustomResourcesDescr(parameters.SandboxStringParameter):
         name = "custom_resources"
-        description = "custom resources"
         multiline = True
+        required = False
+
+    # For cache-locality of resources
+    class CustomResources(parameters.ResourceSelector):
+        name = "custom_resources_locality_enforcer"
+        resource_type = None
+        multiple = True
         required = False
 
     class PythonVirtualEnvironment(parameters.ResourceSelector):
@@ -63,25 +65,27 @@ class RunRemJobPacket(SandboxTask):
         ExecutionSnapshotData,
         ExecutionSnapshotResource,
         CustomResources,
-        #PythonVirtualEnvironment, # TODO UNCOMMENT
+        CustomResourcesDescr,
+        #PythonVirtualEnvironment, # TODO
     ]
 
     def arcadia_info(self):
         return '', None, 1
 
-    def __init_custom_resources_param(self, resources):
+    @classmethod
+    def __parse_custom_resources_any(cls, resources):
         if isinstance(resources, types.StringTypes):
             resources = resources.strip()
 
             if resources:
                 if resources[0] == '=':
                     resources = resources[1:]
-                return list(self.__parse_custom_resources(json.loads(resources)))
+                return list(cls.__parse_custom_resources(json.loads(resources)))
             else:
                 return None
 
         elif isinstance(resources, dict):
-            return list(self.__parse_custom_resources(resources))
+            return list(cls.__parse_custom_resources(resources))
 
         else:
             return None
@@ -145,8 +149,11 @@ class RunRemJobPacket(SandboxTask):
 
             if False:
                 for subdir in ['io', 'root']:
-# FIXME symlinks=True
-                    shutil.copytree(prev_snapshot_path + '/' + subdir, 'work/' + subdir)
+                    shutil.copytree(
+                        prev_snapshot_path + '/' + subdir,
+                        'work/' + subdir,
+                        symlinks=True
+                    )
                 prev_packet_snapshot_file = prev_snapshot_path + '/' + 'packet.pickle'
 
             else:
@@ -180,7 +187,7 @@ class RunRemJobPacket(SandboxTask):
 
         if 'custom_resources_parsed' not in self.ctx:
             self.ctx['custom_resources_parsed'] \
-                = self.__init_custom_resources_param(self.ctx['custom_resources'])
+                = self.__parse_custom_resources_any(self.ctx['custom_resources'])
 
         custom_resources = self.__custom_resources
         if custom_resources:
@@ -197,7 +204,8 @@ class RunRemJobPacket(SandboxTask):
                 '--rem-server-addr', self.ctx['rem_server_addr'],
                 '--result-snapshot-file', packet_snapshot_file,
                 '--last-update-message-file', last_update_message_file,
-                #'--result-status-file=result.json', # FIXME Don't remember what for
+                # FIXME This option was to ensure that 
+                #'--result-status-file=result.json',
         ]
 
         if custom_resources:
@@ -217,7 +225,7 @@ class RunRemJobPacket(SandboxTask):
 
         run_process(argv, log_prefix='executor')
 
-# XXX This actually not needed for work.tar
+        # This actually not needed for tar-archive-resource, only for raw file-tree
         if custom_resources:
             self.__unlink_custom_resources(custom_resources)
 
