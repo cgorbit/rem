@@ -20,12 +20,14 @@ import shutil
 import subprocess
 
 from rem import constants, osspec
-from rem import traced_rpc_method
-from rem import CheckEmailAddress, LocalPacket, SandboxPacket, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
-from rem import AsyncXMLRPCServer
+
+from rem.packet import LocalPacket, SandboxPacket
+from rem.scheduler import Scheduler
+from rem.workers import ThreadJobWorker, TimeTicker, XMLRPCWorker
+from rem.xmlrpc import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
-from rem.common import as_rpc_user_error, RpcUserError, NamedTemporaryDir
+from rem.common import as_rpc_user_error, RpcUserError, NamedTemporaryDir, traced_rpc_method, CheckEmailAddress
 import rem.common
 import rem.fork_locking
 from rem.rem_logging import logger as logging
@@ -969,7 +971,6 @@ def create_context(config):
 
 # TODO
     ctx.sandbox_task_kill_timeout = 14 * 86400
-    ctx.sandbox_task_owner = 'guest'
 
     ctx.sandbox_rpc_invoker_thread_pool_size = 10
     ctx.sandbox_invoker_thread_pool_size = 10

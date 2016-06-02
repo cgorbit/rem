@@ -82,6 +82,7 @@ class Context(object):
         self.sandbox_task_owner = config.safe_get("run", "sandbox_task_owner", None)
         self.sandbox_task_max_count = config.safe_getint("run", "sandbox_task_max_count", 50)
         self.sandbox_rpc_listen_addr = config.safe_get("run", "sandbox_rpc_listen_addr", None)
+        self.sandbox_python_resource_id = config.safe_getint("run", "sandbox_python_resource_id", None)
 
         if self.sandbox_rpc_listen_addr:
             self.sandbox_rpc_listen_addr = parse_network_address(self.sandbox_rpc_listen_addr)

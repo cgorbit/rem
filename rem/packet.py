@@ -1316,10 +1316,6 @@ class SandboxPacket(PacketBase):
     def _check_can_move_beetwen_queues(self):
         pass
 
-# DEBUG
-    def create_sandbox_packet(self):
-        return sandbox_packet.Packet(self.id, self.make_job_graph())
-
     def _check_add_files(self):
         PacketBase._check_add_files(self)
 

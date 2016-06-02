@@ -5,10 +5,8 @@ import time
 import datetime
 import sys
 
-from callbacks import CallbackHolder
-from common import SerializableFunction, Unpickable, safeint, nullobject, zeroint, get_None, get_False
+from common import SerializableFunction, Unpickable, safeint
 import osspec
-import packet
 import constants
 import job_process
 import pgrpguard
@@ -24,14 +22,14 @@ def _RunnerWithFallbackFunctor(self, main, fallback):
     broken = [False]
 
     def impl(*args, **kwargs):
-        if [broken]:
+        if broken[0]:
             return fallback(*args, **kwargs)
 
         try:
             return main(*args, **kwargs)
 
         except subprocsrv.ServiceUnavailable:
-            broken = True
+            broken[0] = True
             return fallback(*args, **kwargs)
 
     return impl
@@ -384,7 +382,7 @@ class JobRunner(object):
         try:
             try:
                 self._run()
-            except Exception as e:
+            except Exception:
                 # FIXME Do something more than logging?
                 logging.exception("Run job %s exception", job.id)
 

@@ -8,7 +8,6 @@ import base64
 import socket
 import threading
 from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
-import xmlrpclib
 import rem.xmlrpc
 from rem.xmlrpc import is_xmlrpc_exception
 from rem.sandbox_remote_packet import WrongTaskIdError
@@ -231,10 +230,6 @@ if __name__ == '__main__':
         notifier_failed[0] = True
         pck.stop(kill_jobs=True) # FIXME Or cancel (do we need snapshot resource)?
 
-    import xmlrpclib
-    #rem_proxy = xmlrpclib.ServerProxy('http://' + opts.rem_server_addr,
-                                   #allow_none=True,
-                                   #)
     rem_proxy = rem.xmlrpc.ServerProxy('http://' + opts.rem_server_addr,
                                    allow_none=True,
                                    timeout=20.0)

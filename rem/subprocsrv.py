@@ -1276,7 +1276,7 @@ class RunnerPoolNaive(object):
     def start(self, *args, **kwargs):
         return self._get_impl().start(*args, **kwargs)
 
-    def stop():
+    def stop(self):
         self._good = []
 
 

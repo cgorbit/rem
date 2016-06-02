@@ -68,7 +68,7 @@ class RunRemJobPacket(SandboxTask):
         ExecutionSnapshotResource,
         CustomResources,
         CustomResourcesDescr,
-        #PythonVirtualEnvironment, # TODO
+        PythonVirtualEnvironment, # TODO
     ]
 
     def arcadia_info(self):
@@ -141,8 +141,12 @@ class RunRemJobPacket(SandboxTask):
         logging.debug(pformat(self.ctx))
         logging.debug(type(self.ctx['custom_resources']))
 
-        os.mkdir('custom_resources')
+        python_virtual_env_path = self.sync_resource(int(self.ctx['python_resource']))
         os.mkdir('python')
+        run_process(['tar', '-C', 'python', '-zxf', python_virtual_env_path])
+        python_virtual_env_bin_directory = os.path.abspath('./python/bin')
+
+        os.mkdir('custom_resources')
         os.mkdir('work')
 
         prev_packet_snapshot_file = None
@@ -225,7 +229,9 @@ class RunRemJobPacket(SandboxTask):
         else:
             raise SandboxTaskFailureError()
 
-        run_process(argv, log_prefix='executor')
+        env = os.environ.copy()
+        env['PATH'] = python_virtual_env_bin_directory + ':' + env.get('PATH', '')
+        run_process(argv, environment=env, log_prefix='executor')
 
         # This actually not needed for tar-archive-resource, only for raw file-tree
         if custom_resources:

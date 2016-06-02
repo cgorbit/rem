@@ -17,9 +17,8 @@ import threading
 import fork_locking
 from job import FuncJob, SerializableFunction
 from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject
-from rem import PacketCustomLogic
 from connmanager import ConnectionManager
-from packet import LocalPacket, PacketState
+from packet import LocalPacket, PacketState, PacketCustomLogic
 import packet
 from queue import LocalQueue, SandboxQueue
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage

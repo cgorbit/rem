@@ -130,6 +130,7 @@ class RemotePacketsDispatcher(object):
         self._rpc_listen_addr = ctx.sandbox_rpc_listen_addr
         self._sbx_task_kill_timeout = ctx.sandbox_task_kill_timeout
         self._sbx_task_owner = ctx.sandbox_task_owner
+        self._sbx_python_resource_id = ctx.sandbox_python_resource_id
 
         self._sandbox = ctx.sandbox_client
 
@@ -186,18 +187,12 @@ class RemotePacketsDispatcher(object):
         self._sbx_invoker.stop()
         self._tasks_status_awaiter.stop()
 
-# TODO max_restarts=0
+# TODO FIXME max_restarts=0
 # TODO kill_timeout=14 * 86400
 # FIXME fail_on_any_error=False XXX А на каких он не падает?
 
 # TODO Создать рботного пользователя FIXME Правда ли никто не сможет ручками перезапускать?
 
-# XXX
-# 1. Может ли таск порестартоваться даже при max_restarts=0
-
-    # XXX TODO
-    # We must check task statuses periodically ourselves
-    # for packets that dont' communicate with us for a 'long time'
 
     # XXX TODO
     # Instance must also ping server (if server doesn't ping instance)
@@ -232,6 +227,7 @@ class RemotePacketsDispatcher(object):
                 'snapshot_resource_id': pck._start_snapshot_resource_id,
                 # '=' to prevent '[object Object]' rendering of parameter on Sandbox task page
                 'custom_resources': '=' + json.dumps(pck._custom_resources, indent=3),
+                'python_resource': self._sbx_python_resource_id,
             }
         )
 

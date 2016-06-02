@@ -4,7 +4,7 @@ import time
 
 from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
 from callbacks import CallbackHolder, ICallbackAcceptor
-from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError
+from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError, NonDestroyingStateError
 from rem_logging import logger as logging
 
 

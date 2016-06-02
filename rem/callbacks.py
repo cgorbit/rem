@@ -1,6 +1,6 @@
 import weakref
 import itertools
-from common import *
+from common import Unpickable
 from rem_logging import logger as logging
 
 class ETagEvent(object):
