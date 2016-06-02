@@ -22,7 +22,7 @@ def parse_arguments():
 
     p.add_argument('--io-dir', dest='io_dir', required=True)
     p.add_argument('--work-dir', dest='work_dir', required=True)
-    p.add_argument('--custom-resources', dest='custom_resources')
+    #p.add_argument('--custom-resources', dest='custom_resources')
     p.add_argument('--task-id', dest='task_id', type=int, required=True)
     p.add_argument('--rem-server-addr', dest='rem_server_addr', required=True)
     #p.add_argument('--result-status-file', dest='result_status_file', default='/dev/stdout')

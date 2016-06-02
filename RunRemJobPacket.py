@@ -5,6 +5,8 @@ import types
 import shutil
 import logging
 import base64
+from pprint import pformat
+import glob
 
 from projects import resource_types as rt
 from sandboxsdk.task import SandboxTask
@@ -68,7 +70,7 @@ class RunRemJobPacket(SandboxTask):
         ExecutionSnapshotResource,
         CustomResources,
         CustomResourcesDescr,
-        PythonVirtualEnvironment, # TODO
+        PythonVirtualEnvironment,
     ]
 
     def arcadia_info(self):
@@ -101,34 +103,92 @@ class RunRemJobPacket(SandboxTask):
 
             resource_id, in_resource_path = m.groups()
 
-            yield int(resource_id), in_resource_path, local_name
+            yield int(resource_id), \
+                  in_resource_path or None, \
+                  local_name
+                  #None if in_resource_path and '*' in in_resource_path else local_name
 
-    def __sync_custom_resources(self, resources):
-        logging.debug('__sync_custom_resources(%s)' % resources)
+    def __sync_custom_resources(self, file_map):
+        logging.debug('__sync_custom_resources(%s)' % file_map)
 
-        custom_resources_ids = set()
-
-        for resource_id, in_resource_path, local_name in resources:
-            custom_resources_ids.add(resource_id)
-
-            target = '../../custom_resources/%d/%s' % (resource_id, in_resource_path)
-            name = 'work/root/%s' % local_name
-
-            logging.debug('symlink(%s, %s)' % (target, name))
-            os.symlink(target, name)
+        custom_resources_ids = {
+            resource_id
+                for resource_id, in_content_path, local_name in file_map
+        }
 
         logging.debug('resource_ids: %s' % custom_resources_ids)
 
-        for resource_id in custom_resources_ids:
-            res_real_path = self.sync_resource(resource_id)
-            os.symlink(res_real_path, 'custom_resources/%d' % resource_id)
+        resources = {}
 
-    def __unlink_custom_resources(self, resources):
-        for resource_id, in_resource_path, local_name in resources:
-            try:
-                os.unlink('work/root/%s' % local_name)
-            except:
-                pass
+        for resource_id in custom_resources_ids:
+            resources[resource_id] = self.sync_resource(resource_id)
+
+        logging.debug('resource: %s' % resources)
+
+        landing_folder = 'custom_resources'
+        target_prefix = 'work/root'
+
+        symlinks = set()
+
+        def symlink(target, name):
+            if os.path.lexists(name):
+                os.unlink(name) # TODO Be more strict: raise
+
+            logging.debug('os.user.symlink(%s, %s)' % (target, name))
+            os.symlink(target, name)
+            symlinks.add(name)
+
+        for resource_id, in_content_path, local_name in file_map:
+            resource_path = resources[resource_id]
+            logging.debug('iter -> %s' % ((resource_id, in_content_path, local_name),))
+
+            if in_content_path:
+                if os.path.isdir(resource_path):
+                    content_path = landing_folder + '/%s' % resource_id
+
+                    logging.debug('treat as folder with content')
+                    logging.debug('os.symlink(%s, %s)' % (resource_path, content_path))
+
+                    if not os.path.lexists(content_path):
+                        os.symlink(resource_path, content_path)
+
+                elif resource_path.endswith('.tar') \
+                        or resource_path.endswith('.tar.gz'):
+
+                    content_path = landing_folder + '/%s_x' % resource_id
+
+                    logging.debug('treat as archive with content')
+                    logging.debug('os.mkdir(%s)' % content_path)
+
+                    if not os.path.exists(content_path):
+                        os.mkdir(content_path)
+                        run_process(['tar', '-C', content_path, '-xf', resource_path])
+
+                full_path = content_path + in_content_path
+
+                files = glob.glob(full_path)
+                logging.debug('glob(%s) => %s' % (full_path, files))
+
+                if os.path.exists(full_path) or os.path.lexists(full_path):
+                    symlink('../../' + full_path, target_prefix + '/' + local_name)
+
+                elif files:
+                    for file in files:
+                        symlink('../../' + file, target_prefix + '/' + os.path.basename(file))
+
+                else:
+                    raise SandboxTaskFailureError("No '%s' file in resource %d" % (in_content_path, resource_id))
+
+            else:
+                landing_path = landing_folder + '/%d' % resource_id
+                if not os.path.lexists(landing_path):
+                    os.symlink(resource_path, landing_path)
+
+                target_path = target_prefix + '/' + local_name
+                symlink('../../' + landing_path, target_path)
+
+            #logging.debug('symlink(%s, %s)' % (target, name))
+        self.ctx['created_symlinks'] = symlinks
 
     @property
     def __custom_resources(self):
@@ -136,14 +196,13 @@ class RunRemJobPacket(SandboxTask):
 
     def on_execute(self):
         logging.debug("on_execute work dir: %s" % os.getcwd())
-        from pprint import pformat
 
         logging.debug(pformat(self.ctx))
         logging.debug(type(self.ctx['custom_resources']))
 
         python_virtual_env_path = self.sync_resource(int(self.ctx['python_resource']))
         os.mkdir('python')
-        run_process(['tar', '-C', 'python', '-zxf', python_virtual_env_path])
+        run_process(['tar', '-C', 'python', '-xf', python_virtual_env_path])
         python_virtual_env_bin_directory = os.path.abspath('./python/bin')
 
         os.mkdir('custom_resources')
@@ -214,11 +273,12 @@ class RunRemJobPacket(SandboxTask):
                 #'--result-status-file=result.json',
         ]
 
-        if custom_resources:
-            orig = self.ctx['custom_resources']
-            if orig[0] == '=':
-                orig = orig[1:]
-            argv.extend(['--custom-resources', json.dumps(orig)])
+    # FIXME What for?
+        #if custom_resources:
+            #orig = self.ctx['custom_resources']
+            #if orig[0] == '=':
+                #orig = orig[1:]
+            #argv.extend(['--custom-resources', json.dumps(orig)])
 
         if prev_packet_snapshot_file:
             argv.extend(['--snapshot-file', prev_packet_snapshot_file])
@@ -231,11 +291,16 @@ class RunRemJobPacket(SandboxTask):
 
         env = os.environ.copy()
         env['PATH'] = python_virtual_env_bin_directory + ':' + env.get('PATH', '')
-        run_process(argv, environment=env, log_prefix='executor')
+        #run_process(argv, environment=env, log_prefix='executor')
+        import time
+        time.sleep(60)
 
-        # This actually not needed for tar-archive-resource, only for raw file-tree
-        if custom_resources:
-            self.__unlink_custom_resources(custom_resources)
+        if 'created_symlinks' in self.ctx:
+            for name in self.ctx['created_symlinks']:
+                try:
+                    os.unlink(name)
+                except:
+                    pass
 
         # TODO XXX Checks (at least for snapshot_file existence)
 
