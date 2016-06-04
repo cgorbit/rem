@@ -291,9 +291,7 @@ class RunRemJobPacket(SandboxTask):
 
         env = os.environ.copy()
         env['PATH'] = python_virtual_env_bin_directory + ':' + env.get('PATH', '')
-        #run_process(argv, environment=env, log_prefix='executor')
-        import time
-        time.sleep(60)
+        run_process(argv, environment=env, log_prefix='executor')
 
         if 'created_symlinks' in self.ctx:
             for name in self.ctx['created_symlinks']:
