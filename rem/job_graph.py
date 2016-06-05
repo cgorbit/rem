@@ -343,31 +343,6 @@ class JobGraphExecutor(Unpickable(
 
     has_jobs_to_run = _can_run_jobs_right_now
 
-    # add_job() -- это излишняя функциональность для JobGraphExecutor
-    # TODO Move back to PacketBase, create JobGraphExecutor only on first ACTIVATE
-    #def add_job(self, job):
-        #for dep_id in job.parents:
-            #if dep_id not in self.jobs:
-                #raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.pck_id)))
-
-        #self.jobs[job.id] = job
-        #self._add_job_to_graph(job)
-
-    #def _add_job_to_graph(self, job):
-        ## wait_job_deps[child] -> parents
-        ## jobs_graph[parent]   -> children (constant between calls to Add)
-
-        #parents = job.parents
-
-        #self.jobs_graph[job.id] = []
-        #for p in parents:
-            #self.jobs_graph[p].append(job.id)
-
-        #self.wait_job_deps[job.id] = [jid for jid in parents if jid not in self.succeed_jobs]
-
-        #if not self.wait_job_deps[job.id]:
-            #self.jobs_to_run.add(job.id)
-
     # Modify:   wait_job_deps, jobs_to_run
     # Consider: jobs_to_retry, succeed_jobs
     def _init_job_deps_graph(self):
@@ -438,8 +413,6 @@ class JobGraphExecutor(Unpickable(
 
         self._init_job_deps_graph()
         self.created_inputs.clear()
-
-        #self._ops.recreate_working_directory() # FIXME
 
         self._clean_state = True # FIXME
 
