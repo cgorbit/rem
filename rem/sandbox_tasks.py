@@ -10,14 +10,10 @@ class TaskStateGroups(object):
     DRAFT = 1
     ACTIVE = 2
     TERMINATED = 3
-    #ANY = 4
 
 
 class SandboxTaskStateAwaiter(object):
-    DEFAULT_UPDATE_INTERVAL = 5.0
-
-# TODO XXX REMOVE
-    DEFAULT_UPDATE_INTERVAL = 1.0
+    DEFAULT_UPDATE_INTERVAL = 1.0 # FIXME
 
     def __init__(self, sandbox, update_interval=DEFAULT_UPDATE_INTERVAL):
         self._sandbox = sandbox
@@ -28,8 +24,6 @@ class SandboxTaskStateAwaiter(object):
         self._update_interval = update_interval
         self._running = {}
         self._incoming = set()
-
-        #self._start()
 
     def start(self):
         self._worker_thread = ProfiledThread(target=self._loop, name_prefix='SbxStateMon')
