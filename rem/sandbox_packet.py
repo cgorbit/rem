@@ -11,12 +11,6 @@ from rem.profile import ProfiledThread
 import rem.subprocsrv
 from rem_logging import logger as logging
 
-#class Resources(object):
-    #def __init__(self):
-        #self.added_files = [] # (id, digest, filename)
-        #self.python = None
-        #self.packet_executor = None
-
 
 class _ExecutorOps(object):
     def __init__(self, pck):
@@ -54,14 +48,6 @@ class _ExecutorOps(object):
         logging.debug('pck._something_changed.notify()')
         pck._something_changed.notify()
 
-    #def _prepare_update(self):
-        #pck = self.pck
-
-        #pck._succeeded_jobs = graph.get_succeeded_jobs()
-        #pck._last_detailed_status = graph.produce_detailed_status()
-
-        #pck._has_updates = True
-
     def job_done_successfully(self, job_id):
         # TODO Notify rem_server for job_done_tag
         self.pck._has_updates = True
@@ -70,12 +56,9 @@ class _ExecutorOps(object):
     def create_job_runner(self, job):
         return rem.job.JobRunner(self.pck, job) # brain damage
 
-    #def on_can_run_jobs(self):
-        #self.pck._something_changed.notify()
-
 
 class Packet(object):
-    _MAX_TIME_WAIT = 60.0 # TODO XXX XXX
+    _MAX_TIME_WAIT = 60.0 # TODO Choose some good value
 
     def __init__(self, pck_id, graph):
         self.id = pck_id
@@ -165,16 +148,6 @@ class Packet(object):
 
     def get_io_directory(self):
         return self._io_directory
-
-    #def run(self):
-        #runner_srv = rem.subprocsrv.create_runner()
-        #try:
-            #self._do_run()
-        #finally:
-            #try:
-                #runner_srv.stop()
-            #except:
-                #pass
 
     def _start_one_another_job(self):
         logging.debug('+ Packet._start_one_another_job')
@@ -286,12 +259,6 @@ class Packet(object):
         if self._do_not_run and self._graph_executor.is_null():
             return GraphState.SUSPENDED
         return self._graph_executor.get_state()
-
-# OPS for JobGraphExecutor's OPS
-    #def _update_state_if_need(self):
-        #new_state = self._calc_state()
-        #if new_state != self.state:
-            #self._update_state(new_state)
 
     def _stop_waiting(self, stop_id):
         with self._lock:

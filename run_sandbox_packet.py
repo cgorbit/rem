@@ -17,6 +17,16 @@ import rem.delayed_executor
 from rem.profile import ProfiledThread
 
 
+class Context(object):
+    def __init__(self):
+        self.log_warn_level = 'debug'
+        self.log_to_stderr = True
+
+rem.rem_logging.reinit_logger(Context())
+
+from rem.rem_logging import logger as logging
+
+
 def parse_arguments():
     p = argparse.ArgumentParser()
 
@@ -35,15 +45,6 @@ def parse_arguments():
 
     return p.parse_args()
 
-
-class Context(object):
-    def __init__(self):
-        self.log_warn_level = 'debug'
-        self.log_to_stderr = True
-
-rem.rem_logging.reinit_logger(Context())
-
-from rem.rem_logging import logger as logging
 
 def with_task_id(f):
     def impl(self, task_id, *args):
