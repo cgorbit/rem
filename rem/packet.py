@@ -10,7 +10,7 @@ import copy
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
 from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
-from job import Job, JobRunner, _DEFAULT_STDERR_SUMMAY_LEN as DEFAULT_JOB_MAX_ERR_LEN
+from job import Job, JobRunner
 import osspec
 import messages
 from rem_logging import logger as logging
@@ -41,23 +41,6 @@ class PacketCustomLogic(object):
         cls.SchedCtx = context
 
 
-# JobGraph: wait_job_deps=dict,
-#           succeed_jobs=set,
-#           failed_jobs=set,
-#           jobs_to_run=set,
-#           jobs_to_retry=dict,
-#           active_jobs_cache=always(set),
-#           created_inputs=set,
-#           dont_run_new_jobs=bool,
-#
-# Packet: repr_state
-#         history
-#
-# Job: tries
-#      results
-#      cached_working_time
-
-
 class JobGraph(object):
     def __init__(self, jobs, kill_all_jobs_on_error):
         self.jobs = jobs
@@ -85,18 +68,18 @@ def always(ctor):
     return always
 
 
-# FIXME Fuck DummyGraphExecutor, use None?
+# FIXME Use None instead of DummyGraphExecutor?
 
 class DummyGraphExecutor(object):
     state = GraphState.PENDING_JOBS
 
-# XXX TODO detailed_status dissapeared from SandboxPacket
+# XXX TODO detailed_status dissapeared from SandboxPacket and JobGraphExecutor
 
     def is_null(self):
         return True
 
     def produce_detailed_status(self):
-        return {}
+        return None
 
     def get_working_jobs(self):
         return []
@@ -124,6 +107,9 @@ class DummyGraphExecutor(object):
 
     def has_jobs_to_run(self):
         raise NotImplementedError()
+
+
+DUMMY_GRAPH_EXECUTOR = DummyGraphExecutor()
 
 
 class PacketBase(Unpickable(
@@ -168,13 +154,13 @@ class PacketBase(Unpickable(
         self.directory = None
         self.queue = None
         self.finish_status = None
+        self._saved_jobs_status = None
 
-        self._graph_executor = DummyGraphExecutor()
+        self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
         self._create_place(context)
         self.id = os.path.split(self.directory)[-1]
 
-# FIXME
         self.files_modified = False
         self.resources_modified = False
 
@@ -276,7 +262,8 @@ class PacketBase(Unpickable(
             ImplState.PAUSED:           ReprState.SUSPENDED,
             ImplState.PAUSING:          ReprState.SUSPENDED,
 
-            ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE, # XXX Must be WORKABLE to support fast_restart
+            # XXX Must be WORKABLE to support fast_restart
+            ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
             ImplState.RUNNING:          ReprState.WORKABLE,
 
             ImplState.TIME_WAIT:        ReprState.WAITING,
@@ -338,12 +325,13 @@ class PacketBase(Unpickable(
                 if isinstance(cur_val, str):
                     self.job_done_tag[jid] = tagStorage.AcquireTag(cur_val)
 
-    # XXX allow_files_auto_sharing is for Tests/Debug
+    # XXX ctx.allow_files_auto_sharing is for testing purposes
     def vivify_resource_sharing(self):
         if self.files_sharing:
             raise NotImplementedError("Resource sharing vivify is not implemented")
 
     def vivify_jobs_waiting_stoppers(self):
+        # TODO Vivify in _graph_executor
         pass
 
     def update_tag_deps(self, tagStorage):
@@ -424,8 +412,7 @@ class PacketBase(Unpickable(
 
             self.directory = None
 
-# TODO XXX TODO BROKEN
-
+# TODO BROKEN
     def _create_place(self, context):
         assert self._graph_executor.is_null() # FIXME
 
@@ -546,12 +533,8 @@ class PacketBase(Unpickable(
         if state == GraphState.SUCCESSFULL:
             assert self._graph_executor.is_null()
             self.finish_status = True
-# TODO XXX
-#           We set DummyGraphExecutor in any case here, but need to store
-#           ._prev_snapshot_resource_id in self
-#           XXX NO NO NO Can't do this in TIME_WAIT!
-# TODO XXX
-            self._graph_executor = DummyGraphExecutor()
+            self._saved_jobs_status = self._graph_executor.produce_detailed_status()
+            self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
         elif state == GraphState.ERROR:
             self.finish_status = False
@@ -699,9 +682,8 @@ class PacketBase(Unpickable(
             #if self.state != ImplState.UNINITIALIZED: # TODO
                 #raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
 
-        # FIXME TODO
-            if isinstance(self, SandboxPacket) and max_err_len and max_err_len > DEFAULT_JOB_MAX_ERR_LEN:
-                max_err_len = DEFAULT_JOB_MAX_ERR_LEN
+            if max_err_len and max_err_len > self.MAX_ERR_LEN:
+                max_err_len = self.MAX_ERR_LEN
 
             parents = list(set(parents + pipe_parents))
             pipe_parents = list(set(pipe_parents))
@@ -712,7 +694,10 @@ class PacketBase(Unpickable(
 
             job = Job(shell, parents, pipe_parents, self.id, max_try_count=tries,
                       max_err_len=max_err_len, retry_delay=retry_delay,
-                      pipe_fail=pipe_fail, description=description, notify_timeout=notify_timeout, max_working_time=max_working_time, output_to_status=output_to_status)
+                      pipe_fail=pipe_fail, description=description,
+                      notify_timeout=notify_timeout,
+                      max_working_time=max_working_time,
+                      output_to_status=output_to_status)
 
         ###
             self.jobs[job.id] = job
@@ -728,26 +713,31 @@ class PacketBase(Unpickable(
 
             return job
 
-    def _resume(self, resume_workable=False):
-        raise AssertionError("Diese Funktion ist Wunderwaffe")
-
     def History(self):
         return self.history or []
 
-    @property
-    def waitingDeadline(self):
-        # TODO Using self.jobs_to_retry
-        return 1
-
     def _get_extended_state(self):
         g = self._graph_executor
+        return (self.state, g.state, g.get_worker_state())
 
-        return (self.state,
-                g.state,
-                g.get_worker_state())
+    def _produce_clean_jobs_status(self):
+        return [
+            dict(
+                id=str(job.id),
+                shell=job.shell,
+                desc=job.description,
+                state="suspended" if job.parents else "pending",
+                results=[],
+                parents=map(str, job.parents or []),
+                pipe_parents=map(str, job.inputs or []),
+                output_filename=None,
+                wait_jobs=map(str, job.parents),
+            )
+                for jid, job in self.jobs.iteritems()
+        ]
 
     # FIXME It's better for debug to allow this call from RPC without lock
-    #       * From messages it's called under lock actually
+    #       * From messages it's called under lock
     def Status(self):
         return self._status()
 
@@ -762,15 +752,15 @@ class PacketBase(Unpickable(
 
         result_tag = self.done_tag.name if self.done_tag else None
 
-        waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
-            if self._repr_state == ReprState.WAITING else None
+# TODO
+        #waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
+            #if self.state == ImplState.TIME_WAIT else None
+        waiting_time = None
 
         all_tags = list(self.all_dep_tags)
 
         status = dict(name=self.name,
-# TODO
-                      sandbox_task_id=None,
-
+                      sandbox_task_id=None, # TODO
                       state=self._repr_state,
                       extended_state=self._get_extended_state(),
                       wait=list(self.wait_dep_tags),
@@ -783,25 +773,27 @@ class PacketBase(Unpickable(
                       wait_time=wait_time,
                       last_modified=history[-1][1],
                       waiting_time=waiting_time)
+
         extra_flags = set()
 
-        if self.state == ImplState.BROKEN:
+        if self.is_broken:
             extra_flags.add("can't-be-recovered")
 
-        if self._repr_state == ReprState.SUSPENDED and self.state == ImplState.RUNNING:
+        if self.do_not_run:
             extra_flags.add("manually-suspended")
 
         if extra_flags:
             status["extra_flags"] = ";".join(extra_flags)
 
-    # XXX XXX WTF XXX XXX
-        # FIXME WHY? no: HISTORIED, NONINITIALIZED, CREATED
-        #if self.state not in [ImplState.HISTORIED, ImplState.UNINITIALIZED]:
-        #if self._repr_state in (ReprState.ERROR, ReprState.SUSPENDED,
-                          #ReprState.WORKABLE, ReprState.PENDING,
-                          #ReprState.SUCCESSFULL, ReprState.WAITING):
-        #if self._graph_executor:
-        status["jobs"] = self._graph_executor.produce_detailed_status()
+        if not isinstance(self._graph_executor, DummyGraphExecutor):
+            jobs = self._graph_executor.produce_detailed_status() \
+                or self._produce_clean_jobs_status()
+        elif self._saved_jobs_status:
+            jobs = self._saved_jobs_status
+        else:
+            jobs = self._produce_clean_jobs_status()
+
+        status["jobs"] = jobs
 
         return status
 
@@ -836,6 +828,7 @@ class PacketBase(Unpickable(
                 raise RuntimeError()
 
             self.finish_status = None # for ERROR
+            self._saved_jobs_status = None
 # TODO XXX
 
             self.do_not_run = True
@@ -909,6 +902,7 @@ class PacketBase(Unpickable(
     def _reset(self):
         self._do_graph_reset()
         self.finish_status = None
+        self._saved_jobs_status = None
 
     def rpc_reset(self, suspend=False):
         with self.lock:
@@ -980,8 +974,12 @@ class PacketBase(Unpickable(
 
     def _set_real_graph_executor_if_need(self):
         if isinstance(self._graph_executor, DummyGraphExecutor):
-            self._graph_executor = self._create_job_graph_executor()
-            self._graph_executor.init() # TODO Better
+            self._set_real_graph_executor()
+
+    def _set_real_graph_executor(self):
+        self._saved_jobs_status = None # j.i.c.
+        self._graph_executor = self._create_job_graph_executor()
+        self._graph_executor.init() # Circular references
 
     def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
         with self.lock:
@@ -993,11 +991,8 @@ class PacketBase(Unpickable(
             if dst_queue:
                 # after _create_job_graph_executor() because of .has_pending_jobs()
                 dst_queue._attach_packet(self)
-
-                #self._graph_executor.set_runner(self.queue.runner)
-
             else:
-                self._graph_executor = DummyGraphExecutor()
+                self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
     def rpc_move_to_queue(self, src_queue, dst_queue):
         with self.lock:
@@ -1053,16 +1048,6 @@ class _LocalPacketJobGraphOps(object):
     def add_working(self, job):
         self.pck.queue._on_job_get(self)
 
-    #def set_successfull_state(self):
-        ##self.pck._change_state(ImplState.SUCCESSFULL)
-        #self.finish_status = True
-        #self._update_state()
-
-    #def set_errored_state(self):
-        ##self.pck._change_state(ImplState.ERROR)
-        #self.finish_status = False
-        #self._update_state()
-
     def job_done_successfully(self, job_id):
         tag = self.pck.job_done_tag.get(job_id)
         if tag:
@@ -1100,6 +1085,8 @@ class NonDestroyingStateError(RuntimeError):
 
 
 class LocalPacket(PacketBase):
+    MAX_ERR_LEN = 2 ** 20
+
     def _create_job_graph_executor(self):
         return job_graph.JobGraphExecutor(
             _LocalPacketJobGraphOps(self), # TODO Cyclic reference
@@ -1184,6 +1171,8 @@ class LocalPacket(PacketBase):
 
 
 class SandboxPacket(PacketBase):
+    MAX_ERR_LEN = 1024
+
     def _do_graph_suspend(self, kill_jobs):
         g = self._graph_executor
         if not g.is_null(): # null in ERROR state
@@ -1267,10 +1256,8 @@ class SandboxPacket(PacketBase):
             if self.resources_modified and not isinstance(self._graph_executor, DummyGraphExecutor):
                 self._graph_executor._custom_resources = self._produce_job_graph_executor_custom_resources()
             else:
-                self._graph_executor = self._create_job_graph_executor()
-                self._graph_executor.init() # TODO Better
+                self._set_real_graph_executor()
 # XXX XXX XXX XXX XXX XXX XXX XXX XXX
-            #self._set_real_graph_executor_if_need()
 
             self.resources_modified = False
 

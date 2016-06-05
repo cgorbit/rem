@@ -1,0 +1,145 @@
+
+shared-folder: 4755
+    foobar.py
+    hello.txt
+
+two-files.tar: 4753
+    file1
+    file2
+
+geodata3.bin: 4751
+
+
+{
+    "_1": "sbx:4755/*.py",
+    "4753-1": "sbx:4753/file1",
+    "4753-as-folder": "sbx:4753/",
+    "4753-as-archive": "sbx:4753",
+    "_2": "sbx:4753/*",
+    "geodata3.bin": "sbx:4751",
+    "4755-folder": "sbx:4755/"
+}
+
+--------------------------------------------------------------------------------
+
+perun
+    0. packet_legacy.py _convert_backup_to_v2
+----1. job*.result dissapeared when switching back to DummyGraphExecutor
+    2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
+    3. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
+
+veles02
+    0. пролонгация ttl REM_JOBPACKET_EXECUTOR
+    1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
+    2. TIME_WAIT для EXCEPTION тасков
+    3. Unpickable всюду
+
+production-quality
+    0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
+    1. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
+    2. PARALLEL resources sync?
+        FIXME Почему меня тащили по skynet?
+              Потому что локальный sandbox и не работало по HTTP?
+    3. python.tar.gz: больше модулей
+    4. Cache locality
+    5. cancel'ить WrongTaskIdError-таски в соответствие текущему стейту:
+        1. периодический ping на тасках -- не оперативно, может не быть дырок
+    --> 2. при старте с бэкапа получать список работающих тасков и убивать ненужные
+
+#WTF?
+    7. REM_JOBPACKET_EXECUTION_SNAPSHOT
+
+--------------------------------------------------------------------------------
+
+1. продлевать время жизни ресурсам?
+
+2. files:
+    0. python
+    1. dpkg -l | grep python-
+
+    2. NER: /Berkanavt/freshness/data/ner
+
+    AddFiles
+        2. Z2: /Berkanavt/freshness/scripts/rem
+        4. Z2: yandex-search-freshness-spok-feed-finder (/Berkanavt/freshness/bin/feed_finder)
+
+3. pck-XXXX и симлинки в них можно оставить прям для простоты
+
+4. Большие файлы джойнить в единые ресурсы не хочу.
+   Маленькие -- не знаю, клеить или нет. Почему-то хочется клеить.
+
+5.
+{
+    'foo27': '/usr/bin/foo27',
+    'blockstat.txt': 'sbx:1232131142',
+    '_any_alias_': 'sbx:1232131142/*', # may be archive
+    'feed_finder': 'sbx:1232131142/feed_finder', # may be archive
+}
+
+[
+    '/usr/bin/foo27',        # 'foo27': '/usr/bin/foo27'
+    ('/usr/bin', ['foo27']), # 'foo27': '/usr/bin/foo27'
+    ('sbx:1232131142', ['foo27', 'scripts/rem/foobar.py']),
+]
+python_path='scripts'
+
+    root/
+        python/
+            # REM_JOBPACKET_EXECUTOR_PYTHON
+
+        custom_resources/
+            ... # ARCADIA_PROJECT, ...
+
+        added_files/
+            28347234234234/
+                6a83598a817398e94d197ca13f74d587
+
+            41434243423423/
+                d2eb8379e609ef386f3166a824ab4835
+
+            30934902580302/
+                freshness_conf.py
+                freshness.py
+                nirvana.py
+                svn.py
+                media_portraits.py
+        io/
+            1234491104411.stderr
+            ...
+            2340942093493.stdout
+
+        executor/ # REM_JOBPACKET_EXECUTOR
+
+        work/
+            querydata_indexer  -> ../added_files/6a83598a817398e94d197ca13f74d587
+            feed_finder        -> ../added_files/d2eb8379e609ef386f3166a824ab4835
+            freshness_conf.py  -> ../30934902580302/freshness_pool.py
+            freshness.py       -> ../30934902580302/freshness.py
+            nirvana.py         -> ../30934902580302/nirvana.py
+            svn.py             -> ../30934902580302/svn.py
+            media_portraits.py -> ../30934902580302/media_portraits.py
+
+
+5.
+    Task: REM_JOBPACKET_EXECUTION
+
+        Input resources:
+            REM_JOBPACKET_EXECUTOR
+
+            REM_JOBPACKET_PYTHON # rem.cfg.run.sandbox_python_resource
+
+            REM_JOBPACKET_ADDED_FILE
+
+            # FIXME
+            REM_JOBPACKET_ADDED_FILE_SET
+                freshness_pool.py
+                fml.py
+
+        Output resources:
+            REM_JOBPACKET_EXECUTION_SNAPSHOT # intermediate
+            REM_JOBPACKET_EXECUTION_RESULTS
+
+
+o Если "все" джобы ждут на WAITING, нет смысла держать sandbox-thread
+
+o Что делать с не достаточно общим shebang у python-скриптов?

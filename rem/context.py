@@ -2,6 +2,8 @@ import os
 from ConfigParser import ConfigParser, NoOptionError
 import rem_logging
 from rem.common import parse_network_address
+import rem.sandbox
+
 
 class ConfigReader(ConfigParser):
     def safe_get(self, section, option, default=""):
@@ -80,6 +82,7 @@ class Context(object):
         self.sandbox_api_url = config.safe_get("run", "sandbox_api_url", None)
         self.sandbox_api_token = config.safe_get("run", "sandbox_api_token", None)
         self.sandbox_task_owner = config.safe_get("run", "sandbox_task_owner", None)
+        self.sandbox_task_priority = config.safe_get("run", "sandbox_task_priority", None)
         self.sandbox_task_max_count = config.safe_getint("run", "sandbox_task_max_count", 50)
         self.sandbox_rpc_listen_addr = config.safe_get("run", "sandbox_rpc_listen_addr", None)
         self.sandbox_python_resource_id = config.safe_getint("run", "sandbox_python_resource_id", None)
@@ -87,8 +90,12 @@ class Context(object):
         if self.sandbox_rpc_listen_addr:
             self.sandbox_rpc_listen_addr = parse_network_address(self.sandbox_rpc_listen_addr)
 
+        if self.sandbox_task_priority is not None:
+            self.sandbox_task_priority = \
+                rem.sandbox.TaskPriority.from_string(self.sandbox_task_priority)
+
         if self.sandbox_api_url and not( \
-            self.sandbox_task_owner \
+            self.sandbox_task_owner and self.sandbox_task_priority \
             and self.sandbox_task_max_count and self.sandbox_rpc_listen_addr):
             raise ValueError("Sandbox setup is incomplete")
 

@@ -889,10 +889,7 @@ def _init_sandbox(ctx):
         subproc=ctx.resource_sharing_subproc,
         sandbox=ctx.sandbox,
         task_owner=ctx.sandbox_task_owner,
-        task_priority=(
-            rem.sandbox.TaskPriority.Class.SERVICE,
-            rem.sandbox.TaskPriority.SubClass.NORMAL
-        ),
+        task_priority=ctx.sandbox_task_priority,
     )
 
     ctx.sandbox_resource_sharer = shr

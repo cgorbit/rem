@@ -122,10 +122,7 @@ class RemotePacketsDispatcher(object):
         return srv
 
     def start(self, ctx, alloc_guard):
-        self._sbx_task_priority = (
-            sandbox.TaskPriority.Class.SERVICE,
-            sandbox.TaskPriority.SubClass.NORMAL)
-
+        self._sbx_task_priority = ctx.sandbox_task_priority
         self._executor_resource_id = ctx.sandbox_executor_resource_id
         self._rpc_listen_addr = ctx.sandbox_rpc_listen_addr
         self._sbx_task_kill_timeout = ctx.sandbox_task_kill_timeout
@@ -281,7 +278,7 @@ prev_task: {prev_task}
             priority=self._sbx_task_priority,
             notifications=[],
             description=description,
-            #fail_on_any_error=True, # FIXME What?
+            #fail_on_any_error=True, # FIXME What is this?
         )
 
     def _mark_all_done(self, pck, reason=None):
@@ -290,7 +287,9 @@ prev_task: {prev_task}
 
         pck._set_state(RemotePacketState.ALL_DONE, reason)
         pck._run_guard = None # j.i.c
-        #self._tasks_status_awaiter.cancel_wait(pck._sandbox_task_id) # TODO XXX NotImplementedError
+
+        # TODO XXX NotImplementedError
+        #self._tasks_status_awaiter.cancel_wait(pck._sandbox_task_id)
 
         if pck._sandbox_task_id:
             self._by_task_id.pop(pck._sandbox_task_id)
@@ -519,7 +518,7 @@ prev_task: {prev_task}
     def _start_fetch_resource_list(self, pck):
         self._sbx_invoker.invoke(lambda : self._fetch_resource_list(pck))
 
-# TODO XXX FIXME From which task state resources are ready?
+# TODO XXX FIXME From which task state resources are really ready?
     def _fetch_resource_list(self, pck):
         try:
             ans = self._sandbox.list_task_resources(pck._sandbox_task_id)
@@ -575,7 +574,7 @@ prev_task: {prev_task}
                             self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
 
         try:
-# TODO timeout
+# TODO timeout as class member
             resp = requests.get(pck._final_update_url, timeout=30.0)
         except Exception as e:
 # FIXME permanent errors?
@@ -689,12 +688,10 @@ prev_task: {prev_task}
 
 
     def restart_packet(self, pck):
-        return # TODO RPC
-        raise NotImplementedError()
+        return # TODO
 
     def resume_packet(self, pck):
-        return # TODO RPC
-        raise NotImplementedError()
+        return # TODO
 
     def stop_packet(self, pck, kill_jobs):
         self._stop_packet(pck, StopMode.STOP if kill_jobs else StopMode.STOP_GRACEFULLY)
@@ -770,9 +767,7 @@ prev_task: {prev_task}
                 proxy.stop(task_id, kill_jobs)
 
         except Exception as e:
-            logging.exception("Failed to send stop to packet") # XXX For devel
-        # TODO ReComment
-            #logging.warning("Failed to send stop to packet: %s" % e)
+            logging.warning("Failed to send stop to packet: %s" % e)
 
             if is_xmlrpc_exception(e, WrongTaskIdError) \
                     or isinstance(e, socket.error) and e.errno == errno.ECONNREFUSED:
@@ -802,79 +797,6 @@ prev_task: {prev_task}
         logging.debug('_start_packet_stop(%s, %s)' % (pck.id, pck._target_stop_mode))
         self._rpc_invoker.invoke(lambda : self._do_stop_packet(pck))
 
-
-#CHECKING_START_PERM_ERROR / CHECKING_START_TEMP_ERROR
-    #._state = CHECKING_START_ERROR
-    #._is_start_error_permanent = bool
-
-#CREATING
-    #._state = CREATING
-
-#CREATION_SCHEDULED
-    #._state = CREATING
-    #._sched = function
-
-#CREATING_AND_CANCELLED
-    #._state = CREATING
-    #._sched = None
-    #._target_stop_mode = StopMode.CANCEL
-
-#EXECUTING_HAS_PEER_ADDR
-    #._peer_addr = not None
-    #._state = CREATED
-
-#GOT_RESULT_TASK_WAIT
-    #._result = not None (set from rpc)
-    #._state = STARTED
-
-#TASK_WAIT_AND_CANCELLED
-    #._result = not None (set from rpc)
-    #._state = STARTED
-    #._target_stop_mode = StopMode.CANCEL
-
-#STARTING
-    #._state = STARTING
-    #._sched = None
-
-#START_SCHEDULED
-    #._state = STARTING
-    #._sched = function
-
-#FETCHING_TERMINATED_TASK_INFO
-    #._state = FETCHING_RESOURCE_LIST
-    #._target_stop_mode = None
-    #._sched = None
-
-#FETCHING_TERMINATED_TASK_INFO_AND_CANCELLED
-    #._state = FETCHING_RESOURCE_LIST
-    #._target_stop_mode = StopMode.CANCEL
-
-#EXECUTING_AND_STOPPING
-    #._state = STARTED
-    #._target_stop_mode != StopMode.NONE
-    #._sched = None
-
-#EXECUTING_AND_STOPPING_SCHEDULED
-    #._state = STARTED
-    #._target_stop_mode != StopMode.NONE
-    #._sched = function
-
-#EXECUTING_AND_STOP_SENT
-    #._state = STARTED
-    #._target_stop_mode != StopMode.NONE
-    #._target_stop_mode == ._sent_stop_mode
-    #._sched = is None
-
-#TERMINATED_CANCELLED
-    #._state = TERMINATED
-    #._target_stop_mode != StopMode.NONE
-
-#._target_stop_mode = 
-#._sent_stop_mode
-#._result
-#._suspended_state_resource_id
-#._peer_addr
-#._state
 
 # XXX
 # Throw on any event in TERMINATED state
@@ -1017,18 +939,16 @@ class SandboxJobGraphExecutorProxy(object):
         self._prev_snapshot_resource_id = None
         self._error = None
 
-        self.cancelled = False # FIXME
-        self.stopping = False # FIXME
+        self.cancelled = False
+        self.stopping = False
 
+        self.state = None
         self.time_wait_deadline = None
         self.time_wait_sched = None
         self.result = None
 
-    # TODO FIXME
-        self.remote_history = [] # TODO
-        self.detailed_status = {}
-        self.state = None
-        #self.history = [] # XXX TODO Непонятно вообще как с этим быть
+        self.remote_history = [] # XXX TODO Непонятно вообще как с этим быть
+        self.detailed_status = None
 
     def init(self):
         self._update_state()
@@ -1044,18 +964,8 @@ class SandboxJobGraphExecutorProxy(object):
             custom_resources=self._custom_resources
         )
 
-    #def get_state(self):
-        #if not self.history:
-            #return ReprState.PENDING
-        #return self.history[-1][0]
-
     def produce_detailed_status(self):
         return self.detailed_status
-
-    #def is_stopping(self):
-        #with self.lock:
-            #return self.cancelled and self._remote_packet
-            # (WORKING | CANCELLED) || (WORKING | SUSPENDED)
 
     def is_cancelling(self):
         return self.cancelled
@@ -1063,13 +973,11 @@ class SandboxJobGraphExecutorProxy(object):
     def is_stopping(self):
         return self.stopping
 
-########### Ops for _remote_packet
     def _on_sandbox_packet_update(self, update, succeed_jobs, is_final):
         with self.lock:
             if self.cancelled:
                 return
 
-# TODO XXX XXX
             self.detailed_status = update['detailed_status']
             self._remote_state = update['state']
 
@@ -1092,11 +1000,9 @@ class SandboxJobGraphExecutorProxy(object):
             self._prev_task_id = self._remote_packet._sandbox_task_id
             self._remote_packet = None
             self._remote_state = None
-            #self._ops.on_job_graph_becomes_null()
 
         assert not self.time_wait_deadline and not self.time_wait_sched
 
-        #res = self._remote_packet.get_result()
         r = self._remote_packet
 
         self.stopping = False
@@ -1127,6 +1033,7 @@ class SandboxJobGraphExecutorProxy(object):
 
         elif r._final_state == GraphState.TIME_WAIT:
             self.time_wait_deadline = r._last_update['nearest_retry_deadline']
+# TODO XXX VIVIFY
             self.time_wait_sched = \
                 delayed_executor.schedule(self._stop_time_wait,
                                             deadline=self.time_wait_deadline)
@@ -1153,9 +1060,6 @@ class SandboxJobGraphExecutorProxy(object):
 
             assert not self.cancelled
 
-            #if not self.do_not_run:
-                #self._remote_packet = self._create_remote_packet()
-
             self._update_state()
 
     def _update_state(self):
@@ -1170,7 +1074,7 @@ class SandboxJobGraphExecutorProxy(object):
     def _calc_state(self):
         with self.lock:
             if self._remote_packet:
-        # XXX
+                # FIXME Proxy something other than TIME_WAIT?
                 if not self.cancelled and self._remote_state == GraphState.TIME_WAIT:
                     return self._remote_state
 
@@ -1178,8 +1082,6 @@ class SandboxJobGraphExecutorProxy(object):
 
                 if self.cancelled:
                     state |= GraphState.CANCELLED
-                #elif self.do_not_run:
-                    #state |= GraphState.SUSPENDED
 
                 return state
 
@@ -1192,9 +1094,6 @@ class SandboxJobGraphExecutorProxy(object):
 
             elif self.time_wait_deadline:
                 return GraphState.TIME_WAIT
-
-            #elif self.do_not_run:
-                #return GraphState.SUSPENDED
 
             else:
                 return GraphState.PENDING_JOBS
@@ -1212,7 +1111,6 @@ class SandboxJobGraphExecutorProxy(object):
                 return # FIXME
 
             self.stopping = True
-            #self.do_not_run = True
             self._remote_packet.stop(kill_jobs)
             self._update_state()
 
@@ -1228,8 +1126,6 @@ class SandboxJobGraphExecutorProxy(object):
         with self.lock:
             if self._remote_packet:
                 raise RuntimeError()
-
-            #self.do_not_run = False
 
             self._remote_packet = self._create_remote_packet(guard)
 
@@ -1250,7 +1146,7 @@ class SandboxJobGraphExecutorProxy(object):
                 self._prev_snapshot_resource_id = None
                 self.result = None
                 self.remote_history = []
-                self.detailed_status = {}
+                self.detailed_status = None
 
             if not self._remote_packet:
                 return
@@ -1258,7 +1154,6 @@ class SandboxJobGraphExecutorProxy(object):
             if self.cancelled:
                 return
 
-            #self.do_not_run = True
             self.cancelled = True
 
             if self.time_wait_sched:
@@ -1275,23 +1170,8 @@ class SandboxJobGraphExecutorProxy(object):
     def recover_after_backup_loading(self):
         pass # FIXME
 
-    #def on_job_done(self, runner):
-    #def apply_jobs_results(self):
-    #def vivify_jobs_waiting_stoppers(self):
-    #def stop_waiting(self, stop_id):
-    #def create_job_file_handles(self, job):
-    #def get_working_jobs(self):
-    #def get_job_to_run(self):
-    #def can_run_jobs_right_now(self):
-
 
 class SandboxPacketOpsForJobGraphExecutorProxy(object):
-    #def __init__(self, pck):
-        #self._pck = pck
-        #self.lock = pck.lock
-
-
-#class _SandboxPacketJobGraphExecutorProxyOps(object):
     def __init__(self, pck):
         self.pck = pck
         self.lock = pck.lock
@@ -1306,8 +1186,4 @@ class SandboxPacketOpsForJobGraphExecutorProxy(object):
 
     def create_job_runner(self, job):
         raise AssertionError()
-
-    #def on_job_graph_becomes_null(self):
-        #self.pck._update_state() # FIXME
-
 

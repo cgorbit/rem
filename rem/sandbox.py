@@ -10,10 +10,36 @@ class TaskPriority(object):
         SERVICE    = 'SERVICE'
         USER       = 'USER'
 
+        _ALL = set([BACKGROUND, SERVICE, USER])
+
+        @classmethod
+        def from_string(cls, s):
+            if s not in cls._ALL:
+                raise ValueError("Unknown priority class '%s'" % s)
+            return s
+
     class SubClass(object):
         LOW    = 'LOW'
         NORMAL = 'NORMAL'
         HIGH   = 'HIGH'
+
+        _ALL = set([LOW, NORMAL, HIGH])
+
+        @classmethod
+        def from_string(cls, s):
+            if s not in cls._ALL:
+                raise ValueError("Unknown priority subclass '%s'" % s)
+            return s
+
+    @classmethod
+    def from_string(cls, s):
+        prio = s.upper().split(':')
+
+        if len(prio) != 2:
+            raise ValueError("Malformed task priority '%s'" % s)
+
+        return (cls.Class.from_string(prio[0]),
+                cls.SubClass.from_string(prio[1]))
 
 
 class NetworkError(RuntimeError):

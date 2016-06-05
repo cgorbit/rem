@@ -455,7 +455,7 @@ class JobGraphExecutor(Unpickable(
             state = "done" if jid in self.succeed_jobs \
                 else "working" if jid in self.active_jobs_cache \
                 else "pending" if jid in self.jobs_to_run \
-                else "errored" if result and not result.IsSuccessfull() \
+                else "errored" if jid in self.failed_jobs \
                 else "suspended"
 
             wait_jobs = []
