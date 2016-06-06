@@ -299,6 +299,9 @@ class JobPacket(object):
         принимает один параметр files - полностью аналогичный одноименному параметру для AddJob"""
         JobPacketInfo(self.conn, self.id).AddFiles(files, retries)
 
+    def Info(self):
+        return self.conn.PacketInfo(self)
+
 
 class JobPacketInfo(object):
     """прокси объект для манипулирования пакетом задач в REM

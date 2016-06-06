@@ -118,7 +118,7 @@ class JobGraphExecutor(Unpickable(
                             jobs=dict,
                             jobs_graph=dict,
 
-                            pck_id=str,
+                            #pck_id=str,
 
                             kill_all_jobs_on_error=(bool, True),
 
@@ -159,6 +159,8 @@ class JobGraphExecutor(Unpickable(
     def __getstate__(self):
         sdict = self.__dict__.copy()
 
+        if sdict['active_jobs_cache']:
+            sdict['jobs_to_run'] = sdict['jobs_to_run'] | sdict['active_jobs_cache']
         sdict.pop('active_jobs_cache', None)
 
         sdict['jobs_to_retry'] = {

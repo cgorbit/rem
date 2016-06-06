@@ -285,7 +285,7 @@ class LocalQueue(QueueBase):
     _PACKET_CLASS = LocalPacket
 
     def _notify_has_pending_if_need(self):
-        logging.debug('_notify_has_pending_if_need ... %s' % self.has_startable_jobs())
+        #logging.debug('_notify_has_pending_if_need ... %s' % self.has_startable_jobs())
 # FIXME Optimize
         if self.has_startable_jobs():
             self.scheduler._on_job_pending(self)

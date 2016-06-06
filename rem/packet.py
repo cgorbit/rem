@@ -173,12 +173,13 @@ class PacketBase(Unpickable(
         self.is_resetable = is_resetable
         self.done_tag = set_tag
 
+        self.tags_awaited = not wait_tags
         self._set_waiting_tags(wait_tags)
 
         self._update_state()
 
-    def _is_executable(self):
-        return not self.is_broken and not self.destroying
+    def _will_never_be_executed(self):
+        return self.is_broken or self.destroying
 
 # TODO Test this code offline with mask
     def _calc_state(self):
@@ -201,14 +202,11 @@ class PacketBase(Unpickable(
         elif not is_inited:
             return ImplState.UNINITIALIZED
 
-        elif self.wait_dep_tags:
+        elif self.wait_dep_tags and not self.tags_awaited:
             return ImplState.TAGS_WAIT # may be GraphState.WORKING
 
         elif not self.jobs:
             return ImplState.SUCCESSFULL
-
-        elif self.finish_status is not None:
-            return ImplState.SUCCESSFULL if self.finish_status else ImplState.ERROR
 
         elif self.do_not_run:
             if self._is_graph_stopping():
@@ -219,6 +217,9 @@ class PacketBase(Unpickable(
                 return ImplState.PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого...
                             # мы должны быть уверены, что Граф будет stop/start'ed,
                             # например, за счёт .files_modified/.resources_modified
+
+        elif self.finish_status is not None:
+            return ImplState.SUCCESSFULL if self.finish_status else ImplState.ERROR
 
     # FIXME
         elif graph.state == GraphState.TIME_WAIT:
@@ -305,7 +306,7 @@ class PacketBase(Unpickable(
         self.wait_dep_tags = set(tag.GetFullname() for tag in wait_tags if not tag.IsLocallySet())
 
     def _process_tag_set_event(self, tag):
-        if not self._is_executable():
+        if self._will_never_be_executed():
             return
 
         tag_name = tag.GetFullname()
@@ -314,6 +315,7 @@ class PacketBase(Unpickable(
             self.wait_dep_tags.remove(tag_name)
 
             if not self.wait_dep_tags:
+                self.tags_awaited = True
                 self._share_files_as_resource_if_need()
                 self._update_state()
 
@@ -331,7 +333,6 @@ class PacketBase(Unpickable(
             raise NotImplementedError("Resource sharing vivify is not implemented")
 
     def vivify_jobs_waiting_stoppers(self):
-        # TODO Vivify in _graph_executor
         pass
 
     def update_tag_deps(self, tagStorage):
@@ -659,7 +660,7 @@ class PacketBase(Unpickable(
                     max_err_len, retry_delay, pipe_fail, description, notify_timeout,
                     max_working_time, output_to_status):
         with self.lock:
-            if self.queue or not self._is_executable():
+            if self.queue or self._will_never_be_executed():
                 raise RpcUserError(RuntimeError("Can't add jobs in %s state" % self._repr_state))
             #if self.state != ImplState.UNINITIALIZED: # TODO
                 #raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
@@ -780,7 +781,7 @@ class PacketBase(Unpickable(
         return status
 
     def _check_add_files(self):
-        if self._is_executable() or self.do_not_run:
+        if not self._will_never_be_executed() or self.do_not_run:
             return
 
         raise RpcUserError(RuntimeError("Can't add files/resources in %s state" % self._repr_state))
@@ -809,7 +810,7 @@ class PacketBase(Unpickable(
             ]:
                 raise RuntimeError()
 
-            self.finish_status = None # for ERROR
+            self.finish_status = None # for ImplState.ERROR
             self._saved_jobs_status = None
 # TODO XXX
 
@@ -882,13 +883,15 @@ class PacketBase(Unpickable(
             self._on_tag_reset(ref, comment)
 
     def _reset(self):
+        if self.wait_dep_tags:
+            self.tags_awaited = False
         self._do_graph_reset()
         self.finish_status = None
         self._saved_jobs_status = None
 
     def rpc_reset(self, suspend=False):
         with self.lock:
-            if not self._is_executable():
+            if self._will_never_be_executed():
                 return
 
             self._update_done_tags(lambda tag, _: tag.Unset())
@@ -907,16 +910,13 @@ class PacketBase(Unpickable(
 
     def _on_tag_reset(self, ref, comment):
         with self.lock:
-            if not self._is_executable():
+            if self._will_never_be_executed():
                 return
-            #if self.destroying:
-                #return
 
             # FIXME Don't even update .wait_dep_tags if not self.is_resetable
             tag_name = ref.GetFullname()
             self.wait_dep_tags.add(tag_name)
 
-            #if self.state == ImplState.UNINITIALIZED:
             if not self.queue:
                 return
 
@@ -1231,7 +1231,7 @@ class SandboxPacket(PacketBase):
     def run(self, guard):
         with self.lock:
             if self.state != ImplState.PENDING:
-            #if not self._is_executable():
+            #if self._will_never_be_executed():
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
 # XXX XXX XXX XXX XXX XXX XXX XXX XXX

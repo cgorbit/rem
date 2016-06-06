@@ -619,13 +619,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     @classmethod
     def _convert_backup_to_v2(cls, sdict, registrator):
-        for pck in registrator.packets:
-            pck.convert_to_v2()
-
-# FIXME queues first, than packets, because packets has ._update_state?
-
         for queue in registrator.queues:
             queue.convert_to_v2()
+
+        for pck in registrator.packets:
+            pck.convert_to_v2()
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):
