@@ -295,7 +295,8 @@ class JobGraphExecutor(Unpickable(
                     self.jobs_to_run.add(nid)
 
         elif job.tries < job.max_try_count:
-            delay = job.retry_delay or job.ERR_PENALTY_FACTOR ** job.tries
+            delay = job.retry_delay \
+                or max(job.ERR_PENALTY_FACTOR ** job.tries, job.ERR_PENALTY_FACTOR)
             self._register_stop_waiting(job.id, time.time() + delay)
 
         else:
@@ -388,15 +389,6 @@ class JobGraphExecutor(Unpickable(
                     if not self.wait_job_deps[jid] and jid not in jobs_to_retry
             )
 
-    # jobs
-    # jobs_graph        = edges
-    # wait_job_deps     = waitJobs
-    # jobs_to_run       = leafs
-    # active_jobs_cache = as_in_queue_working
-    # succeed_jobs      = done
-    # + jobs_to_retry
-    # + failed_jobs
-    #
     def _do_reset(self):
         self._kill_jobs_drop_results()
         assert not self.active_jobs_cache, "Has active jobs"
@@ -520,7 +512,7 @@ class JobGraphExecutor(Unpickable(
     def recover_after_backup_loading(self):
         self.failed_jobs.clear() # FIXME Don't remember. Legacy behaviour?
         self.active_jobs_cache.clear()
-        #self._init_job_deps_graph()
+        #self._init_job_deps_graph() # FIXME Why I comment this?
 
     def vivify_jobs_waiting_stoppers(self):
         jobs_to_retry, self.jobs_to_retry = self.jobs_to_retry, {}

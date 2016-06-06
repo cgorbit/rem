@@ -578,12 +578,6 @@ class PacketBase(Unpickable(
         # Can exists only in tempStorage or in backups wo locks+backup_in_child
         elif self.state == ImplState.UNINITIALIZED:
             raise RuntimeError("Can't restore packets in UNINITIALIZED state")
-# TODO TODO
-# TODO TODO
-# TODO TODO
-# TODO TODO
-        #elif self.state == ReprState.NONINITIALIZED: # XXX FIXME TODO
-            #self._recover_noninitialized(ctx) # XXX FIXME TODO
 
         if self.directory:
             self._try_recover_directory(ctx)
@@ -604,18 +598,6 @@ class PacketBase(Unpickable(
         except Exception as e:
             logging.exception("Failed to recover packet %s" % descr)
             self._mark_as_failed_on_recovery()
-
-    #def _recover_noninitialized(self, ctx): # XXX FIXME TODO
-        #dir = None
-        #if self.directory:
-            #dir = self.directory
-        #elif self.id:
-            #dir = os.path.join(ctx.packets_directory, self.id)
-        #else:
-            #raise RuntimeError("No .id in NONINITIALIZED packet %s" % self.id)
-
-        #self._release_place()
-        #self._create_place_if_need()
 
     def _notify_incorrect_action(self):
         def make(ctx):
@@ -1308,3 +1290,6 @@ class SandboxPacket(PacketBase):
 
         if not self._get_scheduler_ctx().allow_files_auto_sharing:
             raise RpcUserError(RuntimeError("Can't add files to SandboxPacket"))
+
+
+from rem.packet_legacy import JobPacket

@@ -3,7 +3,6 @@ import itertools
 import time
 
 from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
-from callbacks import CallbackHolder, ICallbackAcceptor
 from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError, NonDestroyingStateError
 from rem_logging import logger as logging
 
@@ -14,8 +13,7 @@ class ByUserState(Unpickable(
                        worked=TimedSet.create,
                        errored=TimedSet.create,
                        suspended=set,
-                       waiting=set,
-                       #noninitialized=set,
+                       waited=set,
                  )):
 
     def items(self):
@@ -52,7 +50,7 @@ class QueueBase(Unpickable(
                     )
                 ):
 
-    VIEW_BY_ORDER = "pending", "waiting", "errored", "suspended", "working", "worked"
+    VIEW_BY_ORDER = "pending", "waited", "errored", "suspended", "working", "worked"
 
     VIEW_BY_STATE = {
         PacketState.PAUSED:    "suspended",
@@ -60,7 +58,8 @@ class QueueBase(Unpickable(
         PacketState.TAGS_WAIT: "suspended",
 
         # pending used to run SandboxPacket's
-        PacketState.PENDING:                 "pending",
+        PacketState.PENDING: "pending",
+
         PacketState.PREV_EXECUTOR_STOP_WAIT: "suspended", # FIXME
         PacketState.SHARING_FILES: "suspended", # FIXME
 
@@ -69,7 +68,7 @@ class QueueBase(Unpickable(
 
         PacketState.SUCCESSFULL: "worked",
 
-        PacketState.TIME_WAIT: "waiting",
+        PacketState.TIME_WAIT: "waited",
 
         PacketState.ERROR:  "errored",
         PacketState.BROKEN: "errored",
@@ -96,7 +95,7 @@ class QueueBase(Unpickable(
 # worked
 #     PacketState.SUCCESSFULL
 
-# waiting
+# waited
 #     PacketState.TIME_WAIT
 
 # errored
@@ -410,3 +409,6 @@ class SandboxQueue(QueueBase):
 
     #def _get_working_count(self):
         #return len(self.working_packets)
+
+
+from rem.queue_legacy import Queue

@@ -20,7 +20,9 @@ from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrato
 from connmanager import ConnectionManager
 from packet import LocalPacket, PacketState, PacketCustomLogic
 import packet
-from queue import LocalQueue, SandboxQueue
+import packet_legacy
+from queue import LocalQueue, SandboxQueue, QueueBase
+import queue_legacy
 from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
@@ -518,12 +520,23 @@ class Scheduler(Unpickable(lock=PickableRLock,
             def __init__(self):
                 self.packets = deque()
                 self.tags = deque()
+                self.queues = deque()
 
             def register(self, obj, state):
-                if isinstance(obj, packet.PacketBase):
+                if isinstance(obj, (packet.PacketBase, packet_legacy.JobPacket)):
                     self.packets.append(obj)
                 elif isinstance(obj, TagBase):
                     self.tags.append(obj)
+                elif isinstance(obj, (QueueBase, queue_legacy.Queue)):
+                    self.queues.append(obj)
+
+            def finalize(self):
+                # TODO ATW each packet exists in register in 2 copies
+                self.packets = list(set(self.packets))
+
+            # FIXME
+                self.tags    = list(set(self.tags))
+                self.queues  = list(set(self.queues))
 
             def LogStats(self):
                 pass
@@ -550,8 +563,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         objects_registrator.LogStats()
 
-        # TODO ATW each packet exists in register in 2 copies
-        registrator.packets = list(set(registrator.packets))
+        registrator.finalize()
 
         cls._convert_backup(format_version, sdict, registrator)
 
@@ -609,7 +621,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def _convert_backup_to_v2(cls, sdict, registrator):
         for pck in registrator.packets:
             pck.convert_to_v2()
-            pck.__class__ = LocalPacket
+
+# FIXME queues first, than packets, because packets has ._update_state?
+
+        for queue in registrator.queues:
+            queue.convert_to_v2()
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):
