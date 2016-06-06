@@ -23,12 +23,13 @@ import packet
 import packet_legacy
 from queue import LocalQueue, SandboxQueue, QueueBase
 import queue_legacy
-from storages import PacketNamesStorage, TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
+from storages import TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
 import osspec
 from rem.profile import ProfiledThread
 from rem_logging import logger as logging
 import sandbox_remote_packet
+from rem.packet_names import PacketNamesStorage
 
 
 def _bind1st(f, arg):
