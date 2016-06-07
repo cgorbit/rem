@@ -728,10 +728,13 @@ class PacketBase(Unpickable(
 
         result_tag = self.done_tag.name if self.done_tag else None
 
-# TODO
-        #waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
-            #if self.state == ImplState.TIME_WAIT else None
         waiting_time = None
+        if self.state == ImplState.TIME_WAIT:
+            deadline = self._graph_executor.get_nearest_retry_deadline()
+            if deadline:
+                waiting_time = max(int(deadline - time.time()), 0)
+            else:
+                logging.error("Packet %s in WAITING but has no get_nearest_retry_deadline" % self.id)
 
         all_tags = list(self.all_dep_tags)
 

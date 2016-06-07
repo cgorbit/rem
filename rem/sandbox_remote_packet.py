@@ -1062,6 +1062,9 @@ class SandboxJobGraphExecutorProxy(object):
 
             self._update_state()
 
+    def get_nearest_retry_deadline(self):
+        return self.time_wait_deadline
+
     def _update_state(self):
         new = self._calc_state()
         if new == self.state:
