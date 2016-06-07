@@ -566,7 +566,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         registrator.finalize()
 
-        #cls._convert_backup(format_version, sdict, registrator)
+        cls._convert_backup(format_version, sdict, registrator)
 
         return sdict, registrator
 
