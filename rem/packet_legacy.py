@@ -137,8 +137,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self.is_resetable = pckd.pop('isResetable')
 
         self.wait_dep_tags = pckd.pop('waitTags')
-        self.tags_awaited = not self.wait_dep_tags or state in _TAGS_AWAITED_STATES \
-            or state == ReprState.SUSPENDED and not self.do_not_run # not always true
+        # if we are in SUSPENDED (RCVR_ERROR or not) and len(self.wait_dep_tags)
+        #   -- we will wait tags (in previous packet.py impl)
+        self.tags_awaited = not self.wait_dep_tags or state in _TAGS_AWAITED_STATES
 
         clean_state = pckd.pop('_clean_state') # TODO apply to _graph_executor
 
