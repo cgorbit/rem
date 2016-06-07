@@ -424,6 +424,7 @@ class JobGraphExecutor(Unpickable(
                 else "pending" if jid in self.jobs_to_run \
                 else "errored" if jid in self.failed_jobs \
                 else "suspended"
+                #else "waiting" if jid in self.jobs_to_retry \
 
             wait_jobs = []
             if self.active_jobs_cache:
