@@ -244,10 +244,23 @@ class PacketBase(Unpickable(
         new = self._calc_state()
 
         if self.state != new:
-            self._change_state(new)
+            self.state = new
+            logging.debug("packet %s\tnew impl state %r", self.name, new)
 
-    @staticmethod
-    def _calc_repr_state(state):
+            self._update_repr_state()
+
+            self._on_state_change(new)
+        else:
+            self._update_repr_state()
+
+        if self.queue:
+            self.queue.update_pending_jobs_state(self)
+
+    def _calc_repr_state(self):
+        if self.state == ImplState.RUNNING:
+            return ReprState.PENDING if self._graph_executor.state & GraphState.PENDING_JOBS \
+                else ReprState.WORKABLE
+
         map = {
             ImplState.UNINITIALIZED:    ReprState.CREATED,
             ImplState.ERROR:            ReprState.ERROR,
@@ -263,7 +276,6 @@ class PacketBase(Unpickable(
 
             # Must be WORKABLE to support fast_restart (FIXME Don't remember why)
             ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
-            ImplState.RUNNING:          ReprState.WORKABLE,
 
             ImplState.TIME_WAIT:        ReprState.WAITING,
 
@@ -271,7 +283,7 @@ class PacketBase(Unpickable(
             ImplState.HISTORIED:        ReprState.HISTORIED,
         }
 
-        return map[state]
+        return map[self.state]
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
@@ -464,13 +476,8 @@ class PacketBase(Unpickable(
         with file:
             return file.read()
 
-    def _change_state(self, state):
+    def _on_state_change(self, state):
         with self.lock:
-            self.state = state
-            logging.debug("packet %s\tnew impl state %r", self.name, state)
-
-            self._update_repr_state()
-
             if self.queue:
                 self.queue._on_packet_state_change(self)
 
@@ -493,7 +500,7 @@ class PacketBase(Unpickable(
                 self._release_place()
 
     def _update_repr_state(self):
-        new = self._calc_repr_state(self.state)
+        new = self._calc_repr_state()
 
         if new == self._repr_state:
             return
@@ -677,7 +684,7 @@ class PacketBase(Unpickable(
                 if dep_id not in self.jobs:
                     raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.pck_id)))
 
-            job = Job(shell, parents, pipe_parents, self.id, max_try_count=tries,
+            job = Job(self.id, shell, parents, pipe_parents, max_try_count=tries,
                       max_err_len=max_err_len, retry_delay=retry_delay,
                       pipe_fail=pipe_fail, description=description,
                       notify_timeout=notify_timeout,
@@ -988,6 +995,9 @@ class PacketBase(Unpickable(
             if not self._graph_executor.is_null():
                 raise RpcUserError(RuntimeError("Can't move packets with running jobs"))
 
+            if src_queue == dst_queue:
+                return
+
             self._move_to_queue(src_queue, dst_queue, from_rpc=True)
 
     def _attach_to_queue(self, queue):
@@ -1026,10 +1036,10 @@ class _LocalPacketJobGraphOps(object):
         self.pck._stop_waiting(stop_id)
 
     def del_working(self, job):
-        self.pck.queue._on_job_done(self)
+        self.pck.queue._on_job_done(self, job)
 
     def add_working(self, job):
-        self.pck.queue._on_job_get(self)
+        self.pck.queue._on_job_get(self, job)
 
     def job_done_successfully(self, job_id):
         tag = self.pck.job_done_tag.get(job_id)
@@ -1100,7 +1110,7 @@ class LocalPacket(PacketBase):
                 _raise()
 
             runner = self._graph_executor.get_job_to_run()
-            self._update_state() # FIXME in JobGraphExecutor
+            #self._update_state() # FIXME Do this in JobGraphExecutor only
 
             return runner
 

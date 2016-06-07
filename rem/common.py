@@ -176,6 +176,9 @@ def runtime_object(init_value):
 def emptyset(*args):
     return set()
 
+def emptydict(*args):
+    return {}
+
 
 def zeroint(*args):
     return int()
@@ -373,8 +376,8 @@ def GeneralizedSet(priorAttr):
             if pck not in self:
                 PriorityQueue.add(self, pck, getattr(pck, priorAttr, 0))
 
-        def remove(self, obj):
-            return self.pop(obj)
+        def remove(self, pck):
+            return self.pop(pck)
 
     return _packset
 

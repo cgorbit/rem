@@ -144,7 +144,7 @@ class Job(Unpickable(results=list,
                      output_to_status=bool)):
     ERR_PENALTY_FACTOR = 6
 
-    def __init__(self, shell, parents, pipe_parents, pck_id, max_try_count, max_err_len=None,
+    def __init__(self, pck_id, shell, parents, pipe_parents, max_try_count, max_err_len=None,
                  retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
         super(Job, self).__init__()
         self.id = id(self)
@@ -160,22 +160,6 @@ class Job(Unpickable(results=list,
         self.notify_timeout = notify_timeout
         self.max_working_time = max_working_time
         self.output_to_status = output_to_status
-
-    #def __get_sbx_state__(self):
-        #sdict = self.__dict__.copy()
-        #sdict.pop('pck')
-        #return sdict
-
-    #def __set_sbx_state__(self, sdict, pck):
-        #self.__dict__.update(sdict)
-        #self.pck = pck
-        #return self
-
-    #@classmethod
-    #def from_sbx_state(cls, pck, sdict):
-        #self = cls.__new__(cls)
-        #self.pck = pck
-        #return self
 
     def __repr__(self):
         return "<Job(id: %s; packet: %s)>" % (self.id, self.pck_id)
@@ -413,10 +397,6 @@ class JobRunner(object):
     @property
     def job(self):
         return self._job
-
-    #@property
-    #def pck(self):
-        #return self._job.pck
 
     def __repr__(self):
         return '<JobRunner for %s>' % repr(self._job)

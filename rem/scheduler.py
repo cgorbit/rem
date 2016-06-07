@@ -614,6 +614,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             #self.FillSchedWatcher(prevWatcher)
 
     @classmethod
+    @common.logged()
     def _convert_backup(cls, sdict_version, sdict, registrator):
         for from_version in range(sdict_version, cls.BackupFormatVersion):
             getattr(cls, '_convert_backup_to_v%d' % (from_version + 1))(sdict, registrator)
@@ -625,10 +626,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         for pck in registrator.packets:
             pck.convert_to_v2()
-
-        #for q in registrator.queues:
-            #for pck in list(q.ListAllPackets()):
-                #q.relocate_packet(pck)
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):

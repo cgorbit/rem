@@ -33,7 +33,7 @@ class Queue(Unpickable(pending=PackSet.create,
 
         # TODO noninitialized
 
-        self.working_jobs = set()
+        self.working_jobs = {}
 
         self.packets_with_pending_jobs = PackSet.create()
 
@@ -51,5 +51,8 @@ class Queue(Unpickable(pending=PackSet.create,
 
         self.successfull_default_lifetime = dikt.pop('successForgetTm')
         self.errored_default_lifetime = dikt.pop('errorForgetTm')
+
+        dikt.pop('callbacks', None)
+        dikt.pop('nonpersistent_callbacks', None)
 
         self.__class__ = LocalQueue

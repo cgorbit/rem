@@ -2,7 +2,7 @@ from __future__ import with_statement
 import itertools
 import time
 
-from common import emptyset, TimedSet, PackSet, PickableRLock, Unpickable
+from common import emptyset, emptydict, TimedSet, PackSet, PickableRLock, Unpickable
 from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError, NonDestroyingStateError
 from rem_logging import logger as logging
 
@@ -33,7 +33,7 @@ class QueueBase(Unpickable(
                        by_user_state=ByUserState,
 
                     # LocalQueue # TODO move
-                       working_jobs=emptyset,
+                       working_jobs=emptydict,
                        packets_with_pending_jobs=PackSet.create,
 
                     # SandboxQueue # TODO move
@@ -76,51 +76,6 @@ class QueueBase(Unpickable(
         PacketState.UNINITIALIZED: None, # stored in ShortStorage
         PacketState.HISTORIED:     None,
     }
-
-# suspended
-#     PAUSED or PAUSING or TAGS_WAIT
-
-# pending
-#     Old
-#     PacketState.PENDING or PacketState.RUNNING and pck.has_pending_jobs()
-
-#     New
-#     PacketState.PENDING
-#     PacketState.PREV_EXECUTOR_STOP_WAIT # FIXME
-
-# working
-#     PacketState.RUNNING
-#     PacketState.DESTROYING # FIXME
-
-# worked
-#     PacketState.SUCCESSFULL
-
-# waited
-#     PacketState.TIME_WAIT
-
-# errored
-#     PacketState.ERROR or PacketState.BROKEN
-
-# None
-#     UNINITIALIZED
-
-########################################################################
-
-# packets_with_pending_jobs
-#     pck.has_pending_jobs()
-
-# working_jobs (for limiting)
-#     on callbacks
-
-########################################################################
-
-# pending_packets
-#     by_user_state['pending']
-
-# working_packets (for limiting)
-#     pck.graph.state & GraphState.WORKING
-
-########################################################################
 
     def __init__(self, name):
         super(QueueBase, self).__init__()
@@ -284,6 +239,15 @@ class QueueBase(Unpickable(
 class LocalQueue(QueueBase):
     _PACKET_CLASS = LocalPacket
 
+    def __repr__(self):
+        return '<LocalQueue %s; work=%d; pend=%d; lim=%s at 0x%x>' % (
+            self.name,
+            len(self.working_jobs),
+            len(self.packets_with_pending_jobs),
+            self.working_limit,
+            id(self)
+        )
+
     def _notify_has_pending_if_need(self):
         #logging.debug('_notify_has_pending_if_need ... %s' % self.has_startable_jobs())
 # FIXME Optimize
@@ -293,17 +257,17 @@ class LocalQueue(QueueBase):
     def _on_change_working_limit(self):
         self._notify_has_pending_if_need()
 
-    def _on_job_get(self, ref):
+    def _on_job_get(self, pck, job):
         with self.lock:
-            self.working_jobs.add(ref)
+            self.working_jobs[job] = pck
 
     def _on_resume(self):
         if self.scheduler:
             self.scheduler._on_job_pending(self)
 
-    def _on_job_done(self, ref):
+    def _on_job_done(self, pck, job):
         with self.lock:
-            self.working_jobs.discard(ref)
+            self.working_jobs.pop(job, None)
         self._notify_has_pending_if_need()
 
     def relocate_packet(self, pck):
@@ -311,10 +275,16 @@ class LocalQueue(QueueBase):
         self._notify_has_pending_if_need()
 
     def _on_packet_attach(self, pck):
-        self.working_jobs.update(pck._get_working_jobs())
+        for job in pck._get_working_jobs():
+            self.working_jobs[job] = pck
+
+        if pck.has_pending_jobs():
+            self.packets_with_pending_jobs.add(pck)
 
     def _on_packet_detach(self, pck):
-        self.working_jobs.difference_update(pck._get_working_jobs())
+        for job in pck._get_working_jobs():
+            self.working_jobs.pop(job, None)
+
 # FIXME Optimize
         self.packets_with_pending_jobs.discard(pck)
 
@@ -325,10 +295,7 @@ class LocalQueue(QueueBase):
                 and self.is_alive()
 
     def _get_working_packets(self):
-        return set(job.pck for job in self.working_jobs)
-
-    #def _get_working_count(self):
-        #return len(self.working_jobs)
+        return set(self.working_jobs.values())
 
     def get_job_to_run(self):
         while True:
@@ -342,24 +309,39 @@ class LocalQueue(QueueBase):
             try:
                 job = pck.get_job_to_run()
             except NotWorkingStateError: # because of race
-                logging.debug('NotWorkingStateError idling')
+                logging.debug('NotWorkingStateError idling: %s' % pck)
                 continue
 
             return job
 
+    def update_pending_jobs_state(self, pck):
+        with self.lock:
+            if pck.has_pending_jobs():
+                if pck not in self.packets_with_pending_jobs:
+                    self.packets_with_pending_jobs.add(pck)
+                    self._notify_has_pending_if_need()
+            else:
+                if pck in self.packets_with_pending_jobs:
+                    self.packets_with_pending_jobs.remove(pck)
+
     def _on_before_remove(self, pck):
-        #if pck.has_pending_jobs():
-    # TODO
-        self.packets_with_pending_jobs.discard(pck)
+        pass
 
     def _on_after_add(self, pck):
-# FIXME Optimize
-        if pck.has_pending_jobs():
-            self.packets_with_pending_jobs.add(pck)
+        pass
 
 
 class SandboxQueue(QueueBase):
     _PACKET_CLASS = SandboxPacket
+
+    def __repr__(self):
+        return '<SandboxQueue %s; work=%d; pend=%d; lim=%s at 0x%x>' % (
+            self.name,
+            len(self.working_packets),
+            len(self._pending_packets),
+            self.working_limit,
+            id(self)
+        )
 
     def _notify_has_pending_if_need(self):
         if self._pending_packets and self.scheduler:
@@ -407,9 +389,6 @@ class SandboxQueue(QueueBase):
 
     def _on_packet_detach(self, pck):
         self.working_packets.discard(pck)
-
-    #def _get_working_count(self):
-        #return len(self.working_packets)
 
 
 from rem.queue_legacy import Queue
