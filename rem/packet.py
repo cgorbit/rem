@@ -183,8 +183,6 @@ class PacketBase(Unpickable(
 
 # TODO Test this code offline with mask
     def _calc_state(self):
-        is_inited = bool(self.queue)
-
         graph = self._graph_executor
 
         if self.destroying:
@@ -199,7 +197,7 @@ class PacketBase(Unpickable(
         elif self.is_broken:
             return ImplState.BROKEN # may be GraphState.WORKING
 
-        elif not is_inited:
+        elif not self.queue:
             return ImplState.UNINITIALIZED
 
         elif self.wait_dep_tags and not self.tags_awaited:
@@ -263,7 +261,7 @@ class PacketBase(Unpickable(
             ImplState.PAUSED:           ReprState.SUSPENDED,
             ImplState.PAUSING:          ReprState.SUSPENDED,
 
-            # XXX Must be WORKABLE to support fast_restart
+            # Must be WORKABLE to support fast_restart (FIXME Don't remember why)
             ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
             ImplState.RUNNING:          ReprState.WORKABLE,
 
@@ -478,6 +476,7 @@ class PacketBase(Unpickable(
 
             if state == ImplState.HISTORIED:
                 self.FireEvent("change") # PacketNamesStorage
+                #self.queue = None
 
             if state in [ImplState.ERROR, ImplState.BROKEN]:
                 self._send_email_on_error_state()
@@ -503,7 +502,10 @@ class PacketBase(Unpickable(
         self.history.append((new, time.time()))
         logging.debug("packet %s\tnew state %r", self.name, new)
 
-        # TODO logging.debug("packet %s\twaiting for %s sec", self.name, delay)
+        if new == ReprState.WAITING:
+            deadline = self._graph_executor.get_nearest_retry_deadline()
+            delay = max(deadline - time.time(), 0) if deadline else None
+            logging.debug("packet %s\twaiting for %s sec", self.name, delay)
 
     def destroy(self):
         if self.destroying:

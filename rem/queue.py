@@ -287,7 +287,7 @@ class LocalQueue(QueueBase):
     def _notify_has_pending_if_need(self):
         #logging.debug('_notify_has_pending_if_need ... %s' % self.has_startable_jobs())
 # FIXME Optimize
-        if self.has_startable_jobs():
+        if self.has_startable_jobs() and self.scheduler:
             self.scheduler._on_job_pending(self)
 
     def _on_change_working_limit(self):
@@ -298,7 +298,8 @@ class LocalQueue(QueueBase):
             self.working_jobs.add(ref)
 
     def _on_resume(self):
-        self.scheduler._on_job_pending(self)
+        if self.scheduler:
+            self.scheduler._on_job_pending(self)
 
     def _on_job_done(self, ref):
         with self.lock:
@@ -361,7 +362,7 @@ class SandboxQueue(QueueBase):
     _PACKET_CLASS = SandboxPacket
 
     def _notify_has_pending_if_need(self):
-        if self._pending_packets:
+        if self._pending_packets and self.scheduler:
             self.scheduler._on_packet_pending(self) # XXX not under lock!
 
     def _on_change_working_limit(self):

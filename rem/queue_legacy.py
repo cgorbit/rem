@@ -24,22 +24,22 @@ class Queue(Unpickable(pending=PackSet.create,
     def convert_to_v2(self):
         dikt = self.__dict__
 
-        # FIXME pending -> packets_with_pending_jobs, or _update_state is ok
-        self.packets_with_pending_jobs = PackSet.create()
-
-        self.working_jobs = set()
-
-        # TODO noninitialized
-
-    # FIXME
+        self.scheduler = None
         schedulers = self._get_listeners_by_type(Scheduler)
         if schedulers:
             scheduler = schedulers[0]
             self.scheduler = scheduler
             self.DropCallbackListener(scheduler)
 
+        # TODO noninitialized
+
+        self.working_jobs = set()
+
+        self.packets_with_pending_jobs = PackSet.create()
+
         by_user_state = self.by_user_state = ByUserState()
 
+        # XXX This is wrong, but all packets will be relocated later
         for sub in ['pending', 'working', 'worked', 'errored', 'suspended', 'waited']:
             by_user_state.__dict__[sub] = dikt.pop(sub)
 

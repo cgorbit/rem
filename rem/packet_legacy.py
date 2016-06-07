@@ -175,6 +175,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
             self._saved_jobs_status = g.produce_detailed_status()
             del g
 
+        elif state == ReprState.HISTORIED:
+            pass
+
         elif self.queue:
             g = self._graph_executor = self._create_job_graph_executor()
 
@@ -186,12 +189,15 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
             g._clean_state = clean_state
 
-            #g.init()
             g.state = g._calc_state()
 
         self.state = self._calc_state()
         self._update_repr_state()
-        #self._update_state()
+
+        if self.queue:
+            if self.has_pending_jobs():
+                self.queue.packets_with_pending_jobs.add(self)
+            self.queue.relocate_packet(self)
 
         if self._repr_state != state and not(state == ReprState.WORKABLE and self._repr_state == ReprState.PENDING):
             logging.warning("ReprState mismatch for %s: %s -> %s" % (self, state, self._repr_state))

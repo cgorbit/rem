@@ -620,11 +620,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     @classmethod
     def _convert_backup_to_v2(cls, sdict, registrator):
-        for queue in registrator.queues:
-            queue.convert_to_v2()
+        for q in registrator.queues:
+            q.convert_to_v2()
 
         for pck in registrator.packets:
             pck.convert_to_v2()
+
+        #for q in registrator.queues:
+            #for pck in list(q.ListAllPackets()):
+                #q.relocate_packet(pck)
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):
