@@ -39,3 +39,7 @@ class PacketNamesStorage(ICallbackAcceptor):
 
     def OnPacketReinitRequest(self, pck):
         pass
+
+
+import rem.storages
+rem.storages.PacketNamesStorage = PacketNamesStorage
