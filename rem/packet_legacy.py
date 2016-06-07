@@ -90,7 +90,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
         def pop_failed_job():
             if not jobs_to_run:
-                raise ValueError()
+                raise ValueError("jobs_to_run is empty to pop")
 
             for job_id in jobs_to_run:
                 result = self.jobs[job_id].last_result()
