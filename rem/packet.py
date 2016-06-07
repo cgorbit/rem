@@ -682,14 +682,7 @@ class PacketBase(Unpickable(
                       max_working_time=max_working_time,
                       output_to_status=output_to_status)
 
-        ###
             self.jobs[job.id] = job
-
-
-            #self.jobs_graph[job.id] = []
-            #for p in job.parents:
-                #self.jobs_graph[p].append(job.id)
-        ###
 
             if set_tag:
                 self.job_done_tag[job.id] = set_tag
@@ -808,11 +801,14 @@ class PacketBase(Unpickable(
                 ImplState.DESTROYING,
                 ImplState.HISTORIED
             ]:
-                raise RuntimeError()
+                raise RuntimeError("Can't suspend in %s state" % self._repr_state)
 
             self.finish_status = None # for ImplState.ERROR
             self._saved_jobs_status = None
 # TODO XXX
+
+            # XXX Previous implementation in addition did something like this:
+            # + self.tags_awaited = not self.wait_dep_tags
 
             self.do_not_run = True
 
@@ -913,7 +909,7 @@ class PacketBase(Unpickable(
             if self._will_never_be_executed():
                 return
 
-            # FIXME Don't even update .wait_dep_tags if not self.is_resetable
+            # Legacy behaviour: add in any case
             tag_name = ref.GetFullname()
             self.wait_dep_tags.add(tag_name)
 
