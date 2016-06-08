@@ -8,12 +8,11 @@ import delayed_executor
 from rem_logging import logger as logging
 import osspec
 
-
 #                                     /--jobs_to_retry<--\
 #                                     |                  |
 #                                     |                  |
 #                                     |                  |
-# jobs_graph -> wait_job_deps -> jobs_to_run -> active_jobs_cache
+# parent_to_childs -> child_to_parents -> jobs_to_run -> active_jobs_cache
 #                     ^                                  |
 #                     |                                  |- failed_jobs
 #                     |                                  |
@@ -114,15 +113,27 @@ class _ActiveJobs(object):
         return self._results.pop(0)
 
 
+def _build_deps_dict(jobs):
+    graph = {}
+
+    for job in jobs.values():
+        graph.setdefault(job.id, [])
+
+        for parent_id in job.parents:
+            graph.setdefault(parent_id, []).append(job.id)
+
+    return graph
+
+
 class JobGraphExecutor(Unpickable(
                             jobs=dict,
-                            jobs_graph=dict,
+                            parent_to_childs=dict,
 
                             #pck_id=str,
 
                             kill_all_jobs_on_error=(bool, True),
 
-                            wait_job_deps=dict,
+                            child_to_parents=dict,
                             succeed_jobs=set,
                             failed_jobs=set,
                             jobs_to_run=set,
@@ -136,7 +147,7 @@ class JobGraphExecutor(Unpickable(
     def __init__(self, ops, pck_id, graph):
         super(JobGraphExecutor, self).__init__()
         self.jobs = graph.jobs
-        self.jobs_graph = graph.build_deps_dict()
+        self.parent_to_childs = _build_deps_dict(graph.jobs)
         self.kill_all_jobs_on_error = graph.kill_all_jobs_on_error
         self._clean_state = True
         self._ops = ops
@@ -291,9 +302,9 @@ class JobGraphExecutor(Unpickable(
 
             self._ops.job_done_successfully(job.id)
 
-            for nid in self.jobs_graph[job.id]:
-                self.wait_job_deps[nid].remove(job.id)
-                if not self.wait_job_deps[nid]:
+            for nid in self.parent_to_childs[job.id]:
+                self.child_to_parents[nid].remove(job.id)
+                if not self.child_to_parents[nid]:
                     self.jobs_to_run.add(nid)
 
         elif job.tries < job.max_try_count:
@@ -346,7 +357,7 @@ class JobGraphExecutor(Unpickable(
 
     has_jobs_to_run = _can_run_jobs_right_now
 
-    # Modify:   wait_job_deps, jobs_to_run
+    # Modify:   child_to_parents, jobs_to_run
     # Consider: jobs_to_retry, succeed_jobs
     def _init_job_deps_graph(self):
         def visit(startJID):
@@ -356,11 +367,11 @@ class JobGraphExecutor(Unpickable(
             while st:
                 # num - number of neighbours discovered
                 jid, num = st[-1]
-                adj = self.jobs_graph[jid]
+                adj = self.parent_to_childs[jid]
                 if num < len(adj):
                     st[-1][1] += 1
                     nid = adj[num]
-                    self.wait_job_deps[nid].add(jid)
+                    self.child_to_parents[nid].add(jid)
                     if nid not in discovered:
                         discovered.add(nid)
                         st.append([nid, 0])
@@ -378,7 +389,7 @@ class JobGraphExecutor(Unpickable(
             discovered = set()
             finished = set()
 
-            self.wait_job_deps = {jid: set() for jid in self.jobs if jid not in self.succeed_jobs}
+            self.child_to_parents = {jid: set() for jid in self.jobs if jid not in self.succeed_jobs}
 
             for jid in self.jobs:
                 if jid not in discovered and jid not in self.succeed_jobs:
@@ -388,7 +399,7 @@ class JobGraphExecutor(Unpickable(
 
             self.jobs_to_run = set(
                 jid for jid in discovered
-                    if not self.wait_job_deps[jid] and jid not in jobs_to_retry
+                    if not self.child_to_parents[jid] and jid not in jobs_to_retry
             )
 
     def _do_reset(self):
@@ -428,7 +439,7 @@ class JobGraphExecutor(Unpickable(
 
             wait_jobs = []
             if self.active_jobs_cache:
-                wait_jobs = map(str, self.wait_job_deps.get(jid, []))
+                wait_jobs = map(str, self.child_to_parents.get(jid, []))
 
             parents = map(str, job.parents or [])
             pipe_parents = map(str, job.inputs or [])

@@ -46,16 +46,6 @@ class JobGraph(object):
         self.jobs = jobs
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
 
-    def build_deps_dict(self):
-        graph = {}
-
-        for job in self.jobs.values():
-            graph[job.id] = []
-            for parent_id in job.parents:
-                graph.setdefault(parent_id, []).append(job.id)
-
-        return graph
-
 
 def reraise(msg):
     t, e, tb = sys.exc_info()
@@ -116,7 +106,6 @@ class PacketBase(Unpickable(
                            lock=PickableRLock,
 
                            jobs=dict,
-                           #jobs_graph=dict,
 
                            all_dep_tags=set,
                            wait_dep_tags=set,

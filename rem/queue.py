@@ -308,7 +308,7 @@ class LocalQueue(QueueBase):
             # .get_job_to_run not under lock to prevent deadlock
             try:
                 job = pck.get_job_to_run()
-            except NotWorkingStateError: # because of race
+            except NotWorkingStateError:
                 logging.debug('NotWorkingStateError idling: %s' % pck)
                 continue
 

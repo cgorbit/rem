@@ -18,7 +18,7 @@ _TAGS_AWAITED_STATES = frozenset([
 
 class JobPacket(Unpickable(lock=PickableRLock,
                            jobs=dict,
-                           edges=dict, # jobs_graph
+                           edges=dict, # parent_to_childs
                            done=set, # succeed_jobs
                            leafs=set, # jobs_to_run
                            #_active_jobs=always(_ActiveJobs),
@@ -86,7 +86,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         #active_jobs_cache = set()
         pckd.pop('as_in_queue_working')
 
-        wait_job_deps = pckd.pop('waitJobs')
+        child_to_parents = pckd.pop('waitJobs')
 
         def pop_failed_job():
             if not jobs_to_run:
@@ -120,7 +120,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             elif not self.is_broken:
                 logging.error("ERROR && !broken && !failed_jobs: %s" % self)
 
-        working_jobs = {jid for jid, deps in wait_job_deps.items() if not deps} \
+        working_jobs = {jid for jid, deps in child_to_parents.items() if not deps} \
             - (succeed_jobs | jobs_to_run \
                 | set(descr[0] for descr in jobs_to_retry.values()) \
                 | failed_jobs)
@@ -185,7 +185,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             g.succeed_jobs = succeed_jobs
             g.jobs_to_run = jobs_to_run
             g.jobs_to_retry = jobs_to_retry
-            g.wait_job_deps = wait_job_deps
+            g.child_to_parents = child_to_parents
 
             g._clean_state = clean_state
 

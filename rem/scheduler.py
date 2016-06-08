@@ -614,12 +614,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
             #self.FillSchedWatcher(prevWatcher)
 
     @classmethod
-    @common.logged()
     def _convert_backup(cls, sdict_version, sdict, registrator):
         for from_version in range(sdict_version, cls.BackupFormatVersion):
             getattr(cls, '_convert_backup_to_v%d' % (from_version + 1))(sdict, registrator)
 
     @classmethod
+    @common.logged()
     def _convert_backup_to_v2(cls, sdict, registrator):
         for q in registrator.queues:
             q.convert_to_v2()
