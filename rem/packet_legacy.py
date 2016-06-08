@@ -58,6 +58,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             d.pop('packetRef', None)
             d.pop('callbacks', None)
             d.pop('nonpersistent_callbacks', None)
+            job.max_try_count = d.pop('maxTryCount')
             job.pck_id = self.id
 
         pckd = self.__dict__
