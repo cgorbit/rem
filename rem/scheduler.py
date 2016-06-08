@@ -183,7 +183,7 @@ class SandboxPacketsRunner(object):
 
                 pck = q.get_packet_to_run()
                 if not pck:
-                    logging.debug('NotWorkingStateError idling')
+                    logging.debug('NotWorkingStateError idling: %s' %  q.name)
                     continue
 
                 if q.has_startable_packets():
@@ -349,8 +349,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def _add_queue_as_non_empty_if_need(self, q):
         # this racy code may add empty queue to queues_with_jobs,
         # but it's better, than deadlock
-# XXX REMOVE
-        logging.debug('_add_queue_as_non_empty_if_need ... %s' % q.has_startable_jobs())
         if q.has_startable_jobs():
             with self.lock:
                 if q not in self.queues_with_jobs:
