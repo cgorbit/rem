@@ -25,6 +25,9 @@ from rem.common import PickableLock
 remote_packets_dispatcher = None
 
 
+# XXX This code is not ready for production
+
+
 class WrongTaskIdError(RuntimeError):
     pass
 
@@ -90,6 +93,7 @@ class ActionQueue(object):
 class RemotePacketsDispatcher(object):
     _SANDBOX_TASK_CREATION_RETRY_INTERVAL = 10.0
     _RPC_RESEND_INTERVAL = 20.0
+    _FINAL_UPDATE_FETCH_TIMEOUT = 30.0
 
     class TasksAwaiter(SandboxTaskStateAwaiter):
         def __init__(self, sandbox, dispatcher):
@@ -157,9 +161,7 @@ class RemotePacketsDispatcher(object):
             self._reschedule_packet(pck)
 
     def _reschedule_packet(self, pck):
-# TODO
-# TODO CHECK AGAIN
-# TODO
+        # TODO Check
         by_state = {
             RemotePacketState.CREATING: self._start_create_sandbox_task,
             RemotePacketState.STARTING: self._start_start_sandbox_task,
@@ -184,13 +186,6 @@ class RemotePacketsDispatcher(object):
         self._sbx_invoker.stop()
         self._tasks_status_awaiter.stop()
 
-# TODO FIXME max_restarts=0
-# TODO kill_timeout=14 * 86400
-# FIXME fail_on_any_error=False XXX А на каких он не падает?
-
-# TODO Создать рботного пользователя FIXME Правда ли никто не сможет ручками перезапускать?
-
-
     # XXX TODO
     # Instance must also ping server (if server doesn't ping instance)
     # so REM-server will register instance's remote_addr after
@@ -199,9 +194,9 @@ class RemotePacketsDispatcher(object):
     def register_packet(self, pck):
         self._start_create_sandbox_task(pck)
 
-# FIXME We can't identify packet by pck_id in async/delayed calls
-#       because packet may be recreated by PacketBase
-#       (or we must cancel invokers (not only delayed_executor))
+        # FIXME We can't identify packet by pck_id in async/delayed calls
+        #       because packet may be recreated by PacketBase
+        #       (or we must cancel invokers (not only delayed_executor))
 
     def _start_create_sandbox_task(self, pck):
         self._sbx_invoker.invoke(lambda : self._do_create_sandbox_task(pck))
@@ -211,6 +206,11 @@ class RemotePacketsDispatcher(object):
 
     #def _start_delete_task(self, task_id):
         #self._sbx_invoker.invoke(lambda : self._sandbox.delete_task(task_id)) # no retries
+
+    # TODO Consider following options:
+    #   max_restarts=0
+    #   kill_timeout=14 * 86400
+    #   fail_on_any_error=False
 
     def _sbx_create_task(self, pck):
         return self._sandbox.create_task(
@@ -228,11 +228,6 @@ class RemotePacketsDispatcher(object):
             }
         )
 
-# XXX ACHTUNG
-# XXX ACHTUNG
-# XXX ACHTUNG
-# XXX ACHTUNG
-# XXX ACHTUNG
     def _sbx_update_task(self, pck, task):
         real_pck = pck._ops._ops.pck
         prev_task_id = pck._ops._prev_task_id
@@ -288,7 +283,7 @@ prev_task: {prev_task}
         pck._set_state(RemotePacketState.ALL_DONE, reason)
         pck._run_guard = None # j.i.c
 
-        # TODO XXX NotImplementedError
+        # TODO NotImplementedError
         #self._tasks_status_awaiter.cancel_wait(pck._sandbox_task_id)
 
         if pck._sandbox_task_id:
@@ -449,18 +444,24 @@ prev_task: {prev_task}
 
     @traced_rpc_method()
     def _on_rpc_update_graph(self, task_id, peer_addr, state, is_final):
-        import pprint
-        logging.debug('_ON_RPC_UPDATE_GRAPH[%s]: %s' % (
-            GraphState.str(state['state']),
-            pprint.pformat({
-                'task_id': task_id,
-                'peer_addr': peer_addr,
-                'is_final': is_final,
-                'state': state
-            })
+        pck = self._by_task_id.get(task_id)
+
+        logging.debug('_on_rpc_update_graph: task_id=%s, pck_id=%s; status=%s' % (
+            task_id,
+            pck and pck.id,
+            GraphState.str(state['state'])
         ))
 
-        pck = self._by_task_id.get(task_id)
+        #import pprint
+        #logging.debug('_on_rpc_update_graph[%s]: %s' % (
+            #GraphState.str(state['state']),
+            #pprint.pformat({
+                #'task_id': task_id,
+                #'peer_addr': peer_addr,
+                #'is_final': is_final,
+                #'state': state
+            #})
+        #))
 
         if not pck:
             raise WrongTaskIdError()
@@ -518,7 +519,7 @@ prev_task: {prev_task}
     def _start_fetch_resource_list(self, pck):
         self._sbx_invoker.invoke(lambda : self._fetch_resource_list(pck))
 
-# TODO XXX FIXME From which task state resources are really ready?
+    # FIXME From which task state resources are really ready?
     def _fetch_resource_list(self, pck):
         try:
             ans = self._sandbox.list_task_resources(pck._sandbox_task_id)
@@ -531,7 +532,8 @@ prev_task: {prev_task}
 
             return
 
-# TODO We don't have to _fetch_resource_list() in any TERMINATED task state (e.g. ERROR, EXCEPTION)
+        # TODO We don't have to _fetch_resource_list() in any TERMINATED task
+        # state (e.g. ERROR, EXCEPTION)
 
         #import json
         #logging.debug('task #%s resources list answer: %s' % (pck._sandbox_task_id, json.dumps(ans, indent=3)))
@@ -543,7 +545,7 @@ prev_task: {prev_task}
 
         #logging.debug('task #%s res_by_type: %s' % (pck._sandbox_task_id, json.dumps(res_by_type, indent=3)))
 
-# TODO XXX XXX Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
+        # TODO Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
 
         with pck._lock:
             pck._result_snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
@@ -574,10 +576,9 @@ prev_task: {prev_task}
                             self._SANDBOX_TASK_CREATION_RETRY_INTERVAL)
 
         try:
-# TODO timeout as class member
-            resp = requests.get(pck._final_update_url, timeout=30.0)
+            resp = requests.get(pck._final_update_url, timeout=self._FINAL_UPDATE_FETCH_TIMEOUT)
         except Exception as e:
-# FIXME permanent errors?
+            # FIXME permanent errors?
             log_fail(e)
             reschedule_if_need()
             return
@@ -648,8 +649,7 @@ prev_task: {prev_task}
             ]:
                 return
 
-    # TODO XXX
-    # Пока в черне обрисовал
+            # TODO Check the code
 
             if status_group == TaskStateGroups.DRAFT:
 
@@ -665,7 +665,7 @@ prev_task: {prev_task}
                         self._start_start_sandbox_task(pck)
 
                 elif state in [RemotePacketState.STARTED, RemotePacketState.TASK_FIN_WAIT]:
-# FIXME Race here between graph updates and _on_task_status_change
+                    # FIXME Race here between graph updates and _on_task_status_change
                     logging.warning('_on_task_status_change(%s, %s)' % (status_group, state))
                     #raise AssertionError()
 
@@ -703,9 +703,7 @@ prev_task: {prev_task}
         self._stop_packet(pck, StopMode.CANCEL)
 
     def _stop_packet(self, pck, stop_mode):
-# TODO
-# TODO CHECK AGAIN
-# TODO
+        # TODO Check
         with pck._lock:
             if pck._target_stop_mode >= stop_mode:
                 return
@@ -757,7 +755,6 @@ prev_task: {prev_task}
         task_id = pck._sandbox_task_id
         stop_mode = pck._target_stop_mode
 
-# TODO
         assert pck._peer_addr is not None
 
         proxy = self._create_packet_rpc_proxy(pck)
@@ -803,10 +800,7 @@ prev_task: {prev_task}
         logging.debug('_start_packet_stop(%s, %s)' % (pck.id, pck._target_stop_mode))
         self._rpc_invoker.invoke(lambda : self._do_stop_packet(pck))
 
-
-# XXX
-# Throw on any event in TERMINATED state
-# XXX
+    # FIXME Throw on any event in TERMINATED state
 
 
 class StopMode(object):
@@ -818,14 +812,13 @@ class StopMode(object):
 
 class RemotePacketState(object):
     CREATING = 1
-    STARTING = 3 # after .create_task()+task.update() till we know, that task started
-    CHECKING_START_ERROR = 4 # permanent or temporary error
-    STARTED = 6
-    TASK_FIN_WAIT = 7 # final update by RPC was received, but task not finished yet
-    FETCHING_RESOURCE_LIST = 8 # final update was missed
-    FETCHING_FINAL_UPDATE = 9 # --//--
-    #HAS_RESULT = 10 # task finished and we have final update (by RPC or through FETCHING*)
-    ALL_DONE = 10 # task finished and we have final update (by RPC or through FETCHING*)
+    STARTING = 2 # after .create_task()+task.update() till we know, that task started
+    CHECKING_START_ERROR = 3 # permanent or temporary error
+    STARTED = 4
+    TASK_FIN_WAIT = 5 # final update by RPC was received, but task not finished yet
+    FETCHING_RESOURCE_LIST = 6 # final update was missed
+    FETCHING_FINAL_UPDATE = 7 # --//--
+    ALL_DONE = 8 # task finished and we have final update (by RPC or through FETCHING*)
 
     _NAMES = {
         CREATING: 'CREATING',
@@ -835,7 +828,6 @@ class RemotePacketState(object):
         TASK_FIN_WAIT: 'TASK_FIN_WAIT',
         FETCHING_RESOURCE_LIST: 'FETCHING_RESOURCE_LIST',
         FETCHING_FINAL_UPDATE: 'FETCHING_FINAL_UPDATE',
-        #HAS_RESULT: 'HAS_RESULT',
         ALL_DONE: 'ALL_DONE',
     }
 
@@ -957,7 +949,8 @@ class SandboxJobGraphExecutorProxy(object):
         self.time_wait_sched = None
         self.result = None
 
-        self.remote_history = [] # XXX TODO Непонятно вообще как с этим быть
+        # FIXME Do we need to merge remote history into local one?
+        self.remote_history = []
         self.detailed_status = None
 
     def init(self):
@@ -1031,18 +1024,9 @@ class SandboxJobGraphExecutorProxy(object):
             on_stop()
             return
 
-# XXX TODO
-# XXX TODO
-# Task FAILURE/EXCEPTION
-        #if res.exceptioned: # TODO Rename
-            #logging.warning('...')
-
-            ## XXX TODO XXX Rollback history/Status to prev state
-
-
-        # WTF?
-        # Even on .do_not_run -- ERROR/SUCCESSFULL more prioritized
-        # (TODO Support this rule in PacketBase)
+        # TODO Handle Exception packet state
+        # TODO Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
+        # FIXME Rollback history/Status to prev state
 
         logging.debug('state for SandboxJobGraphExecutorProxy == %s' \
             % None if r._final_state is None else GraphState.str(r._final_state))
@@ -1052,7 +1036,7 @@ class SandboxJobGraphExecutorProxy(object):
 
         elif r._final_state == GraphState.TIME_WAIT:
             self.time_wait_deadline = r._last_update['nearest_retry_deadline']
-# TODO XXX VIVIFY
+            # TODO VIVIFY time_wait_sched
             self.time_wait_sched = \
                 delayed_executor.schedule(self._stop_time_wait,
                                             deadline=self.time_wait_deadline)
@@ -1063,7 +1047,6 @@ class SandboxJobGraphExecutorProxy(object):
         elif r._final_state == GraphState.ERROR:
             self.result = False
 
-# XXX 'prev' was for auto-restart
         self._prev_snapshot_resource_id = r._result_snapshot_resource_id \
             if r._final_state != GraphState.SUCCESSFULL else None
 
@@ -1111,7 +1094,6 @@ class SandboxJobGraphExecutorProxy(object):
                 return GraphState.SUCCESSFULL if self.result else GraphState.ERROR
 
             elif self._error:
-# TODO XXX
                 return GraphState.ERROR
 
             elif self.time_wait_deadline:
@@ -1153,15 +1135,12 @@ class SandboxJobGraphExecutorProxy(object):
 
             self._update_state()
 
-# XXX BEAUTY
     def cancel(self):
         self._cancel(False)
 
-# XXX BEAUTY
     def reset(self):
         self._cancel(True)
 
-# XXX BEAUTY
     def _cancel(self, need_reset):
         with self.lock:
             if need_reset:
