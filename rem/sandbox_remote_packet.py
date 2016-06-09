@@ -693,6 +693,9 @@ prev_task: {prev_task}
     def resume_packet(self, pck):
         return # TODO
 
+    def list_all_user_processes(self, pck):
+        return self._create_packet_rpc_proxy(pck).list_all_user_processes(pck._sandbox_task_id)
+
     def stop_packet(self, pck, kill_jobs):
         self._stop_packet(pck, StopMode.STOP if kill_jobs else StopMode.STOP_GRACEFULLY)
 
@@ -744,6 +747,12 @@ prev_task: {prev_task}
             #else:
                 #raise Unreachable()
 
+    def _create_packet_rpc_proxy(self, pck):
+        return XMLRPCServerProxy(
+            uri='http://%s' % join_host_port(*pck._peer_addr),
+            timeout=15.0
+        )
+
     def _do_stop_packet(self, pck):
         task_id = pck._sandbox_task_id
         stop_mode = pck._target_stop_mode
@@ -751,10 +760,7 @@ prev_task: {prev_task}
 # TODO
         assert pck._peer_addr is not None
 
-        proxy = XMLRPCServerProxy(
-            uri='http://%s' % join_host_port(*pck._peer_addr),
-            timeout=15.0
-        )
+        proxy = self._create_packet_rpc_proxy(pck)
 
         logging.debug('_do_stop_packet(pck=%s, task=%s, stop_mode=%s' % (
             pck.id, task_id, stop_mode))
@@ -897,6 +903,9 @@ class SandboxRemotePacket(object):
     #def get_result(self):
         #raise NotImplementedError()
 
+    def list_all_user_processes(self):
+        return remote_packets_dispatcher.list_all_user_processes(self)
+
     def _update_graph(self, update, is_final):
         assert self._target_stop_mode != StopMode.CANCEL
 
@@ -953,6 +962,10 @@ class SandboxJobGraphExecutorProxy(object):
 
     def init(self):
         self._update_state()
+
+    def list_all_user_processes(self):
+        r = self._remote_packet
+        return r.list_all_user_processes()
 
     def _create_remote_packet(self, guard):
         return SandboxRemotePacket(

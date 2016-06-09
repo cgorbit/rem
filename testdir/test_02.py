@@ -153,9 +153,12 @@ class T02(unittest.TestCase):
             #logging.info(lst)
             return any(val in el for el in lst)
 
+        # TODO Make this code (and other rem.* modules with implementation) more strict
         def list_processes():
-            p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
-            return [l.rstrip('\n') for l in p.stdout]
+            try:
+                return self.connector.proxy.pck_list_worker_host_user_processes(pck.pck_id)
+            except:
+                return []
 
         uniq_id = '12344321%s' % time.time()
         delay = 1.5

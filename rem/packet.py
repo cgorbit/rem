@@ -245,7 +245,7 @@ class PacketBase(Unpickable(
             self._update_repr_state()
 
         if self.queue:
-            self.queue.update_pending_jobs_state(self)
+            self.queue.update_pending_jobs_state(self) # TODO only for LocalPacket actually
 
     def _calc_repr_state(self):
         if self.state == ImplState.RUNNING:

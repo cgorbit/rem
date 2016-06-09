@@ -12,6 +12,7 @@ import rem.xmlrpc
 from rem.xmlrpc import is_xmlrpc_exception
 from rem.sandbox_remote_packet import WrongTaskIdError
 import errno
+import rem.common
 
 import rem.sandbox_packet
 import rem.delayed_executor
@@ -92,6 +93,10 @@ class RpcMethods(object):
     def ping(self):
         pass
 
+    @with_task_id
+    def list_all_user_processes(self):
+        return rem.common.list_all_user_processes()
+
 
 class XMLRPCServer(SimpleXMLRPCServer):
     address_family = socket.AF_INET6 # + hope that IPV6_V6ONLY is off in /sys
@@ -143,7 +148,7 @@ class RemNotifier(object):
         self._should_stop_max_time = None
         self._lock = threading.Lock()
         self._changed = threading.Condition(self._lock)
-        self._worker_thread = ProfiledThread(target=self._loop, name_prefix='RemNotifier')
+        self._worker_thread = ProfiledThread(target=self._the_loop, name_prefix='RemNotifier')
         self._worker_thread.daemon = True # FIXME See failed[0]
         self._worker_thread.start()
 
@@ -162,7 +167,7 @@ class RemNotifier(object):
             self._pending_update = (update, is_final)
             self._changed.notify()
 
-    def _loop(self):
+    def _the_loop(self):
         next_try_min_time = 0
 
         while True:

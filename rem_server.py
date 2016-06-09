@@ -161,6 +161,16 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
     raise MakeNonExistedPacketException(pck_id)
 
 
+@traced_rpc_method("info")
+def pck_list_worker_host_user_processes(pck_id):
+    pck = _scheduler.GetPacket(pck_id)
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+
+    return pck._graph_executor.list_all_user_processes() \
+        if isinstance(pck, SandboxPacket) \
+        else rem.common.list_all_user_processes()
+
 #########
 
 @traced_rpc_method()
@@ -450,10 +460,10 @@ def get_config():
 
 
 class ApiServer(object):
-    def __init__(self, port, poolsize, scheduler, allow_backup_method=False, readonly=False):
+    def __init__(self, port, poolsize, scheduler, allow_debug_rpc_methods=False, readonly=False):
         self.scheduler = scheduler
         self.readonly = readonly
-        self.allow_backup_method = allow_backup_method
+        self.allow_debug_rpc_methods = allow_debug_rpc_methods
         self.rpcserver = AsyncXMLRPCServer(poolsize, ("", port), AuthRequestHandler, allow_none=True)
         self.port = port
         self.rpcserver.register_multicall_functions()
@@ -517,8 +527,9 @@ class ApiServer(object):
             update_tags,
         ]
 
-        if self.allow_backup_method:
+        if self.allow_debug_rpc_methods:
             funcs.append(do_backup)
+            funcs.append(pck_list_worker_host_user_processes)
 
         for func in funcs:
             self.register_function(func)
@@ -559,13 +570,13 @@ class RemDaemon(object):
         self.scheduler = scheduler
         self.api_servers = [
             ApiServer(context.manager_port, context.xmlrpc_pool_size, scheduler,
-                      allow_backup_method=context.allow_backup_rpc_method)
+                      allow_debug_rpc_methods=context.allow_debug_rpc_methods)
         ]
         if context.manager_readonly_port:
             self.api_servers.append(ApiServer(context.manager_readonly_port,
                                               context.readonly_xmlrpc_pool_size,
                                               scheduler,
-                                              allow_backup_method=context.allow_backup_rpc_method,
+                                              allow_debug_rpc_methods=context.allow_debug_rpc_methods,
                                               readonly=True))
 
         for srv in self.api_servers:

@@ -20,6 +20,7 @@ from heap import PriorityQueue
 import osspec
 from rem_logging import logger as logging
 from subprocess import CalledProcessError, MAXFD
+import subprocess
 from xmlrpc import RpcUserError, as_rpc_user_error, traced_rpc_method
 
 def logged(log_args=False, level="debug"):
@@ -711,3 +712,9 @@ class NamedTemporaryDir(object):
     def __exit__(self, e, t, bt):
         shutil.rmtree(self.name)
         self.name = None
+
+
+def list_all_user_processes():
+    p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
+    return [l.rstrip('\n') for l in p.stdout]
+

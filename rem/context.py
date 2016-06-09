@@ -120,7 +120,7 @@ class Context(object):
         self.mailer_thread_count = config.safe_getint("server", "mailer_thread_count", 1)
         self.use_memory_profiler = config.getboolean("server", "use_memory_profiler")
         self.max_remotetags_resend_delay = config.safe_getint("server", "max_remotetags_resend_delay", 300)
-        self.allow_backup_rpc_method = config.safe_getboolean("server", "allow_backup_rpc_method", False)
+        self.allow_debug_rpc_methods = config.safe_getboolean("server", "allow_debug_rpc_methods", False)
         self.register_objects_creation = False
 
     def send_email_async(self, rcpt, msg):
