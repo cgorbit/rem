@@ -16,6 +16,19 @@ _TAGS_AWAITED_STATES = frozenset([
 ])
 
 
+def _check_graph_consistence(g):
+    l1 = list(set([jid for jid, deps in g.child_to_parents.items() if not deps] \
+        + [job.id for job in g.jobs.values() if not job.parents]))
+
+    l2 = list(g.failed_jobs) \
+        + list(g.succeed_jobs) \
+        + list(g.jobs_to_run) \
+        + [job_id for job_id, _1, _2 in g.jobs_to_retry.values()]
+
+    if sorted(l1) != sorted(l2):
+        raise RuntimeError("%s != %s" % (sorted(l1), sorted(l2)))
+
+
 class JobPacket(Unpickable(lock=PickableRLock,
                            jobs=dict,
                            edges=dict, # parent_to_childs
@@ -193,6 +206,11 @@ class JobPacket(Unpickable(lock=PickableRLock,
             g._clean_state = clean_state
 
             g.state = g._calc_state()
+
+            try:
+                _check_graph_consistence(g)
+            except Exception as e:
+                raise RuntimeError("Inconsistent job graph in %s: %s" % (self.id, e))
 
         self.state = self._calc_state()
         self._update_repr_state()
