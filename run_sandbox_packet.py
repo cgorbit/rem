@@ -252,6 +252,9 @@ if __name__ == '__main__':
             + (['snapshot_file'] if opts.snapshot_file is not None else []):
         setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
 
+# TODO XXX Pass as it should be
+    opts.listen_port = '15000-15999'
+
     if opts.listen_port is not None:
         try:
             opts.listen_port = _parse_listen_port(opts.listen_port)
@@ -260,9 +263,9 @@ if __name__ == '__main__':
 
     os.chdir(opts.work_dir)
 
-# TODO delayed_executor
-# TODO rpc_server
-# TODO rem_notifier
+# TODO delayed_executor guard
+# TODO rpc_server guard
+# TODO rem_notifier guard
 
     rem.delayed_executor.start()
     #guard = OnDel(rem.delayed_executor.stop)
