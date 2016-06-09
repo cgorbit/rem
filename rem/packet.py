@@ -940,6 +940,9 @@ class PacketBase(Unpickable(
         if isinstance(self._graph_executor, DummyGraphExecutor):
             self._set_real_graph_executor()
 
+    def _is_dummy_graph_executor(self):
+        return isinstance(self._graph_executor, DummyGraphExecutor)
+
     def _set_real_graph_executor(self):
         self._saved_jobs_status = None # j.i.c.
         self._graph_executor = self._create_job_graph_executor()
@@ -1198,9 +1201,6 @@ class SandboxPacket(PacketBase):
             self.resources_modified = True
 
             self._update_state()
-
-    def _is_dummy_graph_executor(self):
-        return isinstance(self._graph_executor, DummyGraphExecutor)
 
     def run(self, guard):
         with self.lock:
