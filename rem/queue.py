@@ -390,5 +390,7 @@ class SandboxQueue(QueueBase):
     def _on_packet_detach(self, pck):
         self.working_packets.discard(pck)
 
+    def update_pending_jobs_state(self, pck):
+        pass
 
 from rem.queue_legacy import Queue
