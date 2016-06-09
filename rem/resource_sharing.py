@@ -71,8 +71,10 @@ class Timing(object):
         T('after_%s = %.3f' % (self.label, time.time() - self.t0))
 
 
-# XXX TODO Need to go Sandbox async
-# XXX TODO Need vivification-code
+# XXX TODO For production usage:
+# 1. async Sandbox
+# 2. vivification-code
+# 3. pickable
 
 class Sharer(object):
     def __init__(self, subproc, sandbox, task_owner, task_priority):
@@ -232,7 +234,7 @@ class Sharer(object):
             except Exception as e:
                 logging.warning('sky share for %s faled: %s' % (job, e))
 
-# TODO XXX better checks or collect STDERR
+                # TODO better checks or collect STDERR
                 for file in job.files:
                     if not os.path.exists(job.directory + '/' + file):
                         self._set_promise(job, None,
@@ -318,8 +320,7 @@ class Sharer(object):
 
         return task
 
-# XXX SINGLE THREAD, NOT PRODUCTION-READY!
-    # FIXME Run several _upload_loop workers?
+    # XXX Single threaded, not production-ready!
     def _upload_loop(self):
         while not self.should_stop:
             T('begin_upload_loop')
@@ -343,7 +344,6 @@ class Sharer(object):
                 continue
 
             if not task:
-# XXX TODO Not restarted actually
                 self._schedule_retry(job, self.Action.CREATE_UPLOAD_TASK, delay=10.0)
                 continue
 
@@ -443,12 +443,12 @@ class Sharer(object):
         try:
             ans = self.sandbox.list_task_resources(task_id)
         except Exception as e:
-# XXX TODO WTF
-# 2016-04-21 19:28:15,834 27491 WARNING  resource_sharing:
-# Failed to list resources of task 56706912:
-# HTTPSConnectionPool(host='sandbox.yandex-team.ru', port=443):
-# Max retries exceeded with url: /api/v1.0//resource?task_id=56706912&limit=100
-# (Caused by <class 'httplib.BadStatusLine'>: '')
+            # XXX TODO WTF
+            # 2016-04-21 19:28:15,834 27491 WARNING  resource_sharing:
+            # Failed to list resources of task 56706912:
+            # HTTPSConnectionPool(host='sandbox.yandex-team.ru', port=443):
+            # Max retries exceeded with url: /api/v1.0//resource?task_id=56706912&limit=100
+            # (Caused by <class 'httplib.BadStatusLine'>: '')
             logging.warning("Failed to list resources of task %d: %s" % (task_id, e))
             return
 
