@@ -1,16 +1,16 @@
 --------------------------------------------------------------------------------
 
 perun
-    0. packet_legacy.py _convert_backup_to_v2
+----0. packet_legacy.py _convert_backup_to_v2
 ----1. job*.result dissapeared when switching back to DummyGraphExecutor
-    2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
-    3. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
+----2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
 
 veles02
     0. пролонгация ttl REM_JOBPACKET_EXECUTOR
     1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
     2. TIME_WAIT для EXCEPTION тасков
     3. Unpickable всюду
+    4. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
 
 production-quality
     0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
