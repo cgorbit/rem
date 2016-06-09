@@ -135,10 +135,8 @@ def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPL
     if not pck:
         raise MakeNonExistedPacketException(pck_id)
 
-# FIXME XXX
     if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
         raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
-# FIXME XXX
 
     _scheduler.tempStorage.PickPacket(pck_id) # pop packet
 
