@@ -11,6 +11,7 @@ from SimpleXMLRPCServer import SimpleXMLRPCServer, list_public_methods
 import rem.xmlrpc
 from rem.xmlrpc import is_xmlrpc_exception
 from rem.sandbox_remote_packet import WrongTaskIdError
+import errno
 
 import rem.sandbox_packet
 import rem.delayed_executor
@@ -38,6 +39,7 @@ def parse_arguments():
     #p.add_argument('--result-status-file', dest='result_status_file', default='/dev/stdout')
     p.add_argument('--result-snapshot-file', dest='result_snapshot_file')
     p.add_argument('--last-update-message-file', dest='last_update_message_file')
+    p.add_argument('--listen-port', dest='listen_port')
 
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument('--snapshot-data', dest='snapshot_data')
@@ -94,9 +96,33 @@ class RpcMethods(object):
 class XMLRPCServer(SimpleXMLRPCServer):
     address_family = socket.AF_INET6 # + hope that IPV6_V6ONLY is off in /sys
 
+    def __repr__(self):
+        addr, port = self.server_address[:2]
+        return '<XMLRPCServer addr=%s, port=%s at 0x%x>' % (addr, port, id(self))
+
+
+def _do_create_rpc_server(listen_port):
+    def _create(port):
+        return XMLRPCServer(('::', port), allow_none=True)
+
+    if listen_port is None:
+        return _create(0)
+
+    elif isinstance(listen_port, int):
+        return _create(listen_port)
+
+    else:
+        # TODO use random
+        for port in xrange(listen_port[0], listen_port[1] + 1):
+            try:
+                return _create(port)
+            except socket.error as e:
+                if e.errno != errno.EADDRINUSE:
+                    raise
+        raise socket.error(errno.EADDRINUSE, "Can't listen on any addr in range")
 
 def _create_rpc_server(pck, opts):
-    srv = XMLRPCServer(('::', 0), allow_none=True)
+    srv = _do_create_rpc_server(opts.listen_port)
 
     #srv.register_introspection_functions()
     srv.register_instance(RpcMethods(pck, opts.task_id))
@@ -201,12 +227,36 @@ class OnDel(object):
         self._code()
 
 
+def _parse_listen_port(opt):
+    def _check_port(port):
+        if not(port > 0 and port < 65536):
+            raise ValueError("Bad port number")
+
+    if '-' in opt:
+        min, max = map(int, opt.split('-'))
+        _check_port(min)
+        _check_port(max)
+        if max < min:
+            raise ValueError("Incorrect port range")
+        return (min, max)
+    else:
+        port = int(opt)
+        _check_port(port)
+        return port
+
+
 if __name__ == '__main__':
     opts = parse_arguments()
 
     for attr in ['io_dir', 'work_dir', 'result_snapshot_file', 'last_update_message_file'] \
             + (['snapshot_file'] if opts.snapshot_file is not None else []):
         setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
+
+    if opts.listen_port is not None:
+        try:
+            opts.listen_port = _parse_listen_port(opts.listen_port)
+        except:
+            logging.exception("Failed to parse --listen-port")
 
     os.chdir(opts.work_dir)
 
@@ -267,8 +317,9 @@ if __name__ == '__main__':
 
     #rem_notifier.send_update(pck.produce_rem_update_message()) # FIXME
 
+# TODO _create_rpc_server may throw errno.EADDRINUSE
     rpc_server = _create_rpc_server(pck, opts)
-    rpc_server_addr = tuple(rpc_server.server_address[:2])
+    rpc_server_addr = (os.uname()[1], rpc_server.server_address[1]) # TODO Better hostname
 
     pck.start(opts.work_dir, opts.io_dir, rem_notifier.send_update)
 
