@@ -41,15 +41,12 @@ class _ExecutorOps(object):
                 and graph.get_nearest_retry_deadline() - time.time() > pck._MAX_TIME_WAIT \
             or pck._do_not_run and graph.is_null():
 
-    # FIXME WTF? or pck._do_not_run and not(graph.state & GraphState.PENDING_JOBS):
-
             pck._finished = True
 
         logging.debug('pck._something_changed.notify()')
         pck._something_changed.notify()
 
     def job_done_successfully(self, job_id):
-        # TODO Notify rem_server for job_done_tag
         self.pck._has_updates = True
         self.pck._something_changed.notify()
 
@@ -58,7 +55,7 @@ class _ExecutorOps(object):
 
 
 class Packet(object):
-    _MAX_TIME_WAIT = 60.0 # TODO Choose some good value
+    _MAX_TIME_WAIT = 60.0 # FIXME
 
     def __init__(self, pck_id, graph):
         self.id = pck_id
@@ -91,7 +88,7 @@ class Packet(object):
         self._job_threads = []
         self._proc_runner = None
         self._do_not_run = False
-    # FIXME
+
         self._finished = False
         self._cancelled = False
         self._has_updates = False
@@ -111,7 +108,7 @@ class Packet(object):
         sdict.pop('_job_threads', None)
         sdict.pop('_on_update', None)
         sdict.pop('_do_not_run', None)
-    # FIXME
+
         sdict.pop('_finished', None)
         sdict.pop('_cancelled', None)
         sdict.pop('_has_updates', None)
@@ -133,7 +130,7 @@ class Packet(object):
 
 # FIXME
         with self._lock:
-            self._graph_executor.reset_tries() # FIXME
+            self._graph_executor.reset_tries()
             #self.resume()
             #self._do_not_run = False
 
@@ -254,7 +251,6 @@ class Packet(object):
 
         logging.debug('+ exiting Packet.run')
 
-# FIXME
     def _calc_state(self):
         if self._do_not_run and self._graph_executor.is_null():
             return GraphState.SUSPENDED
@@ -284,48 +280,3 @@ class Packet(object):
 
     def create_file_handles(self, job):
         return self._graph_executor.create_job_file_handles(job)
-
-    #def __get_sbx_state__(self):
-        #sdict = self.__dict__.copy()
-
-        #sdict['jobs'] = {
-            #id: job.__get_sbx_state__()
-                #for id, job in sdict['jobs'].items()
-        #}
-
-        #return sdict
-
-    #def __set_sbx_state__(self, sdict):
-        #self.__dict__.clear()
-        #self.__dict__.update(sdict)
-        #self.jobs_graph = {
-            #int(id): val
-                #for id, val in self.jobs_graph.items()
-        #}
-        #self.jobs = {
-            #int(id): rem.job.Job.from_sbx_state(job, self)
-                #for id, job in self.jobs.items()
-        #}
-        #return self
-
-    #@classmethod
-    #def from_sbx_state(cls, sdict):
-        #self = cls.__new__(cls)
-        #self.__set_sbx_state__(sdict)
-        #return self
-
-    #def dump_json(self, out):
-        #json.dump(self.__get_sbx_state__(), out, indent=3)
-
-    #def dumps_json(self):
-        #return json.dumps(self.__get_sbx_state__(), indent=3)
-
-    #@classmethod
-    #def loads_json(cls, s):
-        #return cls.from_sbx_state(json.loads(s))
-
-    #@classmethod
-    #def load_json(cls, in_):
-        #return cls.from_sbx_state(json.load(in_))
-
-

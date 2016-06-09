@@ -1207,7 +1207,7 @@ class SandboxPacket(PacketBase):
             if self.state != ImplState.PENDING:
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
-            # XXX TODO Better
+            # TODO Better
             if self.resources_modified and not self._is_dummy_graph_executor():
                 self._graph_executor._custom_resources \
                     = self._produce_job_graph_executor_custom_resources()
