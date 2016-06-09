@@ -179,7 +179,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         elif state == ReprState.HISTORIED:
             pass
 
-        elif self.queue:
+        elif self.queue and (failed_jobs or succeed_jobs or jobs_to_retry):
             g = self._graph_executor = self._create_job_graph_executor()
 
             g.failed_jobs = failed_jobs
