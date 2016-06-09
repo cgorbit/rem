@@ -65,8 +65,6 @@ def always(ctor):
 class DummyGraphExecutor(object):
     state = GraphState.PENDING_JOBS
 
-# XXX TODO detailed_status dissapeared from SandboxPacket and JobGraphExecutor
-
     def is_null(self):
         return True
 
@@ -172,7 +170,7 @@ class PacketBase(Unpickable(
     def _will_never_be_executed(self):
         return self.is_broken or self.destroying
 
-# TODO Test this code offline with mask
+    # TODO Test this code statically with mask
     def _calc_state(self):
         graph = self._graph_executor
 
@@ -775,7 +773,7 @@ class PacketBase(Unpickable(
         if extra_flags:
             status["extra_flags"] = ";".join(extra_flags)
 
-        if not isinstance(self._graph_executor, DummyGraphExecutor):
+        if not self._is_dummy_graph_executor():
             jobs = self._graph_executor.produce_detailed_status() \
                 or self._produce_clean_jobs_status()
         elif self._saved_jobs_status:
@@ -801,25 +799,21 @@ class PacketBase(Unpickable(
 
     def rpc_suspend(self, kill_jobs=False):
         with self.lock:
-            #if self.state == ImplState.BROKEN: # legacy check
-                #raise RpcUserError(
-                    #RuntimeError(
-                        #"Can't suspend ERROR'ed packet %s with RCVR_ERROR flag set" % self.id))
+            if self.state == ImplState.PAUSED:
+                return
 
-            #raise NotImplementedError("CHECKS") # TODO XXX
+            # FIXME suspend in SUCCESSFULL may mean: don't execute packet after restart/reset
 
-# TODO XXX
             if self.state in [
                 ImplState.SUCCESSFULL,
                 ImplState.BROKEN,
                 ImplState.DESTROYING,
                 ImplState.HISTORIED
             ]:
-                raise RuntimeError("Can't suspend in %s state" % self._repr_state)
+                raise RpcUserError(RuntimeError("Can't suspend in %s state" % self._repr_state))
 
             self.finish_status = None # for ImplState.ERROR
             self._saved_jobs_status = None
-# TODO XXX
 
             # XXX Previous implementation in addition did something like this:
             # + self.tags_awaited = not self.wait_dep_tags
@@ -836,7 +830,6 @@ class PacketBase(Unpickable(
             return True
         except Exception:
             logging.exception("Failed to create place")
-            #self._change_state(ImplState.BROKEN)
             self.is_broken = True
             self._graph_executor.cancel()
             self._update_state()
@@ -844,8 +837,6 @@ class PacketBase(Unpickable(
 
     def rpc_resume(self):
         with self.lock:
-            #raise NotImplementedError("CHECKS") # TODO XXX
-
             if not self.do_not_run:
                 return
 
@@ -859,23 +850,6 @@ class PacketBase(Unpickable(
     def _update_done_tags(self, op):
         for tag, is_done in self._get_all_done_tags():
             op(tag, is_done)
-
-    #def _reset(self, tag_op):
-        # XXX force call to _change_state for packets without jobs
-        #if self._clean_state and self._graph_executor.jobs:
-            #update_tags()
-            #return
-
-        # if not(self._graph_executor.jobs) we will first reset, then set (by _create_place_if_need)
-
-        # TODO Test that job_done_tag are reset
-        #update_tags()
-
-        #if self._local_directory_is_modified(): # FIXME
-            #self._release_place_if_need()
-
-        #if self.wait_dep_tags:
-            #self._graph_executor.stop()
 
     def _get_scheduler_ctx(self):
         return PacketCustomLogic.SchedCtx
@@ -908,8 +882,6 @@ class PacketBase(Unpickable(
 
             if not self.queue:
                 return # noop
-
-# XXX raise NotImplementedError("CHECKS") # TODO XXX
 
             self.do_not_run = suspend
 
@@ -1005,20 +977,19 @@ class PacketBase(Unpickable(
     def _attach_to_queue(self, queue):
         with self.lock:
             if self.queue:
-                raise
-            if self.destroying:
-                raise # FIXME j.i.c
-            #assert self.state == ImplState.UNINITIALIZED
-            self._move_to_queue(None, queue)
+                raise RpcUserError(RuntimeError("Packet already attached to queue"))
 
+            if self.destroying:
+                raise RpcUserError(RuntimeError("Packet is destroying"))
+
+            self._move_to_queue(None, queue)
             self._share_files_as_resource_if_need()
 
-            #self._become_pending_or_wait_tags()
             self._update_state()
 
     def make_job_graph(self):
-# FIXME def Job.reset(self): self.tries = 0; self.results = []; self.cached_working_time = None
         # Without deepcopy self.jobs[*].{tries,result} will be modifed
+        # FIXME Use something else but deepcopy
         return JobGraph(copy.deepcopy(self.jobs), self.kill_all_jobs_on_error)
 
 
@@ -1093,10 +1064,6 @@ class LocalPacket(PacketBase):
         with self.lock:
             return self.state in [ImplState.PENDING, ImplState.RUNNING] \
                 and bool(self._graph_executor.state & GraphState.PENDING_JOBS)
-# XXX Compare this 2 funcs
-    #def _can_run_jobs_right_now(self):
-        #return self.state in [ImplState.RUNNING, ImplState.PENDING] \
-            #and self._graph_executor.has_jobs_to_run()
 
     def get_job_to_run(self):
         with self.lock:
@@ -1112,7 +1079,7 @@ class LocalPacket(PacketBase):
                 _raise()
 
             runner = self._graph_executor.get_job_to_run()
-            #self._update_state() # FIXME Do this in JobGraphExecutor only
+            #self._update_state() called in JobGraphExecutor
 
             return runner
 
@@ -1128,10 +1095,7 @@ class LocalPacket(PacketBase):
         self._graph_executor.on_job_done(runner)
 
         with self.lock:
-# XXX TODO
-# Адовый костыль
-# XXX TODO
-            if self.state != ImplState.SUCCESSFULL:
+            if not self._is_dummy_graph_executor():
                 self._graph_executor.apply_jobs_results()
 
     def _create_job_file_handles(self, job):
@@ -1142,10 +1106,7 @@ class LocalPacket(PacketBase):
             self._graph_executor.stop_waiting(stop_id)
 
     def _check_can_move_beetwen_queues(self):
-        return # TODO
-        #if self._graph_executor.has_running_jobs():
-            #raise as_rpc_user_error(
-                #from_rpc, RuntimeError("Can't move packets with running jobs"))
+        pass
 
     def _do_graph_suspend(self, kill_jobs):
         if kill_jobs:
@@ -1160,7 +1121,6 @@ class LocalPacket(PacketBase):
     def _is_graph_stopping(self):
         return not self._graph_executor.is_null() and self.do_not_run
 
-# TODO Rename
     def _share_files_as_resource_if_need(self):
         pass
 
@@ -1206,7 +1166,7 @@ class SandboxPacket(PacketBase):
             ctx = self._get_scheduler_ctx()
             sharer = ctx.sandbox_resource_sharer
 
-# TODO XXX FIXME Not garanteed anyhow for now
+            # FIXME Not guaranteed anyhow
             assert self.directory
 
             # Force REMOTE_COPY_RESOURCE to create directory even if len(self.bin_links) == 1
@@ -1217,9 +1177,7 @@ class SandboxPacket(PacketBase):
                 'REM_JOBPACKET_ADDED_FILE_SET',
                 name='__auto_shared_files__',
                 directory=self.directory,
-                #files=self.bin_links.keys()
-# XXX XXX XXX Doesn't work correctly if shared directory contains single file
-                files=['.']
+                files=['.'] # FIXME self.bin_links.keys()
             )
 
             self.files_modified = False
@@ -1235,24 +1193,26 @@ class SandboxPacket(PacketBase):
                 self._share_files_as_resource()
                 return
 
-# TODO XXX Handle exception
+            # TODO Handle errors
             self.shared_files_resource_id = future.get()
-            self.resources_modified = True # FIXME
+            self.resources_modified = True
 
             self._update_state()
+
+    def _is_dummy_graph_executor(self):
+        return isinstance(self._graph_executor, DummyGraphExecutor)
 
     def run(self, guard):
         with self.lock:
             if self.state != ImplState.PENDING:
-            #if self._will_never_be_executed():
                 raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
 
-# XXX XXX XXX XXX XXX XXX XXX XXX XXX
-            if self.resources_modified and not isinstance(self._graph_executor, DummyGraphExecutor):
-                self._graph_executor._custom_resources = self._produce_job_graph_executor_custom_resources()
+            # XXX TODO Better
+            if self.resources_modified and not self._is_dummy_graph_executor():
+                self._graph_executor._custom_resources \
+                    = self._produce_job_graph_executor_custom_resources()
             else:
                 self._set_real_graph_executor()
-# XXX XXX XXX XXX XXX XXX XXX XXX XXX
 
             self.resources_modified = False
 

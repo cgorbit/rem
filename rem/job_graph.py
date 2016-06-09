@@ -485,10 +485,6 @@ class JobGraphExecutor(Unpickable(
     def is_null(self):
         return not self.has_running_jobs()
 
-    #def need_indefinite_time_to_reset(self):
-        #return False
-# XXX
-
     def on_job_done(self, runner):
         self._active_jobs.on_done(runner)
 
