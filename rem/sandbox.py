@@ -1,8 +1,8 @@
 import sys
 import requests
 import json
-
 import requests.exceptions as exceptions
+
 
 class TaskPriority(object):
     class Class(object):
@@ -76,19 +76,6 @@ class _ProxyObject(object):
         del ret['_api']
         return ret
 
-    #def update(self, *args, **kwargs):
-        #if args:
-            #if kwargs or len(args) > 1 or not isinstance(args[0], dict):
-                #raise ValueError("update({...}) or update(k1=v1, k2=v2,...)")
-            #updates = args[0]
-        #else:
-            #updates = kwargs
-        #new = self.dict
-        #new.update(updates)
-        #ret = self._make_call('PUT', self.BASE_URL + '/%s' % self.id, new)
-        #self.__dict__.update(ret)
-        #return self
-
     def _update(self):
         ret = self._make_call('GET', self.BASE_URL + '/%s' % self.id)
         self.__dict__.update(ret)
@@ -96,9 +83,6 @@ class _ProxyObject(object):
 
     def dumps(self, indent=3):
         return json.dumps(self.dict, indent=indent, ensure_ascii=False)
-
-    def dump(self, indent=3):
-        print >>sys.stderr, self.dumps(indent=indent)
 
 
 class Client(object):
@@ -134,28 +118,8 @@ class Client(object):
             print >>sys.stderr, '+ response from', path, r.status_code, r.text.encode('utf-8')
 
         if r.status_code != succ_code:
-    # FIXME TODO XXX
-    # use r.json()['message']
-    # FIXME TODO XXX
+            # TODO use r.json()['message']
             raise _ERROR_BY_CODE[r.status_code / 100](r.text)
-
-            #raise RuntimeError(r.text)
-
-            #try:
-                #answer = r.json()
-            #except:
-                #msg = "Can't get 'msg' from answer"
-                #code = None
-            #else:
-                #msg = answer['msg']
-                #code = answer['code']
-
-            #if code == 'CONFLICT_STATE':
-                #excls = TolokaApi.ConflictState
-            #else:
-                #excls = TolokaApi.Exception
-
-            #raise excls("Not 200 Ok answer from api: %s, %s, %s" % (r.status_code, msg, r.text.encode('utf-8')))
 
         return r.text if raw_result else r.json()
 
@@ -218,11 +182,7 @@ class Client(object):
         return self._make_call('GET', '/task/%d/resources' % id)
 
     def list_task_statuses(self, ids):
-        #url = '/task?limit=%d&' % len(ids)
-        #url += '&'.join('id=%d' % id for id in ids)
-
         url = '/task?limit=%d&id=%s' % (len(ids), ','.join(map(str, ids)))
-
         resp = self._make_call('GET', url)
         return {t['id']: t['status'] for t in resp['items']}
 
