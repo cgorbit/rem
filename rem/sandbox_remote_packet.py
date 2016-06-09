@@ -368,7 +368,7 @@ prev_task: {prev_task}
         # - final GRAPH_UPDATE
         # - STOP_GRACEFULLY/STOP/CANCEL
 
-    # XXX Уже неверно.
+        # XXX Уже неверно.
         # No task status changes may appear here, because awaiting is not racy
         # - final GRAPH_UPDATE + task terminated
         # - task terminated wo GRAPH_UPDATE's
@@ -407,7 +407,7 @@ prev_task: {prev_task}
             # XXX FIXME If firewall has no holes for us,
             # we can't do STOP*, but theoretically can do CANCEL
 
-# The hard way
+    # The hard way
     # must be called under lock
     #def _schedule(self, pck, impl, timeout=None):
         #id = None

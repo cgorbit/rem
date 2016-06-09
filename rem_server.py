@@ -896,7 +896,6 @@ def _init_sandbox(ctx):
     ctx.sandbox = rem.sandbox.Client(ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
     ctx.resource_sharing_subproc = subprocsrv.create_runner()
 
-# TODO
     shr = rem.resource_sharing.Sharer(
         subproc=ctx.resource_sharing_subproc,
         sandbox=ctx.sandbox,
@@ -973,23 +972,13 @@ def init(ctx):
         reshare_sandbox_executor()
 
         ctx._reshare_sandbox_executor = reshare_sandbox_executor
-        #ctx.sandbox_executor_resource_id = 926
 
 def create_context(config):
     ctx = Context(config)
 
-# TODO
-    ctx.sandbox_task_kill_timeout = 14 * 86400
-
-    ctx.sandbox_rpc_invoker_thread_pool_size = 10
-    ctx.sandbox_invoker_thread_pool_size = 10
-    ctx.sandbox_rpc_server_thread_pool_size = 10
-
+    # TODO
     ctx.sandbox_client = rem.sandbox.Client(
         ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
-
-    #ctx.sandbox_tasks_awaiter = SandboxTaskStateAwaiter(ctx.sandbox_client)
-# TODO
 
     return ctx
 

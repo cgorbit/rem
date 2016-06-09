@@ -47,9 +47,8 @@ class SandboxTaskStateAwaiter(object):
             if was_empty:
                 self._something_happend.notify()
 
-# TODO
     def cancel_wait(self, task_id):
-        raise NotImplementedError()
+        raise NotImplementedError() # TODO
 
     def _loop(self):
         running = self._running

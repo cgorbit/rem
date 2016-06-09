@@ -384,7 +384,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
         logging.warning("No tasks for execution after condition waking up")
 
     def Notify(self, ref):
-# FIXME What for? Assert maybe?
         if isinstance(ref, LocalQueue):
             self._add_queue_as_non_empty_if_need(ref)
 
@@ -426,7 +425,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             os.makedirs(self.backupDirectory)
 
         self.forgetOldItems()
-        gc.collect() # for Packet -> Job -> Packet cyclic references
+        gc.collect()
 
         start_time = time.time()
 
@@ -532,8 +531,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
             def finalize(self):
                 # TODO ATW each packet exists in register in 2 copies
                 self.packets = list(set(self.packets))
-
-            # FIXME
                 self.tags    = list(set(self.tags))
                 self.queues  = list(set(self.queues))
 
@@ -609,7 +606,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
             # No vivifying of tempStorage packets
 
             self.schedWatcher.Clear() # remove tasks from Queue.relocate_packet
-            #self.FillSchedWatcher(prevWatcher)
+            self.FillSchedWatcher(prevWatcher)
 
     @classmethod
     def _convert_backup(cls, sdict_version, sdict, registrator):
@@ -684,8 +681,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
         )
 
     def FillSchedWatcher(self, prev_watcher=None):
-        assert False
-
         def list_packets_in_queues(state):
             return [
                 pck for q in self.qRef.itervalues()
@@ -858,7 +853,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Stop3(self):
         self._mailer.stop()
-# TODO Better condition
         if self.context.sandbox_api_url:
             self._remote_packets_dispatcher.stop()
         sandbox_remote_packet.remote_packets_dispatcher = None
