@@ -936,6 +936,7 @@ class SandboxJobGraphExecutorProxy(object):
         self._remote_packet = None
         self._prev_task_id = None
         self._remote_state = None
+        self._remote_time_wait_deadline = None
         self._prev_snapshot_resource_id = None
         self._error = None
 
@@ -981,6 +982,10 @@ class SandboxJobGraphExecutorProxy(object):
             self.detailed_status = update['detailed_status']
             self._remote_state = update['state']
 
+            self._remote_time_wait_deadline = update['nearest_retry_deadline'] \
+                if self._remote_state == GraphState.TIME_WAIT \
+                else None
+
             # set(map(int, state['succeed_jobs'])) # TODO
             # state['state'] # TODO
 
@@ -1000,6 +1005,7 @@ class SandboxJobGraphExecutorProxy(object):
             self._prev_task_id = self._remote_packet._sandbox_task_id
             self._remote_packet = None
             self._remote_state = None
+            self._remote_time_wait_deadline = None
 
         assert not self.time_wait_deadline and not self.time_wait_sched
 
@@ -1063,7 +1069,7 @@ class SandboxJobGraphExecutorProxy(object):
             self._update_state()
 
     def get_nearest_retry_deadline(self):
-        return self.time_wait_deadline
+        return self.time_wait_deadline or self._remote_time_wait_deadline
 
     def _update_state(self):
         new = self._calc_state()
