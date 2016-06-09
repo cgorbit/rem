@@ -172,8 +172,10 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self._repr_state = state # to avoid duplicates in pck.history
 
         if state == ReprState.SUCCESSFULL:
+            #pass
             g = self._create_job_graph_executor()
             self._saved_jobs_status = g.produce_detailed_status()
+            #self._saved_jobs_status = self._produce_compressed_job_status(g)
             del g
 
         elif state == ReprState.HISTORIED:

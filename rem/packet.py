@@ -7,6 +7,8 @@ import shutil
 import errno
 import sys
 import copy
+#import zlib
+#import cPickle as pickle
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
 from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
@@ -526,6 +528,16 @@ class PacketBase(Unpickable(
             except NonDestroyingStateError:
                 raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
 
+    #@staticmethod
+    #def _produce_compressed_job_status(graph_executor):
+        #status = graph_executor.produce_detailed_status()
+        #for job in status:
+            #job['results'] = [
+                #r.data for r in job['results']
+            #]
+
+        #return zlib.compress(pickle.dumps(status))
+
     def _on_graph_executor_state_change(self):
         state = self._graph_executor.state
 
@@ -533,6 +545,7 @@ class PacketBase(Unpickable(
             assert self._graph_executor.is_null()
             self.finish_status = True
             self._saved_jobs_status = self._graph_executor.produce_detailed_status()
+            #self._saved_jobs_status = self._produce_compressed_job_status(self._graph_executor)
             self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
         elif state == GraphState.ERROR:
