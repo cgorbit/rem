@@ -87,6 +87,11 @@ class Context(object):
         self.sandbox_rpc_listen_addr = config.safe_get("run", "sandbox_rpc_listen_addr", None)
         self.sandbox_python_resource_id = config.safe_getint("run", "sandbox_python_resource_id", None)
 
+        self.sandbox_task_kill_timeout = 14 * 86400
+        self.sandbox_rpc_invoker_thread_pool_size = 10
+        self.sandbox_invoker_thread_pool_size = 10
+        self.sandbox_rpc_server_thread_pool_size = 10
+
         if self.sandbox_rpc_listen_addr:
             self.sandbox_rpc_listen_addr = parse_network_address(self.sandbox_rpc_listen_addr)
 
