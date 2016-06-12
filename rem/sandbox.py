@@ -151,6 +151,12 @@ class Client(object):
         def start(self):
             self._start(self._api, self.id)
 
+        def get_context(self):
+            return self._api._make_call('GET', 'task/%d/context' % self.id)
+
+            #if res['status'] == 'ERROR':
+                #raise RuntimeError(res['message'])
+
         @staticmethod
         def _start(api, id):
             res = api._make_call(

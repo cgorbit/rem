@@ -12,6 +12,18 @@ class TaskStateGroups(object):
     TERMINATED = 3
 
 
+class TaskStatus(object):
+    for name in [
+        'DRAFT',
+        'ENQUEUING', 'ENQUEUED',
+        'PREPARING', 'EXECUTING', 'TEMPORARY', 'FINISHING', 'STOPPING', 'SUSPENDING', 'SUSPENDED',
+        'WAIT_RES', 'WAIT_TASK', 'WAIT_TIME',
+        'SUCCESS', 'RELEASING', 'RELEASED', 'NOT_RELEASED', 'FAILURE', 'DELETING', 'DELETED',
+        'NO_RES', 'EXCEPTION', 'TIMEOUT', 'STOPPED',
+    ]:
+        exec '%s = "%s"' % (name, name)
+
+
 class SandboxTaskStateAwaiter(object):
     DEFAULT_UPDATE_INTERVAL = 1.0 # FIXME
 
@@ -110,7 +122,7 @@ class SandboxTaskStateAwaiter(object):
 
                 if prev_status_group != status_group:
                     try:
-                        self._notify(task_id, status_group, can_has_res)
+                        self._notify(task_id, status, status_group, can_has_res)
                     except:
                         logging.exception("Sandbox task on_state_change handler failed for %s -> %s" \
                             % (task_id, status))
@@ -125,20 +137,20 @@ class SandboxTaskStateAwaiter(object):
 
         terminated = {
             # Should have resources
-            'SUCCESS':      True,
-            'RELEASING':    True, # "impossible"
-            'NOT_RELEASED': True, # "impossible"
-            'RELEASED':     True, # "impossible"
+            TaskStatus.SUCCESS:      True,
+            TaskStatus.RELEASING:    True, # "impossible"
+            TaskStatus.NOT_RELEASED: True, # "impossible"
+            TaskStatus.RELEASED:     True, # "impossible"
 
             # FIXME Resource list can't be fetched
-            'DELETING':     False,
-            'DELETED':      False,
+            TaskStatus.DELETING:     False,
+            TaskStatus.DELETED:      False,
 
             # Can't have resources
-            'FAILURE':      False, # "impossible"
-            'NO_RES':       False,
-            'EXCEPTION':    False,
-            'TIMEOUT':      False,
+            TaskStatus.FAILURE:      False, # "impossible"
+            TaskStatus.NO_RES:       False,
+            TaskStatus.EXCEPTION:    False,
+            TaskStatus.TIMEOUT:      False,
         }
 
         can_has_res = terminated.get(status)

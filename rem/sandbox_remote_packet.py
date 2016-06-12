@@ -100,8 +100,8 @@ class RemotePacketsDispatcher(object):
             SandboxTaskStateAwaiter.__init__(self, sandbox)
             self.__dispatcher = dispatcher
 
-        def _notify(self, task_id, status_group, can_has_res):
-            self.__dispatcher._on_task_status_change(task_id, status_group, can_has_res)
+        def _notify(self, task_id, status, status_group, can_has_res):
+            self.__dispatcher._on_task_status_change(task_id, status, status_group, can_has_res)
 
     def __init__(self, rhs=None):
         self._by_task_id = rhs._by_task_id if rhs else {}
@@ -276,11 +276,9 @@ prev_task: {prev_task}
             #fail_on_any_error=True, # FIXME What is this?
         )
 
-    def _mark_all_done(self, pck, reason=None):
-        if pck._state != RemotePacketState.TASK_FIN_WAIT:
-            pck._ops._on_packet_terminated() # TODO Ugly
-
-        pck._set_state(RemotePacketState.ALL_DONE, reason)
+    def _mark_as_finished(self, pck, reason=None):
+        prev_state = pck._state
+        pck._set_state(RemotePacketState.FINISHED, reason)
         pck._run_guard = None # j.i.c
 
         # TODO NotImplementedError
@@ -288,6 +286,9 @@ prev_task: {prev_task}
 
         if pck._sandbox_task_id:
             self._by_task_id.pop(pck._sandbox_task_id)
+
+        if prev_state != RemotePacketState.TASK_FIN_WAIT:
+            pck._ops._on_packet_terminated() # TODO Ugly
 
     def _mark_task_fin_wait(self, pck, reason=None):
         pck._set_state(RemotePacketState.TASK_FIN_WAIT, reason)
@@ -312,7 +313,9 @@ prev_task: {prev_task}
             with pck._lock:
                 if not pck._target_stop_mode:
                     pck._error = e
-                self._mark_all_done(pck, 'Unknown error while creating: %s' % e)
+                self._mark_as_finished(pck, 'Unknown error while creating: %s' % e)
+
+        # FIXME Invert logic: retry everything except permanent
 
         try:
             task = self._sbx_create_task(pck)
@@ -381,7 +384,7 @@ prev_task: {prev_task}
                 # TODO Don't forget to take into account ._target_stop_mode in _on_task_status_change
 
                 # Here we don't know if task is really started
-                pck._is_start_error_permanent = \
+                pck._is_error_pemanent = \
                     not isinstance(e, (sandbox.NetworkError, sandbox.ServerInternalError))
                     # TODO
 
@@ -481,7 +484,7 @@ prev_task: {prev_task}
             assert pck._state not in [
                 RemotePacketState.CREATING,
                 RemotePacketState.TASK_FIN_WAIT,
-                RemotePacketState.ALL_DONE,
+                RemotePacketState.FINISHED,
                 RemotePacketState.FETCHING_RESOURCE_LIST,
                 RemotePacketState.FETCHING_FINAL_UPDATE
             ], "_on_rpc_update_graph in %s state" % pck._state
@@ -554,7 +557,7 @@ prev_task: {prev_task}
                 pck._final_update_url = res_by_type['REM_JOBPACKET_GRAPH_UPDATE']['http']['proxy']
                 pck._set_state(RemotePacketState.FETCHING_FINAL_UPDATE)
             else:
-                self._mark_all_done(pck, '_fetch_resource_list')
+                self._mark_as_finished(pck, '_fetch_resource_list')
                 return
 
         self._fetch_final_update(pck) # not under lock
@@ -600,7 +603,7 @@ prev_task: {prev_task}
                 with pck._lock:
                     if pck._target_stop_mode != StopMode.CANCEL:
                         pck._error = RuntimeError() # TODO
-                    self._mark_all_done(pck)
+                    self._mark_as_finished(pck)
 
                 return
 
@@ -612,7 +615,7 @@ prev_task: {prev_task}
             with pck._lock:
                 if pck._target_stop_mode != StopMode.CANCEL:
                     pck._error = RuntimeError('Malformed last update resource data: %s' % e)
-                self._mark_all_done(pck)
+                self._mark_as_finished(pck)
 
             return
 
@@ -621,9 +624,9 @@ prev_task: {prev_task}
             if pck._target_stop_mode != StopMode.CANCEL:
                 pck._update_graph(update, is_final=True)
 
-            self._mark_all_done(pck, '_fetch_final_update')
+            self._mark_as_finished(pck, '_fetch_final_update')
 
-    def _on_task_status_change(self, task_id, status_group, can_has_res):
+    def _on_task_status_change(self, task_id, task_status, status_group, can_has_res):
         #with self.lock:
         if True:
             pck = self._by_task_id.get(task_id)
@@ -639,7 +642,7 @@ prev_task: {prev_task}
             state = pck._state
 
             assert state not in [
-                RemotePacketState.ALL_DONE,
+                RemotePacketState.FINISHED,
                 RemotePacketState.FETCHING_RESOURCE_LIST,
                 RemotePacketState.FETCHING_FINAL_UPDATE
             ]
@@ -657,10 +660,11 @@ prev_task: {prev_task}
                     pass
 
                 elif state == RemotePacketState.CHECKING_START_ERROR:
-                    if pck._is_start_error_permanent:
-                        self._mark_all_done(pck, '_is_start_error_permanent=True, DRAFT')
+                    if pck._is_error_pemanent:
+                        self._mark_as_finished(pck, '_is_error_pemanent=True, DRAFT')
                     else:
                         pck._error = None
+                        pck._is_error_pemanent = None
                         pck._set_state(RemotePacketState.STARTING)
                         self._start_start_sandbox_task(pck)
 
@@ -680,11 +684,26 @@ prev_task: {prev_task}
                              RemotePacketState.CHECKING_START_ERROR,
                              RemotePacketState.STARTED]:
 
-                    pck._set_state(RemotePacketState.FETCHING_RESOURCE_LIST)
-                    self._start_fetch_resource_list(pck)
+                    if can_has_res:
+                        pck._set_state(RemotePacketState.FETCHING_RESOURCE_LIST)
+                        self._start_fetch_resource_list(pck)
+                    else:
+                        pck._error = RuntimeError("Unknown task error")
+                        pck._is_error_pemanent = False
+                        self._mark_as_finished(pck, 'Task TERMINATED and EXCEPTION/FAILURE')
+
+                    # FIXME Does Sandbox delete task's meta info or it's always DELETED
+
+                    # TODO Fetch and interpret ctx['__last_rem_error']
+                    #TaskStatus.DELETING:
+                    #TaskStatus.DELETED: # has context
+                    #TaskStatus.FAILURE:
+                    #TaskStatus.EXCEPTION:
+                    #TaskStatus.NO_RES:
+                    #TaskStatus.TIMEOUT:
 
                 elif state == RemotePacketState.TASK_FIN_WAIT:
-                    self._mark_all_done(pck, 'Task TERMINATED on TASK_FIN_WAIT')
+                    self._mark_as_finished(pck, 'Task TERMINATED on TASK_FIN_WAIT')
 
 
     def restart_packet(self, pck):
@@ -710,13 +729,13 @@ prev_task: {prev_task}
 
             def really_cancel():
                 pck._drop_sched_if_need()
-                self._mark_all_done(pck, '_stop_packet')
+                self._mark_as_finished(pck, '_stop_packet')
 
             pck._target_stop_mode = stop_mode
 
             state = pck._state
 
-            if state == RemotePacketState.ALL_DONE \
+            if state == RemotePacketState.FINISHED \
                 or state == RemotePacketState.TASK_FIN_WAIT \
                     and pck._final_state == GraphState.SUCCESSFULL:
                 raise AlreadyTerminated()
@@ -817,8 +836,9 @@ class RemotePacketState(object):
     STARTED = 4
     TASK_FIN_WAIT = 5 # final update by RPC was received, but task not finished yet
     FETCHING_RESOURCE_LIST = 6 # final update was missed
-    FETCHING_FINAL_UPDATE = 7 # --//--
-    ALL_DONE = 8 # task finished and we have final update (by RPC or through FETCHING*)
+    FETCHING_CONTEXT = 7 # final update was missed
+    FETCHING_FINAL_UPDATE = 8 # --//--
+    FINISHED = 9 # task finished and we have final update (by RPC or through FETCHING*)
 
     _NAMES = {
         CREATING: 'CREATING',
@@ -828,7 +848,8 @@ class RemotePacketState(object):
         TASK_FIN_WAIT: 'TASK_FIN_WAIT',
         FETCHING_RESOURCE_LIST: 'FETCHING_RESOURCE_LIST',
         FETCHING_FINAL_UPDATE: 'FETCHING_FINAL_UPDATE',
-        ALL_DONE: 'ALL_DONE',
+        FETCHING_CONTEXT: 'FETCHING_CONTEXT',
+        FINISHED: 'FINISHED',
     }
 
 
@@ -859,10 +880,9 @@ class SandboxRemotePacket(object):
         self._sched = None
         self._peer_addr = None
         self._error = None
-        self._is_start_error_permanent = None
+        self._is_error_pemanent = None # some guess
         self._final_state = None
         self._result_snapshot_resource_id = None
-        #self._task_awaited = False
 
         self._succeeded_jobs = set()
 
@@ -1025,7 +1045,6 @@ class SandboxJobGraphExecutorProxy(object):
             return
 
         # TODO Handle Exception packet state
-        # TODO Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
         # FIXME Rollback history/Status to prev state
 
         logging.debug('state for SandboxJobGraphExecutorProxy == %s' \
