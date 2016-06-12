@@ -1,31 +1,66 @@
 --------------------------------------------------------------------------------
 
-perun
+perun (PHASE_0)
 ----0. packet_legacy.py _convert_backup_to_v2
 ----1. job*.result dissapeared when switching back to DummyGraphExecutor
 ----2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
 
-veles02
-    0. пролонгация ttl REM_JOBPACKET_EXECUTOR
+freshness@veles02 (PHASE_1)
     1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
-    2. TIME_WAIT для EXCEPTION тасков
-    3. Unpickable всюду
-    4. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
+    2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
+    3. Retriable/TIME_WAIT для EXCEPTION тасков
+        - EXCEPTION -- Temporary or Unknown
+        - FAILURE -- Permanent + __last_rem_error
+        * Or maybe both EXCEPTION + __last_rem_error
+    4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
+    5. Unpickable всюду
+    6. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
+    7. Cache locality
 
-production-quality
-    0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
-    1. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
-    2. PARALLEL resources sync?
+production-quality (PHASE_2)
+----0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
+
+    1. ttl на ресурсы выхлопа RUN_REM_JOBPACKET:
+       + невозможность сделать rpc_resume, если REM_JOBPACKET_EXECUTION_SNAPSHOT протух
+            -> нужно неявно делать pck_restart
+            * wait_dep_tags могут быть непустыми из-за legacy behaviour
+            ** FIXME Как лучше определять, что причина
+                -- протухший REM_JOBPACKET_EXECUTION_SNAPSHOT
+                (или, что гораздо менее вероятно, python (и то, если только дефолтный))
+
+    1. latest_release/latest_resource syntax
+       - a. резолвинг сразу после create_packet, b. сразу после len(wait_dep_tags) == 0
+       - кэш живёт секунд 5
+       - pck_re_resolve_resources
+
+    6. различать причины ошибок в RunRemJobPacket
+        * Для PHASE_1 можно всё считать Retriable
+        # FIXME Но как тогда уведомлять об ошибках, если они Retriable?
+
+        * Разница между Job(tries=5) и этим Retriable в том, что тут я могу
+        пытаться понять, какие ошибки на самом деле Permanent, а tries=5 -- это
+        очень грубое приближение.
+
+        Retriable:
+            - мой код оказался не готов к каким-то вариациям данных
+            - не получилось зафетчить ресурс
+        Not retriable:
+            - ресурса не существует / не существует пути внутри ресурса
+              # TODO отличаться temporary ошибку в sync_resource от permanent
+              # 1. NoSuchResource, 2. others
+
+    2. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
+    3. PARALLEL resources sync?
         FIXME Почему меня тащили по skynet?
               Потому что локальный sandbox и не работало по HTTP?
-    3. python.tar.gz: больше модулей
-    4. Cache locality
-    5. cancel'ить WrongTaskIdError-таски в соответствие текущему стейту:
+    4. python.tar.gz: больше модулей
+    5. обновление дефолтного python.tar.gz без рестарта?
+    6. per-jobpacket python.tar.gz?
+    7. cancel'ить WrongTaskIdError-таски в соответствие текущему стейту:
         1. периодический ping на тасках -- не оперативно, может не быть дырок
     --> 2. при старте с бэкапа получать список работающих тасков и убивать ненужные
 
-#WTF?
-    7. REM_JOBPACKET_EXECUTION_SNAPSHOT
+    9. soft_restart, soft_resume
 
 --------------------------------------------------------------------------------
 
