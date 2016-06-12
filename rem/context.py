@@ -72,6 +72,7 @@ class Context(object):
         self.remote_tags_db_file = config.safe_get("store", "remote_tags_db_file")
         self.fix_bin_links_at_startup = config.safe_getboolean("store", "fix_bin_links_at_startup", True)
 
+        self.server_process_title = config.safe_get("run", "server_process_title", None)
         self.use_ekrokhalev_server_process_title = config.safe_getboolean("run", "use_ekrokhalev_server_process_title", True)
         self.working_job_max_count = config.getint("run", "poolsize")
         self.subprocsrv_runner_count = config.safe_getint("run", "subprocsrv_runner_count", 0)
