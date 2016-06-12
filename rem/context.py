@@ -91,6 +91,8 @@ class Context(object):
         self.sandbox_rpc_invoker_thread_pool_size = 10
         self.sandbox_invoker_thread_pool_size = 10
         self.sandbox_rpc_server_thread_pool_size = 10
+        self.sandbox_executor_resource_ttl = 180 # days
+        self.sandbox_executor_resource_id = config.safe_getint("run", "sandbox_executor_resource_id", None)
 
         if self.sandbox_rpc_listen_addr:
             self.sandbox_rpc_listen_addr = parse_network_address(self.sandbox_rpc_listen_addr)

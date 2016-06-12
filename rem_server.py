@@ -950,7 +950,7 @@ def _share_sandbox_executor(ctx):
             files=[archive_basename],
 
             arch='linux',
-            ttl=10 * 86400, # TODO
+            ttl=ctx.sandbox_executor_resource_ttl # TODO Reshare at runtime
         )
 
         return res_id.get()
@@ -970,6 +970,9 @@ def init(ctx):
             ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
 
         reshare_sandbox_executor()
+
+        if not ctx.sandbox_executor_resource_id:
+            ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
 
         ctx._reshare_sandbox_executor = reshare_sandbox_executor
 
