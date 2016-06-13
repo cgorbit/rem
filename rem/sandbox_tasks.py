@@ -110,7 +110,7 @@ class SandboxTaskStateAwaiter(object):
             # FIXME Move to rem.sandbox
             deleted_task_ids = set(running_task_ids) - set(statuses.keys())
             for task_id in deleted_task_ids:
-                statuses[task_id] = TaskStatus.DELELETED
+                statuses[task_id] = TaskStatus.DELETED
 
             for task_id, status in statuses.iteritems():
                 task = running[task_id]
@@ -149,7 +149,7 @@ class SandboxTaskStateAwaiter(object):
             TaskStatus.NOT_RELEASED: True, # "impossible"
             TaskStatus.RELEASED:     True, # "impossible"
 
-            # FIXME Resource list can be fetched actually (if it was SUCCESS before DELELETED)
+            # FIXME Resource list can be fetched actually (if it was SUCCESS before DELETED)
             TaskStatus.DELETING:     False,
             TaskStatus.DELETED:      False,
 
