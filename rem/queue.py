@@ -62,6 +62,7 @@ class QueueBase(Unpickable(
 
         PacketState.PREV_EXECUTOR_STOP_WAIT: "suspended", # FIXME
         PacketState.SHARING_FILES: "suspended", # FIXME
+        PacketState.RESOLVING_RELEASES: "suspended", # FIXME
 
         PacketState.RUNNING:    "working",
         PacketState.DESTROYING: "working",

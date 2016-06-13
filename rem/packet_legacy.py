@@ -169,6 +169,9 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self.resources_modified = False
         self.files_sharing = None
         self.shared_files_resource_id = None
+        self.resolved_releases = {}
+        self.unresolved_release_count = 0
+        self.all_releases_resolved = True
 
         self.destroying = state == ReprState.HISTORIED
         self.sbx_files = {}

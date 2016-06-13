@@ -40,6 +40,9 @@ import rem.job
 import rem.delayed_executor as delayed_executor
 import rem.resource_sharing
 from rem.queue import LocalQueue, SandboxQueue
+from rem.action_queue import ActionQueue
+from rem.sandbox_releases import SandboxReleasesResolver
+
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -665,6 +668,10 @@ class RemDaemon(object):
         self.scheduler.Stop2()
         logging.debug("rem-server\tjournal_stopped")
 
+# TODO Better
+        if _context.sandbox_api_url:
+            _context.sandbox_action_queue.stop() # FIXME better to stop before final backup
+
         if self._backups_thread:
             logging.debug("rem-server\tbefore_backups_thread_join")
             self._backups_thread.join()
@@ -977,9 +984,18 @@ def init(ctx):
 def create_context(config):
     ctx = Context(config)
 
-    # TODO
-    ctx.sandbox_client = rem.sandbox.Client(
-        ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
+# TODO Join all sandbox initializations
+    if ctx.sandbox_api_url:
+        ctx.sandbox_client = rem.sandbox.Client(
+            ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
+
+    # FIXME Separate queues for task creation and release resolve?
+        ctx.sandbox_action_queue = ActionQueue(
+            thread_count=ctx.sandbox_invoker_thread_pool_size,
+            thread_name_prefix='SbxIO')
+
+        ctx.sandbox_release_resolver = SandboxReleasesResolver(
+            ctx.sandbox_action_queue, ctx.sandbox_client)
 
     return ctx
 

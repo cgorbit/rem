@@ -815,6 +815,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         for q in self.qRef.itervalues():
             for pck in list(q.ListAllPackets()):
                 pck.vivify_jobs_waiting_stoppers()
+                pck.vivify_release_resolving()
 
         self._mailer = Mailer(self.context.mailer_thread_count)
         logging.debug("after_mailer_start")

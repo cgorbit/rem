@@ -192,6 +192,14 @@ class Client(object):
         resp = self._make_call('GET', url)
         return {t['id']: t['status'] for t in resp['items']}
 
+    def get_release(self, task_id):
+        return self._make_call('GET', '/release/%d' % task_id)
+
+    # FIXME &include_broken=0
+    def list_latest_releases(self, resource_type, limit=1):
+        return self._make_call('GET',
+            '/release?resource_type=%s&limit=%d&order=-time&type=stable' % (resource_type, limit))
+
     def create_resource_upload_task(self, type, name, protocol, remote_file_name, ttl=None, arch=None, **kwargs):
         context = {
             'created_resource_name': name,

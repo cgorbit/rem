@@ -7,6 +7,7 @@ import shutil
 import errno
 import sys
 import copy
+import re
 #import zlib
 #import cPickle as pickle
 
@@ -21,6 +22,9 @@ from job_graph import GraphState
 from packet_state import PacketState
 ImplState = PacketState
 import sandbox_remote_packet
+
+
+_SANDBOX_RELEASE_PATH_RE = re.compile('sbx:([a-zA-Z_]\w*)(/.*)?$')
 
 
 class ReprState(object):
@@ -124,6 +128,8 @@ class PacketBase(Unpickable(
                            is_resetable=(bool, True),
                            notify_on_reset=(bool, False),
                            notify_on_skipped_reset=(bool, True),
+                           resolved_releases=dict,
+                           unresolved_release_count=int,
 
                            history=list,
 
@@ -155,6 +161,8 @@ class PacketBase(Unpickable(
 
         self.files_sharing = None
         self.shared_files_resource_id = None
+        self.resolved_releases = {}
+        self.unresolved_release_count = 0
 
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
         self.priority = priority
@@ -229,6 +237,9 @@ class PacketBase(Unpickable(
         elif self.files_sharing:
             return ImplState.SHARING_FILES
 
+        elif self.unresolved_release_count:
+            return ImplState.RESOLVING_RELEASES
+
         else:
             return ImplState.PENDING
 
@@ -261,6 +272,7 @@ class PacketBase(Unpickable(
             ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
 
             ImplState.SHARING_FILES:    ReprState.PENDING,
+            ImplState.RESOLVING_RELEASES: ReprState.PENDING,
 
             ImplState.TAGS_WAIT:        ReprState.SUSPENDED,
             ImplState.PAUSED:           ReprState.SUSPENDED,
@@ -1228,11 +1240,76 @@ class SandboxPacket(PacketBase):
             PacketBase._check_add_files(self)
             self.resources_modified = True
             self.sbx_files[name] = path
+            self._resolve_releases_if_need(path)
+
+    def _resolve_releases_if_need(self, path):
+        m = _SANDBOX_RELEASE_PATH_RE.match(path)
+        if not m:
+            return
+
+        resource_type = m.groups()[0]
+
+        if resource_type in self.resolved_releases:
+            return
+
+        self.resolved_releases[resource_type] = None
+        self.unresolved_release_count += 1
+
+        self._do_resolve_release(resource_type)
+
+    def _on_release_resolved(self, resource_type, f):
+        with self.lock:
+            if not f.is_success():
+# TODO add error message to _status()
+                self.is_broken = True
+                self._update_state()
+                return
+
+            self.unresolved_release_count -= 1
+            self.resolved_releases[resource_type] = f.get()
+
+            if not self.unresolved_release_count and self.state == ImplState.RESOLVING_RELEASES:
+                self._update_state()
+
+    def vivify_release_resolving(self):
+        with self.lock:
+            if self._will_never_be_executed():
+                return
+
+            to_resolve = [
+                resource_type for resource_type, resource_id in self.resolved_releases.items()
+                    if resource_id is None
+            ]
+
+            self.unresolved_release_count = len(to_resolve)
+
+            if not to_resolve:
+                return
+
+            for resource_type in to_resolve:
+                self._do_resolve_release(resource_type)
+
+    def _do_resolve_release(self, resource_type):
+        ctx = self._get_scheduler_ctx()
+        resolver = ctx.sandbox_release_resolver
+
+        # FIXME Use int result in resolve() if it ready
+        resolver.resolve(resource_type
+            ).subscribe(lambda f: self._on_release_resolved(resource_type, f))
 
     def _produce_job_graph_executor_custom_resources(self):
         assert not self.files_modified
 
-        files = self.sbx_files
+        files = {}
+
+    # FIXME Don't compute on each run?
+        for filename, path in self.sbx_files.items():
+            m = _SANDBOX_RELEASE_PATH_RE.match(path)
+            if m:
+                resource_type, inner_path = m.groups()
+                path = 'sbx:%s%s' % (self.resolved_releases[resource_type], inner_path or '')
+
+            files[filename] = path
 
         if self.shared_files_resource_id:
             files = files.copy()
