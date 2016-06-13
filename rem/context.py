@@ -103,8 +103,11 @@ class Context(object):
                 rem.sandbox.TaskPriority.from_string(self.sandbox_task_priority)
 
         if self.sandbox_api_url and not( \
-            self.sandbox_task_owner and self.sandbox_task_priority \
-            and self.sandbox_task_max_count and self.sandbox_rpc_listen_addr):
+            self.sandbox_task_owner \
+            and self.sandbox_task_priority \
+            and self.sandbox_task_max_count \
+            and self.sandbox_python_resource_id \
+            and self.sandbox_rpc_listen_addr):
             raise ValueError("Sandbox setup is incomplete")
 
         self.allow_files_auto_sharing = config.safe_getboolean("run", "allow_files_auto_sharing", False)
