@@ -1142,6 +1142,9 @@ class LocalPacket(PacketBase):
     def _share_files_as_resource_if_need(self):
         pass
 
+    def vivify_release_resolving(self):
+        pass
+
 
 class SandboxPacket(PacketBase):
     MAX_ERR_LEN = 1024
