@@ -195,6 +195,9 @@ class PacketBase(Unpickable(
         elif not self.jobs:
             return ImplState.SUCCESSFULL
 
+
+# FIXME do_not_run vs. finish_status priority?
+
         elif self.do_not_run:
             if self._is_graph_stopping():
                 assert graph.state & GraphState.WORKING, "Got %s" % graph.state

@@ -94,9 +94,11 @@ class SandboxTaskStateAwaiter(object):
 
     def _update(self):
         running = self._running
+        running_task_ids = running.keys()
 
+        # FIXME Determine max &limit for /task in list_task_statuses and split request
         try:
-            statuses = self._sandbox.list_task_statuses(running.keys())
+            statuses = self._sandbox.list_task_statuses(running_task_ids)
 
         except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
             pass
@@ -105,6 +107,11 @@ class SandboxTaskStateAwaiter(object):
             logging.exception("Can't fetch task statuses from Sandbox")
 
         else:
+            # FIXME Move to rem.sandbox
+            deleted_task_ids = set(running_task_ids) - set(statuses.keys())
+            for task_id in deleted_task_ids:
+                statuses[task_id] = TaskStatus.DELELETED
+
             for task_id, status in statuses.iteritems():
                 task = running[task_id]
                 prev_status_group, prev_status = task
@@ -142,9 +149,12 @@ class SandboxTaskStateAwaiter(object):
             TaskStatus.NOT_RELEASED: True, # "impossible"
             TaskStatus.RELEASED:     True, # "impossible"
 
-            # FIXME Resource list can't be fetched
+            # FIXME Resource list can be fetched actually (if it was SUCCESS before DELELETED)
             TaskStatus.DELETING:     False,
             TaskStatus.DELETED:      False,
+
+            # FIXME
+            #TaskStatus.STOPPED:      False,
 
             # Can't have resources
             TaskStatus.FAILURE:      False, # "impossible"

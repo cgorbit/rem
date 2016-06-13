@@ -7,12 +7,24 @@ import logging
 import base64
 from pprint import pformat
 import glob
+import sys
 
 from projects import resource_types as rt
 from sandboxsdk.task import SandboxTask
 from sandboxsdk.process import run_process
 from sandboxsdk import parameters
 from sandboxsdk.errors import SandboxTaskFailureError
+
+
+class RuntimeErrorWithCode(RuntimeError):
+    pass
+
+
+def reraise(code):
+    t, e, tb = sys.exc_info()
+    if isinstance(e, RuntimeErrorWithCode):
+        raise
+    raise RuntimeErrorWithCode, RuntimeErrorWithCode(code, e), tb
 
 
 class RunRemJobPacket(SandboxTask):
@@ -99,7 +111,7 @@ class RunRemJobPacket(SandboxTask):
         for local_name, full_path in raw_resources.items():
             m = re.match('^(?:sbx:)(\d+)(/.*)?$', full_path)
             if not m:
-                raise SandboxTaskFailureError()
+                raise RuntimeErrorWithCode('E_MALFORMED_RESOURCE_PATH', None)
 
             resource_id, in_resource_path = m.groups()
 
@@ -121,7 +133,10 @@ class RunRemJobPacket(SandboxTask):
         resources = {}
 
         for resource_id in custom_resources_ids:
-            resources[resource_id] = self.sync_resource(resource_id)
+            try:
+                resources[resource_id] = self.sync_resource(resource_id)
+            except:
+                reraise('E_CUSTOM_RESOURCE_SYNC_FAILED')
 
         logging.debug('resource: %s' % resources)
 
@@ -177,7 +192,9 @@ class RunRemJobPacket(SandboxTask):
                         symlink('../../' + file, target_prefix + '/' + os.path.basename(file))
 
                 else:
-                    raise SandboxTaskFailureError("No '%s' file in resource %d" % (in_content_path, resource_id))
+                    raise RuntimeErrorWithCode(
+                        'E_NO_FILE_IN_RESOURCE',
+                        "No '%s' file in resource %d" % (in_content_path, resource_id))
 
             else:
                 landing_path = landing_folder + '/%d' % resource_id
@@ -194,13 +211,17 @@ class RunRemJobPacket(SandboxTask):
     def __custom_resources(self):
         return self.ctx['custom_resources_parsed']
 
-    def on_execute(self):
+    def __do_on_execute(self):
         logging.debug("on_execute work dir: %s" % os.getcwd())
 
         logging.debug(pformat(self.ctx))
         logging.debug(type(self.ctx['custom_resources']))
 
-        python_virtual_env_path = self.sync_resource(int(self.ctx['python_resource']))
+        try:
+            python_virtual_env_path = self.sync_resource(int(self.ctx['python_resource']))
+        except:
+            reraise('E_PYTHON_RESOURCE_SYNC_FAILED')
+
         os.mkdir('python')
         run_process(['tar', '-C', 'python', '-xf', python_virtual_env_path])
         python_virtual_env_bin_directory = os.path.abspath('./python/bin')
@@ -210,7 +231,10 @@ class RunRemJobPacket(SandboxTask):
 
         prev_packet_snapshot_file = None
         if self.ctx['snapshot_resource_id']:
-            prev_snapshot_path = self.sync_resource(int(self.ctx['snapshot_resource_id']))
+            try:
+                prev_snapshot_path = self.sync_resource(int(self.ctx['snapshot_resource_id']))
+            except:
+                reraise('E_SNAPSHOT_RESOURCE_SYNC_FAILED')
 
             if False:
                 for subdir in ['io', 'root']:
@@ -243,20 +267,30 @@ class RunRemJobPacket(SandboxTask):
             os.mkdir('work/io')
             os.mkdir('work/root')
 
-        executor_path = self.sync_resource(int(self.ctx['executor_resource']))
-        if False:
-            os.symlink(executor_path, 'executor')
         else:
-            os.mkdir('executor')
-            run_process(['tar', '-C', 'executor', '-xf', executor_path])
+            raise RuntimeErrorWithCode('E_NO_PREV_SNAPSHOT_SETUP', None)
+
+        try:
+            executor_path = self.sync_resource(int(self.ctx['executor_resource']))
+        except:
+            reraise('E_EXECUTOR_RESOURCE_SYNC_FAILED')
+
+        os.mkdir('executor')
+        run_process(['tar', '-C', 'executor', '-xf', executor_path])
 
         if 'custom_resources_parsed' not in self.ctx:
-            self.ctx['custom_resources_parsed'] \
-                = self.__parse_custom_resources_any(self.ctx['custom_resources'])
+            try:
+                self.ctx['custom_resources_parsed'] \
+                    = self.__parse_custom_resources_any(self.ctx['custom_resources'])
+            except:
+                reraise('E_MALFORMED_CUSTOM_RESOURCES')
 
         custom_resources = self.__custom_resources
         if custom_resources:
-            self.__sync_custom_resources(custom_resources)
+            try:
+                self.__sync_custom_resources(custom_resources)
+            except:
+                reraise('E_CUSTOM_RESOURCES_SETUP_FAILED')
 
         packet_snapshot_file = 'work/packet.pickle'
         last_update_message_file = 'last_update_message.pickle'
@@ -280,14 +314,14 @@ class RunRemJobPacket(SandboxTask):
                 #orig = orig[1:]
             #argv.extend(['--custom-resources', json.dumps(orig)])
 
-        if prev_packet_snapshot_file:
-            argv.extend(['--snapshot-file', prev_packet_snapshot_file])
+        #if prev_packet_snapshot_file:
+        argv.extend(['--snapshot-file', prev_packet_snapshot_file])
 
         #elif self.ctx['snapshot_data']:
             #argv.extend(['--snapshot-data', self.ctx['snapshot_data'].replace('\n', '')])
 
-        else:
-            raise SandboxTaskFailureError()
+        #else:
+            #raise SandboxTaskFailureError()
 
         env = os.environ.copy()
         env['PATH'] = python_virtual_env_bin_directory + ':' + env.get('PATH', '')
@@ -302,6 +336,8 @@ class RunRemJobPacket(SandboxTask):
 
         # TODO XXX Checks (at least for snapshot_file existence)
 
+        # TODO ttl
+
         run_process(['tar', '-C', 'work', '-cf', 'work.tar', './'])
         self.create_resource(
             '',
@@ -315,5 +351,22 @@ class RunRemJobPacket(SandboxTask):
 
         #rt.REM_JOBPACKET_EXECUTION_RESULTS
 
+    def on_execute(self):
+        self.__run(self.__do_on_execute)
+
+    def __run(self, f):
+        try:
+            return f()
+        except RuntimeErrorWithCode:
+            t, e, tb = sys.exc_info()
+            code, orig_error = e.args
+            self.ctx['__last_rem_error'] = (code, str(orig_error))
+            if isinstance(orig_error, Exception):
+                raise type(orig_error), orig_error, tb
+            else:
+                raise t, e, tb
+        except Exception as e:
+            self.ctx['__last_rem_error'] = ('E_UNKNOWN', str(e))
+            raise
 
 __Task__ = RunRemJobPacket
