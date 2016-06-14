@@ -664,11 +664,11 @@ class RemDaemon(object):
 
         logging.debug("rem-server\tworkers_stopped")
 
-    # TODO Make it nice
+        # TODO Make it nice
         self.scheduler.Stop2()
         logging.debug("rem-server\tjournal_stopped")
 
-# TODO Better
+        # TODO Better
         if _context.sandbox_api_url:
             _context.sandbox_action_queue.stop() # FIXME better to stop before final backup
 
@@ -681,7 +681,7 @@ class RemDaemon(object):
         for proc in multiprocessing.active_children():
             proc.terminate()
 
-    # TODO Make it nice
+        # TODO Make it nice
         self.scheduler.Stop3()
 
     def _start_workers(self):
