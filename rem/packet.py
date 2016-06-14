@@ -1305,7 +1305,7 @@ class SandboxPacket(PacketBase):
 
         files = {}
 
-    # FIXME Don't compute on each run?
+        # FIXME Don't compute on each run?
         for filename, path in self.sbx_files.items():
             m = _SANDBOX_RELEASE_PATH_RE.match(path)
             if m:

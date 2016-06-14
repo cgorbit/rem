@@ -7,15 +7,23 @@ perun (PHASE_0)
 
 freshness@veles02 (PHASE_1)
     1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
+    0. Some suitable way to create FRESHNESS_SCRIPTS resource
     2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
-    3. Retriable/TIME_WAIT для EXCEPTION тасков
+    3. Add some whole-packet _error_message from sandbox_remote_packet (display
+       in rem-tool and email messages)
+    3. rem-tool
+        - is_sandbox=True (потому что sandbox_task_id ещё может не быть)
+        - last sandbox_task_id (link to web-page)
+        - resolved_releases?
+        - whole-packet error (if sandbox_remote_packet fail)
+    3. !Retriable /TIME_WAIT для EXCEPTION тасков
         - EXCEPTION -- Temporary or Unknown
         - FAILURE -- Permanent + __last_rem_error
         * Or maybe both EXCEPTION + __last_rem_error
+    7. Cache locality
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
     5. Unpickable всюду
     6. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
-    7. Cache locality
 
 production-quality (PHASE_2)
 ----0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
