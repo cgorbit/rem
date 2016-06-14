@@ -18,7 +18,7 @@ import fork_locking
 from job import FuncJob, SerializableFunction
 from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject
 from connmanager import ConnectionManager
-from packet import LocalPacket, PacketState, PacketCustomLogic
+from packet import LocalPacket, PacketBase, PacketState, PacketCustomLogic
 import packet
 import packet_legacy
 from queue import LocalQueue, SandboxQueue, QueueBase
@@ -606,7 +606,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
             # No vivifying of tempStorage packets
 
             self.schedWatcher.Clear() # remove tasks from Queue.relocate_packet
-            self.FillSchedWatcher(prevWatcher)
 
     @classmethod
     def _convert_backup(cls, sdict_version, sdict, registrator):
@@ -679,51 +678,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
             yt_writer_count=yt_writer_count,
             bucket_size=bucket_size
         )
-
-    def FillSchedWatcher(self, prev_watcher=None):
-        def list_packets_in_queues(state):
-            return [
-                pck for q in self.qRef.itervalues()
-                    for pck in q.ListAllPackets()
-                        if pck.state == state
-            ]
-
-        def list_schedwatcher_tasks(obj_type, method_name):
-            if not prev_watcher:
-                return []
-
-            return (
-                (deadline, task)
-                    for deadline, task in prev_watcher.ListTasks()
-                        if task.object \
-                            and isinstance(task.object, obj_type) \
-                            and task.methName == method_name
-            )
-
-        def produce_packets_to_wait():
-            packets = list_packets_in_queues(PacketState.TIME_WAIT)
-
-            logging.debug("WAITING packets in Queue's for schedWatcher: %s" % [pck.id for pck in packets])
-
-            now = time.time()
-
-            prev_deadlines = {
-                task.object.id: deadline or now
-                    for deadline, task in list_schedwatcher_tasks(LocalPacket, 'stopWaiting')
-            }
-
-            if prev_watcher:
-                logging.debug("old backup schedWatcher WAITING packets deadlines: %s" % prev_deadlines)
-
-            for pck in packets:
-                pck.waitingDeadline = pck.waitingDeadline \
-                    or prev_deadlines.get(pck.id, None) \
-                    or time.time() # missed in old backup
-
-            return packets
-
-        for pck in produce_packets_to_wait():
-            self.ScheduleTaskD(pck.waitingDeadline, pck.stopWaiting)
 
     def Restore(self, restorer=None, restore_tags_only=False):
         ctx = self.context
