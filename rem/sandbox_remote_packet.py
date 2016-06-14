@@ -433,8 +433,6 @@ prev_task: {prev_task}
             # rem: _on_task_status_change (enter + exit)
             # rem: _on_rpc_update_graph with self.lock <-- OOPS
 
-            logging.debug('_on_rpc_update_graph state %s' % pck._state)
-
             assert pck._state not in [
                 RemotePacketState.CREATING,
                 RemotePacketState.TASK_FIN_WAIT,
@@ -850,7 +848,7 @@ class SandboxRemotePacket(object):
 
     def _set_state(self, state, reason=None):
         self._state = state
-        logging.debug('remote-%s new state %s, reason: %s' % (self.id, RemotePacketState._NAMES[state], reason))
+        logging.debug('%s new state %s, reason: %s' % (self.id, RemotePacketState._NAMES[state], reason))
 
     def cancel(self):
         remote_packets_dispatcher.cancel_packet(self)

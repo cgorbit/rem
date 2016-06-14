@@ -13,7 +13,7 @@ from projects import resource_types as rt
 from sandboxsdk.task import SandboxTask
 from sandboxsdk.process import run_process
 from sandboxsdk import parameters
-from sandboxsdk.errors import SandboxTaskFailureError
+#from sandboxsdk.errors import SandboxTaskFailureError
 
 
 class RuntimeErrorWithCode(RuntimeError):
@@ -205,7 +205,7 @@ class RunRemJobPacket(SandboxTask):
                 symlink('../../' + landing_path, target_path)
 
             #logging.debug('symlink(%s, %s)' % (target, name))
-        self.ctx['created_symlinks'] = symlinks
+        self.ctx['created_symlinks'] = list(symlinks)
 
     @property
     def __custom_resources(self):
@@ -253,9 +253,7 @@ class RunRemJobPacket(SandboxTask):
 
         # snapshot_data may be E2BIG for execve
         elif self.ctx['snapshot_data']:
-# TODO DRY
-# TODO DRY
-# TODO DRY
+        # TODO DRY
             prev_packet_snapshot_file = 'initial_snapshot.pickle'
 
             with open(prev_packet_snapshot_file, 'w') as out:
