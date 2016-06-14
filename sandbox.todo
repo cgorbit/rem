@@ -6,7 +6,6 @@ perun (PHASE_0)
 ----2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
 
 freshness@veles02 (PHASE_1)
-    0. 2016-06-13 21:58:47,588 20042 DEBUG sandbox_remote_packet: _on_rpc_update_graph state 4
     1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
     2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
     3. Retriable/TIME_WAIT для EXCEPTION тасков

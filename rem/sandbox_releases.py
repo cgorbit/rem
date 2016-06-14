@@ -49,14 +49,13 @@ class SandboxReleasesResolver(object):
     def _do_resolve(self, rel):
         try:
             self._do_do_resolve(rel)
-# TODO Permanent errors?
+        # TODO Fail on permanent errors
         except Exception as e:
-            logging.warning('Failed to list_latest_releases for %s: %s' % (rel.resource_type, e))
+            #logging.warning('Failed to list_latest_releases for %s: %s' % (rel.resource_type, e))
             logging.exception('Failed to list_latest_releases for %s' % rel.resource_type)
             delayed_executor.schedule(lambda : self._resolve(rel), timeout=self._RETRY_INTERVAL)
 
-# XXX FIXME BROKEN, DELETED
-# FIXME Move logic to combined rem.sandbox?
+    # FIXME Move 2-step logic to rem.sandbox?
     def _do_do_resolve(self, rel):
         resource_type = rel.resource_type
 
@@ -70,6 +69,7 @@ class SandboxReleasesResolver(object):
 
         release = self._client.get_release(task_id)
 
+        # FIXME BROKEN, DELETED
         resources = [
             res['resource_id'] for res in release['resources']
                 if res['type'] == resource_type
