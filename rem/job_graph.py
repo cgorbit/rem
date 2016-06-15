@@ -520,8 +520,9 @@ class JobGraphExecutor(Unpickable(
         return bool(self.active_jobs_cache)
 
     def recover_after_backup_loading(self):
-        self.failed_jobs.clear() # FIXME Don't remember. Legacy behaviour?
+        self.jobs_to_run.update(self.active_jobs_cache)
         self.active_jobs_cache.clear()
+        #self.failed_jobs.clear() # FIXME Don't remember. Legacy behaviour?
         #self._init_job_deps_graph() # FIXME Why I comment this?
 
     def vivify_jobs_waiting_stoppers(self):
