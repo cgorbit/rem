@@ -596,6 +596,8 @@ class PacketBase(Unpickable(
                 reraise("Failed to resurrect directory")
 
     def _try_recover_after_backup_loading(self, ctx):
+        self._graph_executor.recover_after_backup_loading()
+
         if self.state in [ImplState.BROKEN, ImplState.HISTORIED]:
             if self.directory:
                 self._release_place()
@@ -611,7 +613,6 @@ class PacketBase(Unpickable(
             if os.path.isdir(directory):
                 shutil.rmtree(directory, onerror=None)
 
-        self._graph_executor.recover_after_backup_loading()
 
         self._update_state()
 
