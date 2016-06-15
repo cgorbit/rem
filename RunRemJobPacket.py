@@ -9,6 +9,8 @@ from pprint import pformat
 import glob
 import sys
 
+from common.types.client import Tag
+
 from projects import resource_types as rt
 from sandboxsdk.task import SandboxTask
 from sandboxsdk.process import run_process
@@ -31,6 +33,8 @@ class RunRemJobPacket(SandboxTask):
     '''REM job-packet executor'''
 
     type = 'RUN_REM_JOBPACKET'
+
+    client_tags = Tag.GENERIC & Tag.LINUX_PRECISE & ~Tag.OXYGEN
 
     class Executor(parameters.ResourceSelector):
         name = "executor_resource"
