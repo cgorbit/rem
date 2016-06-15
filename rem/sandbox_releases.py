@@ -1,21 +1,33 @@
 import time
 import threading
+import re
+from collections import namedtuple
 
-from rem.profile import ProfiledThread
 from rem_logging import logger as logging
 from rem.future import Promise
 import rem.delayed_executor as delayed_executor
 
 
+_RESOURCE_DESCR_RE = re.compile('^(?:(re[sl]):)?([a-zA-Z_]\w*)(?::owner=(\w+))?$')
+
+
 class _Resource(object):
-    def __init__(self, resource_type):
+    def __init__(self, request):
         self.promise = Promise()
         self.resolve_time = None
-        self.resource_type = resource_type
+        self.request = request
+
+
+class MalformedResourceDescr(ValueError):
+    pass
 
 
 class SandboxReleasesResolver(object):
     _RETRY_INTERVAL = 15.0 # TODO More complicated policy
+    _RESOLVE_RESULT_TTL = 5.0 # FIXME
+
+    # XXX Must be hashable type
+    Request = namedtuple('Request', ['type', 'owner', 'released'])
 
     def __init__(self, action_queue, client):
         self._action_queue = action_queue
@@ -24,9 +36,29 @@ class SandboxReleasesResolver(object):
         self._lock = threading.Lock()
         self._releases = {}
 
-    def resolve(self, resource_type):
+    @classmethod
+    def _parse_resource_descr(cls, descr):
+        m = _RESOURCE_DESCR_RE.match(descr)
+        if not m:
+            raise MalformedResourceDescr()
+
+        groups = m.groups()
+
+        return cls.Request(
+            type=groups[1],
+            owner=groups[2],
+            released=groups[0] is None or groups[0] == 'rel'
+        )
+
+    def resolve(self, descr):
+        req = self._parse_resource_descr(descr)
+        logging.debug(str(req))
+
+        #import traceback
+        #logging.debug(''.join(traceback.format_stack()))
+
         with self._lock:
-            rel = self._releases.get(resource_type)
+            rel = self._releases.get(req)
             if rel:
                 if rel.resolve_time is None:
                     return rel.promise.to_future()
@@ -34,10 +66,10 @@ class SandboxReleasesResolver(object):
                 if time.time() - rel.resolve_time < self._RESOLVE_RESULT_TTL:
                     return rel.promise.to_future()
 
-                self._releases.pop(resource_type)
+                self._releases.pop(req)
 
-            rel = _Resource(resource_type)
-            self._releases[resource_type] = rel
+            rel = _Resource(req)
+            self._releases[req] = rel
 
         self._resolve(rel)
 
@@ -51,32 +83,27 @@ class SandboxReleasesResolver(object):
             self._do_do_resolve(rel)
         # TODO Fail on permanent errors
         except Exception as e:
-            #logging.warning('Failed to list_latest_releases for %s: %s' % (rel.resource_type, e))
-            logging.exception('Failed to list_latest_releases for %s' % rel.resource_type)
+            #logging.warning('Failed to list_latest_releases for %s: %s' % (rel.request, e))
+            logging.exception('Failed to list_latest_releases for %s' % rel.request)
             delayed_executor.schedule(lambda : self._resolve(rel), timeout=self._RETRY_INTERVAL)
 
     # FIXME Move 2-step logic to rem.sandbox?
     def _do_do_resolve(self, rel):
-        resource_type = rel.resource_type
+        request = rel.request
 
-        releases = self._client.list_latest_releases(resource_type, limit=1)
+        resource = self._client.get_latest_resource(
+            type=request.type,
+            owner=request.owner,
+            released=request.released
+        )
 
-        if not releases['items']:
-            rel.promise.set(None, RuntimeError("No such release type %s" % resource_type))
+        rel.resolve_time = time.time()
+
+        if not resource:
+            logging.warning("Failed to resolve %s" % request)
+            rel.promise.set(None, RuntimeError("Can't find resource %s" % request))
             return
 
-        task_id = releases['items'][0]['task_id']
-
-        release = self._client.get_release(task_id)
-
-        # FIXME BROKEN, DELETED
-        resources = [
-            res['resource_id'] for res in release['resources']
-                if res['type'] == resource_type
-        ]
-
-        if not resources:
-            raise RuntimeError("No resources of type %s in release %d" % (resource_type, task_id))
-
-        rel.promise.set(resources[0])
+        logging.debug("%s resolved to %s" % (request, resource))
+        rel.promise.set(resource['id'])
 

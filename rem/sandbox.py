@@ -192,13 +192,74 @@ class Client(object):
         resp = self._make_call('GET', url)
         return {t['id']: t['status'] for t in resp['items']}
 
-    def get_release(self, task_id):
+    def get_latest_resource(self, type, owner=None, released=False):
+        if released:
+            r = self._get_latest_released_resource(type, owner)
+
+            if not r:
+                return None
+
+            return {
+                'id': r['resource_id'],
+                'description': r['description'],
+            }
+
+        else:
+            resources = self._list_latest_resources(type, owner)
+
+            if not resources:
+                return None
+
+            r = resources[0]
+
+            return {
+                'id': r['id'],
+                'description': r['description'],
+            }
+
+    def _get_release(self, task_id):
         return self._make_call('GET', '/release/%d' % task_id)
 
     # FIXME &include_broken=0
-    def list_latest_releases(self, resource_type, limit=1):
-        return self._make_call('GET',
-            '/release?resource_type=%s&limit=%d&order=-time&type=stable' % (resource_type, limit))
+    def _list_latest_releases_raw(self, type, owner=None, limit=1):
+        # XXX only STABLE releases
+        query = '/release?resource_type=%s&limit=%d&order=-time&type=stable' % (type, limit)
+
+        if owner is not None:
+            query += '&owner=%s' % owner
+
+        return self._make_call('GET', query)
+
+    def _get_latest_released_resource(self, type, owner=None):
+        releases = self._list_latest_releases_raw(type=type, owner=owner, limit=1)
+
+        if not releases['items']:
+            return None
+
+        task_id = releases['items'][0]['task_id']
+
+        release = self._get_release(task_id)
+
+        # FIXME BROKEN, DELETED
+        resources = [
+            res for res in release['resources']
+                if res['type'] == type
+        ]
+
+        if not resources:
+            raise RuntimeError("No resources of type %s in release %d" % (type, task_id))
+
+        return resources[0]
+
+    def _list_latest_resources(self, type, owner=None, limit=1):
+        query = '/resource?type={type}&limit={limit}&order=-time&state=READY'.format(
+            type=type,
+            limit=limit)
+
+        if owner is not None:
+            query += '&owner=%s' % owner
+
+        return self._make_call('GET', query)['items']
 
     def create_resource_upload_task(self, type, name, protocol, remote_file_name, ttl=None, arch=None, **kwargs):
         context = {

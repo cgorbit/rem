@@ -6,6 +6,7 @@ perun (PHASE_0)
 ----2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
 
 freshness@veles02 (PHASE_1)
+    0. sky share результатами недоступен в Sandbox
     1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
     0. Some suitable way to create FRESHNESS_SCRIPTS resource
     2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'

@@ -22,9 +22,10 @@ from job_graph import GraphState
 from packet_state import PacketState
 ImplState = PacketState
 import sandbox_remote_packet
+from sandbox_releases import MalformedResourceDescr
 
-
-_SANDBOX_RELEASE_PATH_RE = re.compile('sbx:([a-zA-Z_]\w*)(/.*)?$')
+_SANDBOX_RELEASE_PATH_RE = re.compile('sbx:([^/]+)(/[-/_a-zA-Z0-9.?*]*)?$')
+_INTEGER_RE = re.compile('^\d+$')
 
 
 class ReprState(object):
@@ -1241,27 +1242,42 @@ class SandboxPacket(PacketBase):
 
     def rpc_add_resource(self, name, path):
         with self.lock:
+            if not path.startswith('sbx:'):
+                raise RpcUserError(ValueError())
+
             PacketBase._check_add_files(self)
+
+            # Must comes first (contains check, may throw)
+            self._resolve_releases_if_need(path)
+
             self.resources_modified = True
             self.sbx_files[name] = path
-            self._resolve_releases_if_need(path)
 
     def _resolve_releases_if_need(self, path):
         m = _SANDBOX_RELEASE_PATH_RE.match(path)
         if not m:
+            raise RpcUserError(RuntimeError("Malformed resource path '%s'" % path))
+
+        resource_descr = m.groups()[0]
+
+        if _INTEGER_RE.match(resource_descr):
             return
 
-        resource_type = m.groups()[0]
+        # TODO Use parsed hashable Request instead of string descr
 
-        if resource_type in self.resolved_releases:
+        if resource_descr in self.resolved_releases:
             return
 
-        self.resolved_releases[resource_type] = None
+        try:
+            # Must comes first (contains check, may throw)
+            self._do_resolve_release(resource_descr)
+        except MalformedResourceDescr as e:
+            raise RpcUserError(ValueError(str(e)))
+
+        self.resolved_releases[resource_descr] = None
         self.unresolved_release_count += 1
 
-        self._do_resolve_release(resource_type)
-
-    def _on_release_resolved(self, resource_type, f):
+    def _on_release_resolved(self, resource_descr, f):
         with self.lock:
             if not f.is_success():
 # TODO add error message to _status()
@@ -1270,7 +1286,7 @@ class SandboxPacket(PacketBase):
                 return
 
             self.unresolved_release_count -= 1
-            self.resolved_releases[resource_type] = f.get()
+            self.resolved_releases[resource_descr] = f.get()
 
             if not self.unresolved_release_count and self.state == ImplState.RESOLVING_RELEASES:
                 self._update_state()
@@ -1281,7 +1297,7 @@ class SandboxPacket(PacketBase):
                 return
 
             to_resolve = [
-                resource_type for resource_type, resource_id in self.resolved_releases.items()
+                resource_descr for resource_descr, resource_id in self.resolved_releases.items()
                     if resource_id is None
             ]
 
@@ -1290,16 +1306,16 @@ class SandboxPacket(PacketBase):
             if not to_resolve:
                 return
 
-            for resource_type in to_resolve:
-                self._do_resolve_release(resource_type)
+            for resource_descr in to_resolve:
+                self._do_resolve_release(resource_descr)
 
-    def _do_resolve_release(self, resource_type):
+    def _do_resolve_release(self, resource_descr):
         ctx = self._get_scheduler_ctx()
         resolver = ctx.sandbox_release_resolver
 
         # FIXME Use int result in resolve() if it ready
-        resolver.resolve(resource_type
-            ).subscribe(lambda f: self._on_release_resolved(resource_type, f))
+        resolver.resolve(resource_descr
+            ).subscribe(lambda f: self._on_release_resolved(resource_descr, f))
 
     def _produce_job_graph_executor_custom_resources(self):
         assert not self.files_modified
@@ -1310,8 +1326,8 @@ class SandboxPacket(PacketBase):
         for filename, path in self.sbx_files.items():
             m = _SANDBOX_RELEASE_PATH_RE.match(path)
             if m:
-                resource_type, inner_path = m.groups()
-                path = 'sbx:%s%s' % (self.resolved_releases[resource_type], inner_path or '')
+                resource_descr, inner_path = m.groups()
+                path = 'sbx:%s%s' % (self.resolved_releases[resource_descr], inner_path or '')
 
             files[filename] = path
 
