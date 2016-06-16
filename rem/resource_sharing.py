@@ -164,7 +164,7 @@ class Sharer(object):
         elif action == self.Action.CREATE_UPLOAD_TASK:
             queue, condvar = self.upload_queue, self.upload_queue_not_empty
 
-        elif action == self.Action.CREATE_UPLOAD_TASK:
+        elif action == self.Action.FETCH_RESOURCE_ID:
             queue, condvar = self.wait2_queue, self.wait2_queue_not_empty
 
         else:
