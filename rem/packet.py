@@ -1328,9 +1328,11 @@ class SandboxPacket(PacketBase):
                 resource_descr, inner_path = m.groups()
 
                 if _INTEGER_RE.match(resource_descr):
-                    continue
+                    resource_id = int(resource_descr)
+                else:
+                    resource_id = self.resolved_releases[resource_descr]
 
-                path = 'sbx:%s%s' % (self.resolved_releases[resource_descr], inner_path or '')
+                path = 'sbx:%s%s' % (resource_id, inner_path or '')
 
             files[filename] = path
 
