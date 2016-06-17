@@ -614,7 +614,6 @@ class PacketBase(Unpickable(
             if os.path.isdir(directory):
                 shutil.rmtree(directory, onerror=None)
 
-
         self._update_state()
 
     def try_recover_after_backup_loading(self, ctx):
@@ -1327,6 +1326,10 @@ class SandboxPacket(PacketBase):
             m = _SANDBOX_RELEASE_PATH_RE.match(path)
             if m:
                 resource_descr, inner_path = m.groups()
+
+                if _INTEGER_RE.match(resource_descr):
+                    continue
+
                 path = 'sbx:%s%s' % (self.resolved_releases[resource_descr], inner_path or '')
 
             files[filename] = path
