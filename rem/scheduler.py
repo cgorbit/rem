@@ -144,6 +144,7 @@ class SandboxPacketsRunner(object):
             self._parent = parent
 
         def __del__(self):
+            logging.debug('_RunningGuard.__del__')
             self._parent._release_running()
 
     def __init__(self, pool_size):
@@ -166,6 +167,7 @@ class SandboxPacketsRunner(object):
     def _release_running(self):
         with self._lock:
             self._run_pool += 1
+            logging.debug('SandboxPacketsRunner._run_pool += 1 => %d' % self._run_pool)
 
             if self._run_pool == 1:
                 self._changed.notify()
@@ -183,20 +185,21 @@ class SandboxPacketsRunner(object):
 
                 pck = q.get_packet_to_run()
                 if not pck:
-                    logging.debug('NotWorkingStateError idling: %s' %  q.name)
+                    logging.warning('NotWorkingStateError idling: %s' %  q.name)
                     continue
 
                 if q.has_startable_packets():
                     self._queues.push(q)
 
                 self._run_pool -= 1
+                logging.debug('SandboxPacketsRunner._run_pool -= 1 => %d' % self._run_pool)
 
             guard = self._RunningGuard(self)
 
             try:
                 pck.run(guard)
             except packet.NotWorkingStateError:
-                pass
+                logging.warning('NotWorkingStateError idling: %s' %  pck)
 
             del guard
 
