@@ -5,10 +5,16 @@ perun (PHASE_0)
 ----1. job*.result dissapeared when switching back to DummyGraphExecutor
 ----2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
 
+
 freshness@veles02 (PHASE_1)
-    0. sky share результатами недоступен в Sandbox
+    0. packet._notify_has_pending_if_need может не создать директорию для SandboxPacket,
+       тогда его надо загасить (в текущем виде вообще AssertionError и не стартанёт)
     1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
-    0. Some suitable way to create FRESHNESS_SCRIPTS resource
+----X. Не resume'ятся очереди sbx: при рестарте сервера
+    0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
+       таски такой переход осуществляют
+    0. sky share результатами недоступен в Sandbox
+----0. Some suitable way to create FRESHNESS_SCRIPTS resource
     2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
     3. Add some whole-packet _error_message from sandbox_remote_packet (display
        in rem-tool and email messages)
@@ -25,6 +31,7 @@ freshness@veles02 (PHASE_1)
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
     5. Unpickable всюду
     6. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
+
 
 production-quality (PHASE_2)
 ----0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
