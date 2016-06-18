@@ -798,8 +798,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 alloc_guard=self._sandbox_packets_runner._acquire
             )
 
-        # LocalQueue's notifies in _vivify_queues actually,
-        # but SandboxQueue's can't notify before SandboxPacketsRunner is created
+        # LocalQueue's notify in _vivify_queues actually,
+        # but SandboxQueue's can't notify until SandboxPacketsRunner is created
         for q in self.qRef.itervalues():
             if q.is_alive():
                 q._notify_has_pending_if_need()
