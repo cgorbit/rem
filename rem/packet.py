@@ -575,18 +575,23 @@ class PacketBase(Unpickable(
             self._update_state()
 
     def _try_recover_directory(self, ctx):
+        prev_packets_directory, _ = os.path.split(self.directory)
+        actual_directory = os.path.join(ctx.packets_directory, self.id)
+
         if os.path.isdir(self.directory):
-            parentDir, dirname = os.path.split(self.directory)
-            if parentDir != ctx.packets_directory:
-                dst_loc = os.path.join(ctx.packets_directory, self.id)
+            if prev_packets_directory != ctx.packets_directory:
                 try:
-                    logging.debug("relocates directory %s to %s", self.directory, dst_loc)
-                    shutil.copytree(self.directory, dst_loc)
-                    self.directory = dst_loc
+                    logging.debug("relocates directory %s to %s", self.directory, actual_directory)
+                    shutil.copytree(self.directory, actual_directory)
+                    self.directory = actual_directory
                 except:
                     reraise("Failed to relocate directory")
 
         else:
+            if os.path.isdir(actual_directory):
+                self.directory = actual_directory
+                return # FIXME Recreate?
+
             if not self._are_links_alive(ctx):
                 raise NotAllFileLinksAlive("Not all links alive")
 
