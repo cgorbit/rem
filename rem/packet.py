@@ -348,7 +348,8 @@ class PacketBase(Unpickable(
             raise NotImplementedError("Resource sharing vivify is not implemented")
 
     def vivify_jobs_waiting_stoppers(self):
-        pass
+        with self.lock:
+            self._graph_executor.vivify_jobs_waiting_stoppers()
 
     def update_tag_deps(self, tagStorage):
         with self.lock:
@@ -1106,10 +1107,6 @@ class LocalPacket(PacketBase):
             #self._update_state() called in JobGraphExecutor
 
             return runner
-
-    def vivify_jobs_waiting_stoppers(self):
-        with self.lock:
-            self._graph_executor.vivify_jobs_waiting_stoppers()
 
     # Called in queue under packet lock
     def _get_working_jobs(self):

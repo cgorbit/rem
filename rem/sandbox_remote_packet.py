@@ -1007,10 +1007,7 @@ class SandboxJobGraphExecutorProxy(object):
 
         elif r._final_state == GraphState.TIME_WAIT:
             self.time_wait_deadline = r._last_update['nearest_retry_deadline']
-            # TODO VIVIFY time_wait_sched
-            self.time_wait_sched = \
-                delayed_executor.schedule(self._stop_time_wait,
-                                            deadline=self.time_wait_deadline)
+            self._schedule_time_wait_stop()
 
         elif r._final_state == GraphState.SUCCESSFULL:
             self.result = True
@@ -1022,6 +1019,19 @@ class SandboxJobGraphExecutorProxy(object):
             if r._final_state != GraphState.SUCCESSFULL else None
 
         on_stop()
+
+    def __getstate__(self):
+        sdict = self.__dict__.copy()
+        sdict['time_wait_sched'] = None
+        return sdict
+
+    def _schedule_time_wait_stop(self):
+        self.time_wait_sched = \
+            delayed_executor.schedule(self._stop_time_wait, deadline=self.time_wait_deadline)
+
+    def vivify_jobs_waiting_stoppers(self):
+        if self.time_wait_deadline:
+            self._schedule_time_wait_stop()
 
     def _stop_time_wait(self, sched_id):
         with self.lock:

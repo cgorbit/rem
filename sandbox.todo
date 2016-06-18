@@ -9,7 +9,7 @@ perun (PHASE_0)
 freshness@veles02 (PHASE_1)
     0. packet._notify_has_pending_if_need может не создать директорию для SandboxPacket,
        тогда его надо загасить (в текущем виде вообще AssertionError и не стартанёт)
-    1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
+----1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
 ----X. Не resume'ятся очереди sbx: при рестарте сервера
     0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
        таски такой переход осуществляют
