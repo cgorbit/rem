@@ -915,31 +915,37 @@ def _init_sandbox(ctx):
     shr.start()
 
 
-def _copy_executor_files(dir):
-    code_root = os.path.dirname(sys.modules[__name__].__file__)
+def _copy_executor_files(dst_root):
+    src_root = os.path.dirname(sys.modules[__name__].__file__)
 
-    if code_root == '':
-        code_root = '.'
+    if src_root == '':
+        src_root = '.'
 
-    shutil.copy(code_root + '/run_sandbox_packet.py', dir + '/')
+    shutil.copy(src_root + '/run_sandbox_packet.py', dst_root + '/')
 
-    shutil.copytree(
-        code_root + '/rem',
-        dir + '/rem',
-        ignore=(lambda _, files: [f for f in files if not f.endswith('.py')]),
-    )
+    def allow(filter):
+        return (lambda _, files: [f for f in files if not filter(f)])
+
+    allow_py = allow(lambda f: f.endswith('.py'))
+
+    shutil.copytree(src_root + '/rem', dst_root + '/rem', ignore=allow_py)
+    shutil.copytree(src_root + '/client', dst_root + '/client', ignore=allow_py)
 
 
 def _share_sandbox_executor(ctx):
-    with NamedTemporaryDir(prefix='rem_sbx_exe') as dir:
-        os.chmod(dir, 0775)
-        _copy_executor_files(dir)
+    with NamedTemporaryDir(prefix='rem_sbx_exe') as work_dir:
+        os.chmod(work_dir, 0775)
+
+        resource_dir = work_dir + '/out'
+        os.mkdir(resource_dir)
+        os.chmod(resource_dir, 0775)
+
+        _copy_executor_files(resource_dir)
 
         archive_basename = 'rem_executor.tar'
-        archive_filename = dir + '/' + archive_basename
+        archive_filename = work_dir + '/' + archive_basename
 
-        subprocess.check_call(
-            ['tar', '-C', dir, '-cf', archive_filename, 'run_sandbox_packet.py', 'rem'])
+        subprocess.check_call(['tar', '-C', resource_dir, '-cf', archive_filename, '.'])
 
         res_id = ctx.sandbox_resource_sharer.share(
             'REM_JOBPACKET_EXECUTOR',
@@ -949,11 +955,11 @@ def _share_sandbox_executor(ctx):
             ),
 
             #name='executor',
-            #directory=dir,
+            #directory=resource_dir,
             #files=['.'],
 
             name=archive_basename,
-            directory=dir,
+            directory=work_dir,
             files=[archive_basename],
 
             arch='linux',
