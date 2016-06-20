@@ -770,7 +770,9 @@ class PacketBase(Unpickable(
         all_tags = list(self.all_dep_tags)
 
         status = dict(name=self.name,
-                      sandbox_task_id=None, # TODO
+                      is_sandbox=isinstance(self, SandboxPacket),
+                      sandbox_task_id=None, # TODO # FIXME History of tasks? Or logs is enough?
+                      resolved_releases=self.resolved_releases,
                       state=self._repr_state,
                       extended_state=self._get_extended_state(),
                       wait=list(self.wait_dep_tags),
