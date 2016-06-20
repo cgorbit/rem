@@ -1,3 +1,5 @@
+//#define Py_TRACE_REFS
+
 #if defined(_win_)
 #error Windows is not supported
 #endif
@@ -8,14 +10,14 @@
 #include <Python.h>
 
 #if defined(__clang__)
-  #define POD_THREAD(T) __thread T
-  #define POD_STATIC_THREAD(T) static __thread T
+  #define Y_POD_THREAD(T) __thread T
+  #define Y_POD_STATIC_THREAD(T) static __thread T
 #elif defined __GNUC__ && (__GNUC__ > 3 || (__GNUC__ == 3 && __GNUC_MINOR__ > 2)) && !(defined __FreeBSD__ && __FreeBSD__ < 5) && !defined(_cygwin_) && !defined(_arm_) && !defined(__IOS_SIMULATOR__)
-  #define POD_THREAD(T) __thread T
-  #define POD_STATIC_THREAD(T) static __thread T
+  #define Y_POD_THREAD(T) __thread T
+  #define Y_POD_STATIC_THREAD(T) static __thread T
 #elif defined(_arm_)
-  #define POD_THREAD(T) __declspec(thread) T
-  #define POD_STATIC_THREAD(T) __declspec(thread) static T
+  #define Y_POD_THREAD(T) __declspec(thread) T
+  #define Y_POD_STATIC_THREAD(T) __declspec(thread) static T
 #else
   #error No tls for your architecture
 #endif
@@ -48,7 +50,7 @@ extern void fld_thread_has_acquired_locks();
     #define WRITE_DEBUG(s)
 #endif
 
-POD_STATIC_THREAD(size_t) thread_lock_count = 0;
+Y_POD_STATIC_THREAD(size_t) thread_lock_count = 0;
 
 enum {
     FS_NONE = 0,

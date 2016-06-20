@@ -9,7 +9,7 @@
 #include <util/string/printf.h>
 #include <util/system/tls.h>
 
-POD_STATIC_THREAD(ui64) AcquireTime;
+Y_POD_STATIC_THREAD(ui64) AcquireTime;
 
 static size_t debugFd = 2;
 

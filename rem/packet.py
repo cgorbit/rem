@@ -122,7 +122,10 @@ class JobPacketImpl(object):
             old_file = self.binLinks.pop(binname)
             if isinstance(old_file, BinaryFile):
                 old_file.Unlink(self, binname)
-        self._create_link(binname, file)
+        if self.directory:
+            self._create_link(binname, file)
+        else:
+            self.binLinks[binname] = file.checksum
 
     def _vivify_link(self, context, link):
         if isinstance(link, str):
@@ -373,6 +376,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self.isResetable = isResetable
         self.done_indicator = set_tag
         self._set_waiting_tags(wait_tags)
+        self.notify_on_reset = notify_on_reset
+        self.notify_on_skipped_reset = notify_on_skipped_reset
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)
