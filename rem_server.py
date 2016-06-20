@@ -394,6 +394,14 @@ def pck_add_resource(pck_id, name, path):
     pck.rpc_add_resource(name, path)
 
 
+@traced_rpc_method()
+def pck_resolve_resources(pck_id):
+    pck = _scheduler.tempStorage.GetPacket(pck_id) or _scheduler.GetPacket(pck_id)
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+    pck.rpc_resolve_resources()
+
+
 @readonly_method
 @traced_rpc_method()
 def pck_list_files(pck_id):
@@ -501,6 +509,7 @@ class ApiServer(object):
             lookup_tags,
             pck_add_binary,
             pck_add_resource,
+            pck_resolve_resources,
             pck_add_job,
             pck_addto_queue,
             pck_delete,

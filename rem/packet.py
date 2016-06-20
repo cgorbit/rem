@@ -1270,13 +1270,23 @@ class SandboxPacket(PacketBase):
             return
 
         try:
-            # Must comes first (contains check, may throw)
-            self._do_resolve_release(resource_descr)
+            resolve = self._start_resolve_release(resource_descr)
         except MalformedResourceDescr as e:
             raise RpcUserError(ValueError(str(e)))
 
         self.resolved_releases[resource_descr] = None
         self.unresolved_release_count += 1
+        resolve()
+
+    # force re-resolve
+    def rpc_resolve_resources(self):
+        with self.lock:
+            for descr, res_id in self.resolved_releases.items():
+                if res_id is not None:
+                    resolve = self._start_resolve_release(descr)
+                    self.unresolved_release_count += 1
+                    self.resolved_releases[descr] = None
+                    resolve()
 
     def _on_release_resolved(self, resource_descr, f):
         with self.lock:
@@ -1308,15 +1318,22 @@ class SandboxPacket(PacketBase):
                 return
 
             for resource_descr in to_resolve:
-                self._do_resolve_release(resource_descr)
+                self._start_resolve_release(resource_descr)()
 
-    def _do_resolve_release(self, resource_descr):
+    # Implemented in 2 stages because # parse stage may throw and we don't want
+    # to modify self before it
+    def _start_resolve_release(self, descr):
         ctx = self._get_scheduler_ctx()
         resolver = ctx.sandbox_release_resolver
 
-        # FIXME Use int result in resolve() if it ready
-        resolver.resolve(resource_descr
-            ).subscribe(lambda f: self._on_release_resolved(resource_descr, f))
+        req = resolver.parse_resource_descr(descr)
+
+        def resolve():
+            # FIXME Use int result in resolve() if it ready
+            resolver.resolve(req
+                ).subscribe(lambda f: self._on_release_resolved(descr, f))
+
+        return resolve
 
     def _produce_job_graph_executor_custom_resources(self):
         assert not self.files_modified

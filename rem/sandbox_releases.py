@@ -37,7 +37,7 @@ class SandboxReleasesResolver(object):
         self._releases = {}
 
     @classmethod
-    def _parse_resource_descr(cls, descr):
+    def parse_resource_descr(cls, descr):
         m = _RESOURCE_DESCR_RE.match(descr)
         if not m:
             raise MalformedResourceDescr()
@@ -50,8 +50,7 @@ class SandboxReleasesResolver(object):
             released=groups[0] is None or groups[0] == 'rel'
         )
 
-    def resolve(self, descr):
-        req = self._parse_resource_descr(descr)
+    def resolve(self, req):
         logging.debug(str(req))
 
         #import traceback
