@@ -1,6 +1,7 @@
 import re
 import socket
 import xmlrpclib
+import time
 import httplib
 from SimpleXMLRPCServer import SimpleXMLRPCServer as SimpleXMLRPCServerOrig
 from SocketServer import ThreadingMixIn
@@ -18,15 +19,19 @@ class AsyncXMLRPCServer(ThreadingMixIn, SimpleXMLRPCServer):
         SimpleXMLRPCServer.__init__(self, *args, **kws)
         self.poolsize = poolsize
         self.requests = StdQueue.Queue(poolsize)
+        self._timings = {}
 
-    def handle_request(self):
+    def handle_request(self, timings):
         try:
             request = self.get_request()
         except socket.error:
             logging.error("XMLRPCServer: socket error")
             return
-        if self.verify_request(*request):
-            self.requests.put(request)
+
+        timings.append(time.time())
+        self._timings[id(request[0])] = timings
+
+        self.requests.put(request)
 
 class XMLRPCMethodNotSupported(xmlrpclib.Fault):
     pass

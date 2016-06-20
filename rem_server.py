@@ -39,15 +39,33 @@ class DuplicatePackageNameException(Exception):
 
 class AuthRequestHandler(SimpleXMLRPCRequestHandler):
     def _dispatch(self, method, params):
+        timings = self.server._timings.pop(id(self.request))
+        timings.append(time.time())
+
         func = self.server.funcs.get(method)
         if not func:
             raise Exception('method "%s" is not supported' % method)
         username = self.headers.get("X-Username", "Unknown")
         log_level = getattr(func, "log_level", None)
         log_func = getattr(logging, log_level, None) if log_level else None
-        if callable(log_func):
-            log_func("RPC method (user: %s, host: %s): %s %r", username, self.address_string(), method, params)
-        return func(*params)
+
+        try:
+            return func(*params)
+
+        finally:
+            try:
+                timings.append(time.time())
+
+                delays = [
+                    '%.3f' % (timings[idx + 1] - timings[idx])
+                        for idx in range(len(timings) - 1)
+                ]
+
+                if callable(log_func):
+                    log_func("RPC method\t%s\t(user: %s, host: %s):\t%s\t%r",
+                        ','.join(delays), username, self.address_string(), method, params)
+            except:
+                pass
 
 
 _scheduler = None
@@ -482,7 +500,8 @@ class ApiServer(object):
         while self.alive:
             rout, _, _ = select.select((rpc_fd,), (), (), 0.01)
             if rpc_fd in rout:
-                self.rpcserver.handle_request() # FIXME Can I use lower level API to not to hold threads?
+                timings = [time.time()]
+                self.rpcserver.handle_request(timings) # FIXME Can I use lower level API to not to hold threads?
 
     def start(self):
         self.xmlrpcworkers = [XMLRPCWorker(self.rpcserver.requests, self.rpcserver.process_request_thread)
