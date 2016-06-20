@@ -73,6 +73,10 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
                     else:
                         params_descr = params
 
+                    params_descr = str(params_descr)
+                    if len(params_descr) > 4096:
+                        params_descr = params_descr[:4096] + '...'
+
                     log_func("RPC method\t%s\t(user: %s, host: %s):\t%s\t%r",
                         ','.join(delays), username, self.address_string(), method, params_descr)
             except:

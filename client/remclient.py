@@ -604,6 +604,12 @@ class Tag(object):
         return self.proxy.get_dependent_packets_for_tag(self.name)
 
 
+class ETagEvent(object):
+    Unset = 0
+    Set   = 1
+    Reset = 2
+
+
 class TagsBulk(object):
     """Class for bulk operations on tags."""
 
@@ -617,11 +623,7 @@ class TagsBulk(object):
             self.tags = []
 
     def Check(self):
-        multicall = xmlrpclib.MultiCall(self.conn.proxy)
-        for tag in self.tags:
-            multicall.check_tag(tag)
-        multicall_iterator = multicall()
-        self.states = dict(zip(self.tags, multicall_iterator))
+        self.states = self.conn.proxy.check_tags(self.tags)
 
     def FilterSet(self):
         self.Check()
@@ -631,23 +633,17 @@ class TagsBulk(object):
         self.Check()
         return TagsBulk(self.conn, filter(lambda x: not self.states[x], self.tags))
 
+    def _update(self, ev):
+        self.conn.proxy.update_tags([(tag, ev) for tag in self.tags])
+
     def Set(self):
-        multicall = xmlrpclib.MultiCall(self.conn.proxy)
-        for obj in self.tags:
-            multicall.set_tag(obj)
-        return multicall()
+        self._update(ETagEvent.Set)
 
     def Unset(self):
-        multicall = xmlrpclib.MultiCall(self.conn.proxy)
-        for obj in self.tags:
-            multicall.unset_tag(obj)
-        return multicall()
+        self._update(ETagEvent.Unset)
 
     def Reset(self):
-        multicall = xmlrpclib.MultiCall(self.conn.proxy)
-        for obj in self.tags:
-            multicall.reset_tag(obj)
-        return multicall()
+        self._update(ETagEvent.Reset)
 
     def GetTags(self):
         return self.tags
