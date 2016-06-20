@@ -42,11 +42,14 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
         timings = self.server._timings.pop(id(self.request))
         timings.append(time.time())
 
+        is_multicall = method == 'system.multicall'
+
         func = self.server.funcs.get(method)
         if not func:
             raise Exception('method "%s" is not supported' % method)
         username = self.headers.get("X-Username", "Unknown")
-        log_level = getattr(func, "log_level", None)
+
+        log_level = 'debug' if is_multicall else getattr(func, "log_level", None)
         log_func = getattr(logging, log_level, None) if log_level else None
 
         try:
@@ -62,8 +65,16 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
                 ]
 
                 if callable(log_func):
+                    if is_multicall:
+                        call_count = {}
+                        for r in params[0]:
+                            call_count.setdefault(r['methodName'], [0])[0] += 1
+                        params_descr = call_count
+                    else:
+                        params_descr = params
+
                     log_func("RPC method\t%s\t(user: %s, host: %s):\t%s\t%r",
-                        ','.join(delays), username, self.address_string(), method, params)
+                        ','.join(delays), username, self.address_string(), method, params_descr)
             except:
                 pass
 
