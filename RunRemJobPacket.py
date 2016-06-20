@@ -209,11 +209,11 @@ class RunRemJobPacket(SandboxTask):
                 symlink('../../' + landing_path, target_path)
 
             #logging.debug('symlink(%s, %s)' % (target, name))
-        self.ctx['created_symlinks'] = list(symlinks)
+        self.ctx['_created_symlinks'] = list(symlinks)
 
     @property
     def __custom_resources(self):
-        return self.ctx['custom_resources_parsed']
+        return self.ctx['_custom_resources_parsed']
 
     def __do_on_execute(self):
         logging.debug("on_execute work dir: %s" % os.getcwd())
@@ -280,9 +280,9 @@ class RunRemJobPacket(SandboxTask):
         os.mkdir('executor')
         run_process(['tar', '-C', 'executor', '-xf', executor_path])
 
-        if 'custom_resources_parsed' not in self.ctx:
+        if '_custom_resources_parsed' not in self.ctx:
             try:
-                self.ctx['custom_resources_parsed'] \
+                self.ctx['_custom_resources_parsed'] \
                     = self.__parse_custom_resources_any(self.ctx['custom_resources'])
             except:
                 reraise('E_MALFORMED_CUSTOM_RESOURCES')
@@ -332,8 +332,8 @@ class RunRemJobPacket(SandboxTask):
 
         run_process(argv, environment=env, log_prefix='executor')
 
-        if 'created_symlinks' in self.ctx:
-            for name in self.ctx['created_symlinks']:
+        if '_created_symlinks' in self.ctx:
+            for name in self.ctx['_created_symlinks']:
                 try:
                     os.unlink(name)
                 except:
