@@ -164,6 +164,8 @@ class Queue(object):
                     raise DuplicatePackageNameException(e.faultString)
                 else:
                     self.conn.logger.warning(e.faultString)
+            else:
+                raise RuntimeError(e.faultString)
 
     def Suspend(self):
         """приостанавливает выполнение новых задач из очереди"""
@@ -230,7 +232,7 @@ class JobPacket(object):
 
     def __init__(self, connector, name, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
                  kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
-                 notify_on_reset=False, notify_on_skipped_reset=True):
+                 notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False):
         self.conn = connector
         self.proxy = connector.proxy
         if check_tag_uniqueness and self.proxy.check_tag(set_tag):
@@ -241,8 +243,11 @@ class JobPacket(object):
             kill_all_jobs_on_error, packet_name_policy, resetable,
         ]
 
-        if notify_on_reset or not notify_on_skipped_reset:
+        if notify_on_reset or not notify_on_skipped_reset or is_sandbox:
             args.extend([notify_on_reset, notify_on_skipped_reset])
+
+        if is_sandbox:
+            args.append(is_sandbox)
 
         self.id = self.proxy.create_packet(*args)
 
@@ -293,6 +298,9 @@ class JobPacket(object):
         """добавляет файлы, необходимые для выполнения пакета
         принимает один параметр files - полностью аналогичный одноименному параметру для AddJob"""
         JobPacketInfo(self.conn, self.id).AddFiles(files, retries)
+
+    def Info(self):
+        return self.conn.PacketInfo(self)
 
 
 class JobPacketInfo(object):
@@ -370,14 +378,14 @@ class JobPacketInfo(object):
     def Restart(self, suspend=False, files=None, reset_tag=False, reset_message=None):
         """рестарт выполнения (перезапустит все job'ы, в том числе выполняющиеся и уже выполненные"""
         if suspend or files or reset_tag:
-            suspend_packet = suspend or files
+            suspend_temporary = suspend or files
             if reset_tag:
-                self.proxy.pck_reset(self.pck_id, suspend_packet, reset_tag, reset_message) # v3
+                self.proxy.pck_reset(self.pck_id, suspend_temporary, reset_tag, reset_message) # v3
             else:
-                self.proxy.pck_reset(self.pck_id, suspend_packet) # v2
+                self.proxy.pck_reset(self.pck_id, suspend_temporary) # v2
             if files:
                 self.AddFiles(files)
-            if not suspend:
+            if not suspend and suspend_temporary:
                 self.proxy.pck_resume(self.pck_id)
         else:
             self.proxy.pck_reset(self.pck_id) # v1
@@ -418,7 +426,7 @@ class JobPacketInfo(object):
                 cs_calc.update(buff)
             return cs_calc.hexdigest()
 
-    def _GetFileChecksum(self, path, db_path=None):
+    def _get_file_checksum_from_db(self, path, db_path=None):
         if db_path is None:
             return self._CalcFileChecksum(path)
 
@@ -460,6 +468,16 @@ class JobPacketInfo(object):
                 self.conn.logger.error("check_binary_and_lock raised exception: code=%s descr=%s", e.faultCode, e.faultString)
             return False
 
+    def _get_file_checksum(self, filename):
+        checksum = self._get_file_checksum_from_db(filename, self.conn.checksumDbPath)
+        if not self._TryCheckBinaryAndLock(checksum, filename):
+            data = open(filename, 'r').read()
+            checksum2 = hashlib.md5(data).hexdigest()
+            if (checksum2 == checksum) or not self._TryCheckBinaryAndLock(checksum2, filename):
+                self.proxy.save_binary(xmlrpclib.Binary(data))
+            checksum = checksum2
+        return checksum
+
     def _AddFiles(self, files):
         """добавляет или изменяет файлы, необходимые для работы пакета
         принимает один параметр files - полностью идентичный одноименному параметру для JobPacket.AddJob"""
@@ -485,18 +503,13 @@ class JobPacketInfo(object):
             files = make_files_dict(files)
 
         for fname, fpath in files.iteritems():
-            if not os.path.isfile(fpath):
-                raise AttributeError("can't find file \"%s\"" % fpath)
-
-            checksum = self._GetFileChecksum(fpath, self.conn.checksumDbPath)
-            if not self._TryCheckBinaryAndLock(checksum, fpath):
-                data = open(fpath, 'r').read()
-                checksum2 = hashlib.md5(data).hexdigest()
-                if (checksum2 == checksum) or not self._TryCheckBinaryAndLock(checksum2, fpath):
-                    self.proxy.save_binary(xmlrpclib.Binary(data))
-                checksum = checksum2
-
-            self.proxy.pck_add_binary(self.pck_id, fname, checksum)
+            if fpath.startswith('sbx:'):
+                self.proxy.pck_add_resource(self.pck_id, fname, fpath)
+            else:
+                if not os.path.isfile(fpath):
+                    raise AttributeError("can't find file \"%s\"" % fpath)
+                checksum = self._get_file_checksum(fpath)
+                self.proxy.pck_add_binary(self.pck_id, fname, checksum)
 
     def AddFiles(self, files, retries=1):
         return _RetriableMethod(self._AddFiles, retries, True, AttributeError)(files)
@@ -670,7 +683,7 @@ class Connector(object):
 
     def Packet(self, pckname, priority=MAX_PRIORITY, notify_emails=[], wait_tags=(), set_tag=None,
                check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True,
-               notify_on_reset=False, notify_on_skipped_reset=True):
+               notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False):
         """создает новый пакет с именем pckname
             priority - приоритет выполнения пакета
             notify_emails - список почтовых адресов, для уведомления об ошибках
@@ -688,7 +701,8 @@ class Connector(object):
                 kill_all_jobs_on_error=kill_all_jobs_on_error,
                 packet_name_policy=self.packet_name_policy,
                 notify_on_reset=notify_on_reset,
-                notify_on_skipped_reset=notify_on_skipped_reset
+                notify_on_skipped_reset=notify_on_skipped_reset,
+                is_sandbox=is_sandbox
             )
         except xmlrpclib.Fault, e:
             if 'DuplicatePackageNameException' in e.faultString:
