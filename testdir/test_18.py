@@ -491,9 +491,9 @@ class T18(unittest.TestCase):
                         for idx in range(5)
                 ]
 
-                pck = rem.packet.JobPacket('foobar', 0, ctx, [], wait_tags)
+                pck = rem.packet.LocalPacket('foobar', 0, ctx, [], wait_tags)
 
-                sched.AddPacketToQueue('q', pck)
+                sched.AddPacketToQueue(pck, sched._queue('q'))
 
                 del pck
 

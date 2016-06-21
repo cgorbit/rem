@@ -1,5 +1,5 @@
 import unittest
-import rem
+from rem.storages import LocalTag, TagWrapper
 
 
 class T07(unittest.TestCase):
@@ -8,10 +8,10 @@ class T07(unittest.TestCase):
     def testTagWrapperSerialization(self):
         import cPickle
 
-        tag = rem.LocalTag("test", lambda *args: None)
-        wrapOrig = rem.storages.TagWrapper(tag)
+        tag = LocalTag("test", lambda *args: None)
+        wrapOrig = TagWrapper(tag)
         wrapDesc = cPickle.dumps(wrapOrig)
         wrapNew = cPickle.loads(wrapDesc)
-        self.assertTrue(isinstance(wrapNew, rem.storages.TagWrapper))
+        self.assertTrue(isinstance(wrapNew, TagWrapper))
         self.assertEqual(wrapNew.name, wrapOrig.name)
 

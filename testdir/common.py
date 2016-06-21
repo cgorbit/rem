@@ -4,10 +4,14 @@ import os.path
 import subprocess
 import remclient
 import random
+import unittest
+import types
 
 __all__ = ["PrintPacketResults", "TestingQueue", "LmtTestQueue", "Config",
            "WaitForExecution", "WaitForStates", "WaitForExecutionList", "PrintCurrentWorkingJobs",
-           "ServiceTemporaryShutdown", "RestartService", "RemServerWrapper"]
+           "ServiceTemporaryShutdown", "RestartService", "RemServerWrapper",
+           "TestCase", "AnyExecutionState"
+           ]
 
 
 class SharedValue(object):
@@ -26,31 +30,56 @@ Config = SharedValue()
 def _toPacketInfoIfNeed(pck):
     return pck.conn.PacketInfo(pck) if isinstance(pck, remclient.JobPacket) else pck
 
-def WaitForExecution(pck, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
+AnyExecutionState = object()
+
+def WaitForExecution(pck, fin_states=["SUCCESSFULL", "ERROR"], poll_interval=1.0, use_extended_states=False):
+    if use_extended_states:
+        def extend_state(st):
+            return st + [AnyExecutionState] * (3 - len(st))
+
+        if not isinstance(fin_states, types.FunctionType):
+            fin_states = map(extend_state, fin_states)
+
+        def get_state(pck):
+            return pck.extended_state
+
+        def cmp_state(lhs, rhs):
+            return all(map(lambda (a, b): AnyExecutionState in [a, b] or a == b, zip(lhs, rhs)))
+    else:
+        def get_state(pck):
+            return pck.state
+
+        def cmp_state(lhs, rhs):
+            return lhs == rhs
+
     while True:
         pck.update()
-        cur_state = pck.state
+        cur_state = get_state(pck)
 
-        if cur_state in fin_states:
-            break
+        if isinstance(fin_states, types.FunctionType):
+            if fin_states(cur_state):
+                return cur_state
+
+        elif any(cmp_state(cur_state, i) for i in fin_states):
+            return cur_state
 
         logging.info("packet %s state: %s" % (pck.pck_id, cur_state))
-        time.sleep(timeout)
+        time.sleep(poll_interval)
 
-    return cur_state
+    raise
 
-def WaitForStates(some, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
+def WaitForStates(some, fin_states=["SUCCESSFULL", "ERROR"], poll_interval=1.0):
     if isinstance(some, list):
-        return WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, timeout)
+        return WaitForExecutionList(map(_toPacketInfoIfNeed, some), fin_states, poll_interval)
     else:
-        return WaitForExecution(_toPacketInfoIfNeed(some), fin_states, timeout)
+        return WaitForExecution(_toPacketInfoIfNeed(some), fin_states, poll_interval)
 
 def PrintPacketResults(pckInfo):
     for job in pckInfo.jobs:
         print job.shell, "\n".join(r.data for r in job.results)
 
 
-def WaitForExecutionList(pckList, fin_states=("SUCCESSFULL", "ERROR"), timeout=1.0):
+def WaitForExecutionList(pckList, fin_states=["SUCCESSFULL", "ERROR"], poll_interval=1.0):
     while True:
         remclient.JobPacketInfo.multiupdate(pckList)
         waitPckCount = sum(1 for pck in pckList if pck.state not in fin_states)
@@ -64,7 +93,7 @@ def WaitForExecutionList(pckList, fin_states=("SUCCESSFULL", "ERROR"), timeout=1
         if waitPckCount == 0:
             return [pck.state for pck in pckList]
 
-        time.sleep(timeout)
+        time.sleep(poll_interval)
 
 
 def PrintCurrentWorkingJobs(queue):
@@ -189,3 +218,8 @@ class RemServerWrapper(object):
 
         def AsNative(self, rem):
             return rem.connector.Tag(self.local_name_for(rem))
+
+
+class TestCase(unittest.TestCase):
+    def _is_sandbox_only_setup(self):
+        return bool(self.connector.proxy.get_config()['all_packets_in_sandbox'])

@@ -10,6 +10,9 @@ import xmlrpclib
 import remclient
 from testdir import *
 
+from rem.packet_state import PacketState
+from rem.job_graph import GraphState
+
 
 class T02(unittest.TestCase):
     """Checking common server functionality"""
@@ -113,7 +116,7 @@ class T02(unittest.TestCase):
         self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
         logging.info("packet %s(%s) added to queue %s, waiting until doing", pckname, pck.id, TestingQueue.Get())
         pckInfo = self.connector.PacketInfo(pck)
-        self.assertEqual(WaitForExecution(pckInfo, "WAITING"), "WAITING")
+        self.assertEqual(WaitForExecution(pckInfo, ["WAITING", "ERROR", "SUCCESSFULL"]), "WAITING")
         self.assertEqual(len(pckInfo.jobs), 2)
         self.assertEqual(WaitForExecution(pckInfo), "ERROR")
         pckInfo.Delete()
@@ -150,9 +153,12 @@ class T02(unittest.TestCase):
             #logging.info(lst)
             return any(val in el for el in lst)
 
+        # TODO Make this code (and other rem.* modules with implementation) more strict
         def list_processes():
-            p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
-            return [l.rstrip('\n') for l in p.stdout]
+            try:
+                return self.connector.proxy.pck_list_worker_host_user_processes(pck.pck_id)
+            except:
+                return []
 
         uniq_id = '12344321%s' % time.time()
         delay = 1.5
@@ -163,6 +169,15 @@ class T02(unittest.TestCase):
         def check(res):
             self.assertEqual(contains(list_processes(), uniq_id), res)
 
+        def wait(state):
+            WaitForExecution(pck, [state], use_extended_states=True),
+
+        def wait_suspended():
+            wait([PacketState.PAUSED])
+
+        def wait_working():
+            wait([PacketState.RUNNING, AnyExecutionState, GraphState.WORKING])
+
         pckname = "suspend-kill-%.f" % time.time()
         pck = self.connector.Packet(pckname, time.time())
         pck.AddJob("sleep 10 && echo %s" % uniq_id)
@@ -170,19 +185,22 @@ class T02(unittest.TestCase):
 
         pck = self.connector.PacketInfo(pck.id)
 
+        wait_working()
+        check(True)
+
         pck.Stop()
-        sleep()
+        wait_suspended()
         check(False)
 
         pck.Resume()
-        sleep()
+        wait_working()
         check(True)
 
         pck.Suspend()
         check(True)
 
         pck.Stop()
-        sleep()
+        wait_suspended()
         check(False)
 
         pck.Delete()
@@ -202,19 +220,51 @@ class T02(unittest.TestCase):
     def testMovePacket(self):
         pckname = "moving-packet-%d" % self.timestamp
         pck = self.connector.Packet(pckname, self.timestamp)
-        pck.AddJob("sleep 2", tries=1)
+        pck.AddJob("sleep 5", tries=1)
+
         fakePck = self.connector.Packet(pckname + "-fake", self.timestamp)
+
         queue1 = TestingQueue.Get()
         queue2 = LmtTestQueue.Get()
+
         self.connector.Queue(queue1).AddPacket(pck)
         self.connector.Queue(queue2).AddPacket(fakePck)
+
         logging.info('Packet id: %s', pck.id)
+
         pckInfo = self.connector.PacketInfo(pck.id)
+
+        self.assertTrue(
+            WaitForExecution(
+                pckInfo,
+                [[PacketState.RUNNING, AnyExecutionState, GraphState.WORKING]],
+                use_extended_states=True
+            )[0] == PacketState.RUNNING)
+
         pckInfo.Suspend()
+
+        try:
+            pckInfo.MoveToQueue(queue1, queue2)
+        except xmlrpclib.Fault as e:
+            self.assertTrue("Can't move packets with running jobs" in str(e))
+        else:
+            self.assertTrue(False and "Must raise")
+
+        pckInfo.Stop()
+
+        self.assertTrue(
+            WaitForExecution(
+                pckInfo,
+                [[PacketState.PAUSED]],
+                use_extended_states=True
+            )[0] == PacketState.PAUSED)
+
         pckInfo.MoveToQueue(queue1, queue2)
         pckInfo.MoveToQueue(queue2, queue2)
         pckInfo.MoveToQueue(queue2, queue1)
+
         pckInfo.Resume()
+
         self.assertEqual(WaitForExecution(pckInfo), "SUCCESSFULL")
 
     def testMoveErroredPacket(self):
@@ -225,7 +275,7 @@ class T02(unittest.TestCase):
         queue2 = LmtTestQueue.Get()
         self.connector.Queue(queue1).AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
-        time.sleep(2.0)
+        self.assertEqual(WaitForExecution(pckInfo), "ERROR")
         pckInfo.MoveToQueue(queue1, queue2)
         pckInfo.MoveToQueue(queue2, queue2)
 

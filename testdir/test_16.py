@@ -1,6 +1,7 @@
 import unittest
 import logging
 import remclient
+import time
 from testdir import *
 
 
@@ -18,6 +19,6 @@ class T16(unittest.TestCase):
         self.connector.Queue('test_lifetime').AddPacket(pck)
         pckInfo = self.connector.PacketInfo(pck.id)
         self.connector.Queue('test_lifetime').SetSuccessLifeTime(1)
-        WaitForExecution(pckInfo, "SUCCESSFULL")
+        WaitForExecution(pckInfo, ["SUCCESSFULL"])
         RestartService(Config.Get().server1.projectDir)
         self.assertRaises(pckInfo.update)
