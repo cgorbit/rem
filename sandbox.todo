@@ -1,0 +1,197 @@
+--------------------------------------------------------------------------------
+
+perun (PHASE_0)
+----0. packet_legacy.py _convert_backup_to_v2
+----1. job*.result dissapeared when switching back to DummyGraphExecutor
+----2. packet.py: waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
+
+
+freshness@veles02 (PHASE_1)
+    0. packet._notify_has_pending_if_need может не создать директорию для SandboxPacket,
+       тогда его надо загасить (в текущем виде вообще AssertionError и не стартанёт)
+----1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
+----X. Не resume'ятся очереди sbx: при рестарте сервера
+    0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
+       таски такой переход осуществляют
+    0. sky share результатами недоступен в Sandbox
+----0. Some suitable way to create FRESHNESS_SCRIPTS resource
+    2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
+    3. Add some whole-packet _error_message from sandbox_remote_packet (display
+       in rem-tool and email messages)
+    3. rem-tool
+        - is_sandbox=True (потому что sandbox_task_id ещё может не быть)
+        - last sandbox_task_id (link to web-page)
+        - resolved_releases?
+        - whole-packet error (if sandbox_remote_packet fail)
+    3. !Retriable /TIME_WAIT для EXCEPTION тасков
+        - EXCEPTION -- Temporary or Unknown
+        - FAILURE -- Permanent + __last_rem_error
+        * Or maybe both EXCEPTION + __last_rem_error
+    7. Cache locality
+    4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
+    5. Unpickable всюду
+    6. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
+
+
+production-quality (PHASE_2)
+----0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
+
+    1. ttl на ресурсы выхлопа RUN_REM_JOBPACKET:
+       + невозможность сделать rpc_resume, если REM_JOBPACKET_EXECUTION_SNAPSHOT протух
+            -> нужно неявно делать pck_restart
+            * wait_dep_tags могут быть непустыми из-за legacy behaviour
+            ** FIXME Как лучше определять, что причина
+                -- протухший REM_JOBPACKET_EXECUTION_SNAPSHOT
+                (или, что гораздо менее вероятно, python (и то, если только дефолтный))
+
+    1. latest_release/latest_resource syntax
+       - a. резолвинг сразу после create_packet, b. сразу после len(wait_dep_tags) == 0
+       - кэш живёт секунд 5
+       - pck_re_resolve_resources
+
+    6. различать причины ошибок в RunRemJobPacket
+        * Для PHASE_1 можно всё считать Retriable
+        # FIXME Но как тогда уведомлять об ошибках, если они Retriable?
+
+        * Разница между Job(tries=5) и этим Retriable в том, что тут я могу
+        пытаться понять, какие ошибки на самом деле Permanent, а tries=5 -- это
+        очень грубое приближение.
+
+        Retriable:
+            - мой код оказался не готов к каким-то вариациям данных
+            - не получилось зафетчить ресурс
+        Not retriable:
+            - ресурса не существует / не существует пути внутри ресурса
+              # TODO отличаться temporary ошибку в sync_resource от permanent
+              # 1. NoSuchResource, 2. others
+
+    2. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
+    3. PARALLEL resources sync?
+        FIXME Почему меня тащили по skynet?
+              Потому что локальный sandbox и не работало по HTTP?
+    4. python.tar.gz: больше модулей
+    5. обновление дефолтного python.tar.gz без рестарта?
+    6. per-jobpacket python.tar.gz?
+    7. cancel'ить WrongTaskIdError-таски в соответствие текущему стейту:
+        1. периодический ping на тасках -- не оперативно, может не быть дырок
+    --> 2. при старте с бэкапа получать список работающих тасков и убивать ненужные
+
+    9. soft_restart, soft_resume
+
+--------------------------------------------------------------------------------
+
+shared-folder: 4755
+    foobar.py
+    hello.txt
+
+two-files.tar: 4753
+    file1
+    file2
+
+geodata3.bin: 4751
+
+
+{
+    "_1": "sbx:4755/*.py",
+    "4753-1": "sbx:4753/file1",
+    "4753-as-folder": "sbx:4753/",
+    "4753-as-archive": "sbx:4753",
+    "_2": "sbx:4753/*",
+    "geodata3.bin": "sbx:4751",
+    "4755-folder": "sbx:4755/"
+}
+
+--------------------------------------------------------------------------------
+
+1. продлевать время жизни ресурсам?
+
+2. files:
+    0. python
+    1. dpkg -l | grep python-
+
+    2. NER: /Berkanavt/freshness/data/ner
+
+    AddFiles
+        2. Z2: /Berkanavt/freshness/scripts/rem
+        4. Z2: yandex-search-freshness-spok-feed-finder (/Berkanavt/freshness/bin/feed_finder)
+
+3. pck-XXXX и симлинки в них можно оставить прям для простоты
+
+4. Большие файлы джойнить в единые ресурсы не хочу.
+   Маленькие -- не знаю, клеить или нет. Почему-то хочется клеить.
+
+5.
+{
+    'foo27': '/usr/bin/foo27',
+    'blockstat.txt': 'sbx:1232131142',
+    '_any_alias_': 'sbx:1232131142/*', # may be archive
+    'feed_finder': 'sbx:1232131142/feed_finder', # may be archive
+}
+
+[
+    '/usr/bin/foo27',        # 'foo27': '/usr/bin/foo27'
+    ('/usr/bin', ['foo27']), # 'foo27': '/usr/bin/foo27'
+    ('sbx:1232131142', ['foo27', 'scripts/rem/foobar.py']),
+]
+python_path='scripts'
+
+    root/
+        python/
+            # REM_JOBPACKET_EXECUTOR_PYTHON
+
+        custom_resources/
+            ... # ARCADIA_PROJECT, ...
+
+        added_files/
+            28347234234234/
+                6a83598a817398e94d197ca13f74d587
+
+            41434243423423/
+                d2eb8379e609ef386f3166a824ab4835
+
+            30934902580302/
+                freshness_conf.py
+                freshness.py
+                nirvana.py
+                svn.py
+                media_portraits.py
+        io/
+            1234491104411.stderr
+            ...
+            2340942093493.stdout
+
+        executor/ # REM_JOBPACKET_EXECUTOR
+
+        work/
+            querydata_indexer  -> ../added_files/6a83598a817398e94d197ca13f74d587
+            feed_finder        -> ../added_files/d2eb8379e609ef386f3166a824ab4835
+            freshness_conf.py  -> ../30934902580302/freshness_pool.py
+            freshness.py       -> ../30934902580302/freshness.py
+            nirvana.py         -> ../30934902580302/nirvana.py
+            svn.py             -> ../30934902580302/svn.py
+            media_portraits.py -> ../30934902580302/media_portraits.py
+
+
+5.
+    Task: REM_JOBPACKET_EXECUTION
+
+        Input resources:
+            REM_JOBPACKET_EXECUTOR
+
+            REM_JOBPACKET_PYTHON # rem.cfg.run.sandbox_python_resource
+
+            REM_JOBPACKET_ADDED_FILE
+
+            # FIXME
+            REM_JOBPACKET_ADDED_FILE_SET
+                freshness_pool.py
+                fml.py
+
+        Output resources:
+            REM_JOBPACKET_EXECUTION_SNAPSHOT # intermediate
+            REM_JOBPACKET_EXECUTION_RESULTS
+
+
+o Если "все" джобы ждут на WAITING, нет смысла держать sandbox-thread
+
+o Что делать с не достаточно общим shebang у python-скриптов?
