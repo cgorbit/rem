@@ -9,7 +9,7 @@ create_rem_directory() {
     mkdir $NAME
     DIR=$(realpath $NAME)
 
-    for SRC in rem start-stop-daemon.py rem-server.py client network_topology.cfg; do
+    for SRC in rem start-stop-daemon.py rem-server.py rem_server.py client network_topology.cfg; do
         ln -sf ../$SRC $DIR/$SRC
     done
     cp rem.cfg-default $DIR/rem.cfg
