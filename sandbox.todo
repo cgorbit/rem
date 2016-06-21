@@ -27,7 +27,7 @@ freshness@veles02 (PHASE_1)
         - EXCEPTION -- Temporary or Unknown
         - FAILURE -- Permanent + __last_rem_error
         * Or maybe both EXCEPTION + __last_rem_error
-    7. Cache locality
+----7. Cache locality
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
     5. Unpickable всюду
     6. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)

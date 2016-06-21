@@ -1341,21 +1341,23 @@ class SandboxPacket(PacketBase):
         assert not self.files_modified
 
         files = {}
+        resources = []
 
         # FIXME Don't compute on each run?
         for filename, path in self.sbx_files.items():
             m = _SANDBOX_RELEASE_PATH_RE.match(path)
-            if m:
-                resource_descr, inner_path = m.groups()
 
-                if _INTEGER_RE.match(resource_descr):
-                    resource_id = int(resource_descr)
-                else:
-                    resource_id = self.resolved_releases[resource_descr]
+            resource_descr, inner_path = m.groups()
 
-                path = 'sbx:%s%s' % (resource_id, inner_path or '')
+            if _INTEGER_RE.match(resource_descr):
+                resource_id = int(resource_descr)
+            else:
+                resource_id = self.resolved_releases[resource_descr]
+
+            path = 'sbx:%s%s' % (resource_id, inner_path or '')
 
             files[filename] = path
+            resources.append(resource_id)
 
         if self.shared_files_resource_id:
             files = files.copy()
@@ -1365,19 +1367,19 @@ class SandboxPacket(PacketBase):
             for filename in self.bin_links.keys():
                 files[filename] = prefix + filename
 
-        return files
+        return sandbox_remote_packet.PacketResources(files, resources)
 
     def _create_job_graph_executor(self):
         assert not self.files_modified
-        files = self._produce_job_graph_executor_custom_resources()
+        resources = self._produce_job_graph_executor_custom_resources()
 
-        logging.debug('_create_job_graph_executor(%s): %s' % (self.id, files))
+        logging.debug('_create_job_graph_executor(%s): %s' % (self.id, resources))
 
         return sandbox_remote_packet.SandboxJobGraphExecutorProxy(
             sandbox_remote_packet.SandboxPacketOpsForJobGraphExecutorProxy(self),
             self.id,
             self.make_job_graph(),
-            files,
+            resources,
             #self.make_sandbox_task_params()
         )
 

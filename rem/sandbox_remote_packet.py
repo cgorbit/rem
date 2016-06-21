@@ -167,6 +167,12 @@ class RemotePacketsDispatcher(object):
     #   fail_on_any_error=False
 
     def _sbx_create_task(self, pck):
+        # TODO remove flow-fork after update on veles02:7104
+        files_setup = pck._custom_resources
+        resource_ids = []
+        if isinstance(files_setup, PacketResources):
+            files_setup, resource_ids = files_setup.files_setup, files_setup.resource_ids
+
         return self._sandbox.create_task(
             'RUN_REM_JOBPACKET',
             {
@@ -177,7 +183,8 @@ class RemotePacketsDispatcher(object):
                     else None,
                 'snapshot_resource_id': pck._start_snapshot_resource_id,
                 # '=' to prevent '[object Object]' rendering of parameter on Sandbox task page
-                'custom_resources': '=' + json.dumps(pck._custom_resources, indent=3),
+                'custom_resources': '=' + json.dumps(files_setup, indent=3),
+                'custom_resources_list': map(str, resource_ids),
                 'python_resource': self._sbx_python_resource_id,
             }
         )
@@ -896,6 +903,12 @@ class SandboxRemotePacket(object):
 def _produce_snapshot_data(pck_id, graph):
     pck = sandbox_packet.Packet(pck_id, graph)
     return base64.b64encode(pickle.dumps(pck, 2))
+
+
+class PacketResources(object):
+    def __init__(self, files_setup, resource_ids):
+        self.files_setup = files_setup
+        self.resource_ids = resource_ids
 
 
 class SandboxJobGraphExecutorProxy(object):
