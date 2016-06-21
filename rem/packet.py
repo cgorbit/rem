@@ -107,6 +107,10 @@ class DummyGraphExecutor(object):
 DUMMY_GRAPH_EXECUTOR = DummyGraphExecutor()
 
 
+def _value_or_None(*args):
+    return args[0] if args else None
+
+
 class PacketBase(Unpickable(
                            lock=PickableRLock,
 
@@ -120,7 +124,7 @@ class PacketBase(Unpickable(
 
                            bin_links=dict,
                            sbx_files=dict,
-                           directory=lambda *args: args[0] if args else None,
+                           directory=_value_or_None,
 
                            _repr_state=(str, ReprState.ERROR),
                            state=(str, ImplState.BROKEN),
@@ -131,6 +135,7 @@ class PacketBase(Unpickable(
                            notify_on_skipped_reset=(bool, True),
                            resolved_releases=dict,
                            unresolved_release_count=int,
+                           last_sandbox_task_id=_value_or_None,
 
                            history=list,
 
@@ -151,6 +156,7 @@ class PacketBase(Unpickable(
         self.queue = None
         self.finish_status = None
         self._saved_jobs_status = None
+        self.last_sandbox_task_id = None
 
         self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
@@ -771,7 +777,7 @@ class PacketBase(Unpickable(
 
         status = dict(name=self.name,
                       is_sandbox=isinstance(self, SandboxPacket),
-                      sandbox_task_id=None, # TODO # FIXME History of tasks? Or logs is enough?
+                      last_sandbox_task_id=self.last_sandbox_task_id, # TODO History of tasks
                       resolved_releases=self.resolved_releases,
                       state=self._repr_state,
                       extended_state=self._get_extended_state(),

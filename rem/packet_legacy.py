@@ -171,7 +171,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
         self.shared_files_resource_id = None
         self.resolved_releases = {}
         self.unresolved_release_count = 0
-        self.all_releases_resolved = True
 
         self.destroying = state == ReprState.HISTORIED
         self.sbx_files = {}
@@ -183,6 +182,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             (False if state == ReprState.ERROR and not self.is_broken else None)
 
         self._saved_jobs_status = None
+        self.last_sandbox_task_id = None
         self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
         self._repr_state = state # to avoid duplicates in pck.history

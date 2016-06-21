@@ -19,9 +19,9 @@ freshness@veles02 (PHASE_1)
     3. Add some whole-packet _error_message from sandbox_remote_packet (display
        in rem-tool and email messages)
     3. rem-tool
-        - is_sandbox=True (потому что sandbox_task_id ещё может не быть)
-        - last sandbox_task_id (link to web-page)
-        - resolved_releases?
+----    - is_sandbox=True (потому что sandbox_task_id ещё может не быть)
+----    - last sandbox_task_id (link to web-page)
+----    - resolved_releases?
         - whole-packet error (if sandbox_remote_packet fail)
     3. !Retriable /TIME_WAIT для EXCEPTION тасков
         - EXCEPTION -- Temporary or Unknown

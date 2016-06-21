@@ -23,17 +23,32 @@ class ICommander(object):
 def print_pck_info(pck, extended=False):
     workTime = pck.GetWorkingTime()
     hd = "packet '%s':" % pck.pck_id
-    print "%s\tname=%s,state=%s;wait=%r,priority=%s;working_time=%s;result_tag=%s;last_update='%s';notify_emails=%s" \
+    last_sandbox_task_id = getattr(pck, 'last_sandbox_task_id', None)
+    print "%s\tname=%s,state=%s;wait=%r,priority=%s;working_time=%s;result_tag=%s;last_update='%s';notify_emails=%s;is_sandbox=%s;last_sandbox_task_id=%s" \
         % (hd, pck.name, pck.state, 
            pck.wait, pck.priority, workTime, pck.result_tag, 
            time.strftime("%Y/%m/%d-%H:%M:%S", time.localtime(pck.history[-1][1]) if pck.history else "none"),
            getattr(pck, 'notify_emails', None),
+           getattr(pck, 'is_sandbox', False),
+           last_sandbox_task_id,
           )
+
     for job in pck.jobs:
         if job.state == "working": print "%sexec_shell=%s" % (" " * len(hd), job.shell)
+
     if extended:
+        resolved_releases = getattr(pck, 'resolved_releases', None)
+        if resolved_releases:
+            print "Resolved resources:"
+            for descr in sorted(resolved_releases.keys()):
+                print "\t%s: %s" % (descr, resolved_releases[descr])
+
+        if last_sandbox_task_id is not None:
+            print 'Sandbox url: https://sandbox.yandex-team.ru/task/%d/view' % last_sandbox_task_id
+
         for status, tstamp in pck.history:
             print "\t[%s] %s" % (time.ctime(tstamp), status)
+
         for job in pck.jobs:
             print "[SUBJOB %s] id: %s,\tshell: %s" % (getattr(job, 'desc', ''), getattr(job, 'id', None), job.shell)
             if not getattr(job, 'wait_jobs', None):

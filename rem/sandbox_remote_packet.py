@@ -312,7 +312,7 @@ prev_task: {prev_task}
                 return
 
             # FIXME fork locking (mallformed pck state)
-            pck._sandbox_task_id = task.id
+            pck._set_task_id(task.id)
             pck._set_state(RemotePacketState.STARTING)
 
             self._by_task_id[task.id] = pck
@@ -857,6 +857,10 @@ class SandboxRemotePacket(object):
         self._state = state
         logging.debug('%s new state %s, reason: %s' % (self.id, RemotePacketState._NAMES[state], reason))
 
+    def _set_task_id(self, id):
+        self._sandbox_task_id = id
+        self._ops._on_remote_packet_task_id(id)
+
     def cancel(self):
         remote_packets_dispatcher.cancel_packet(self)
 
@@ -964,6 +968,12 @@ class SandboxJobGraphExecutorProxy(object):
 
     def is_stopping(self):
         return self.stopping
+
+    def _on_remote_packet_task_id(self, id):
+        with self.lock:
+            if self.cancelled:
+                return
+            self._ops.on_sandbox_task_id(id)
 
     def _on_sandbox_packet_update(self, update, succeed_jobs, is_final):
         with self.lock:
@@ -1178,6 +1188,9 @@ class SandboxPacketOpsForJobGraphExecutorProxy(object):
         tag = self.pck.job_done_tag.get(job_id)
         if tag:
             tag.Set()
+
+    def on_sandbox_task_id(self, id):
+        self.pck.last_sandbox_task_id = id
 
     def create_job_runner(self, job):
         raise AssertionError()
