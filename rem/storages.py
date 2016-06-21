@@ -826,7 +826,7 @@ class TagStorage(object):
     # for calls from from RPC
     def _modify_tags_unsafe(self, updates):
         if not updates:
-            return future.READY_FUTURE
+            return READY_FUTURE
 
         cloud_updates = []
         local_updates = []

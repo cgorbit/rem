@@ -634,6 +634,8 @@ class TagsBulk(object):
         return TagsBulk(self.conn, filter(lambda x: not self.states[x], self.tags))
 
     def _update(self, ev):
+        if not self.tags:
+            return
         self.conn.proxy.update_tags([(tag, ev) for tag in self.tags])
 
     def Set(self):
