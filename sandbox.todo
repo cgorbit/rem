@@ -13,7 +13,7 @@ freshness@veles02 (PHASE_1)
 ----X. Не resume'ятся очереди sbx: при рестарте сервера
     0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
        таски такой переход осуществляют
-    0. sky share результатами недоступен в Sandbox
+----0. sky share результатами недоступен в Sandbox
 ----0. Some suitable way to create FRESHNESS_SCRIPTS resource
     2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
     3. Add some whole-packet _error_message from sandbox_remote_packet (display
