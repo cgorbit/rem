@@ -85,14 +85,14 @@ class LogPrinter(object):
 
 
 class Service(object):
-    def __init__(self, runargs, pidfile, logfile, name=None, checkname=None, customname=None):
+    def __init__(self, runargs, pidfile, logfile, name=None, checkname=None, customnames=None):
         self.runArgs = runargs
         self.pidFile = pidfile
         self.logFile = logfile
         self.name = name or os.path.split(self.runArgs[0])[-1]
         self.checkExecNames = [checkname or self.runArgs[0]]
-        if customname:
-            self.checkExecNames += [customname]
+        if customnames:
+            self.checkExecNames += customnames
 
     def CheckProcess(self):
         """Checks if daemon is started
@@ -215,7 +215,7 @@ class REMService(Service):
             runargs=runArgs, pidfile="var/rem.pid", logfile="var/rem.errlog", 
             name="remd%s" % (("(\"" + self.serverName + "\")") if self.serverName else ""),
             checkname="python",
-            customname="[remd]"
+            customnames=["[remd]", "remd"],
         )
 
     def Configure(self):
