@@ -2,6 +2,7 @@
 from __future__ import with_statement
 
 import os
+import sys
 import re
 import select
 import signal
@@ -14,22 +15,34 @@ import datetime
 import multiprocessing
 import signal
 import argparse
+import tempfile
+import shutil
+import subprocess
 
 from rem import constants, osspec
-from rem import traced_rpc_method
-from rem import CheckEmailAddress, JobPacket, PacketState, Scheduler, ThreadJobWorker, TimeTicker, XMLRPCWorker
-from rem import AsyncXMLRPCServer
+
+from rem.packet import LocalPacket, SandboxPacket
+from rem.scheduler import Scheduler
+from rem.workers import ThreadJobWorker, TimeTicker, XMLRPCWorker
+from rem.xmlrpc import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
-from rem.common import as_rpc_user_error, RpcUserError
+from rem.common import as_rpc_user_error, RpcUserError, NamedTemporaryDir, traced_rpc_method, CheckEmailAddress
 import rem.common
 import rem.fork_locking
 from rem.rem_logging import logger as logging
 import rem.rem_logging as rem_logging
 from rem.context import Context
 import rem.subprocsrv as subprocsrv
+import rem.sandbox
 import rem.subprocsrv_fallback
 import rem.job
+import rem.delayed_executor as delayed_executor
+import rem.resource_sharing
+from rem.queue import LocalQueue, SandboxQueue
+from rem.action_queue import ActionQueue
+from rem.sandbox_releases import SandboxReleasesResolver
+
 
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
@@ -104,7 +117,8 @@ def MakeDuplicatePackageNameException(pck_name):
 def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
                   kill_all_jobs_on_error=True,
                   packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY,
-                  resetable=True, notify_on_reset=False, notify_on_skipped_reset=True):
+                  resetable=True, notify_on_reset=False, notify_on_skipped_reset=True,
+                  is_sandbox=False):
 
     if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
@@ -112,10 +126,15 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
         rpc_assert(isinstance(notify_emails, list), "notify_emails must be list or None")
         for email in notify_emails:
             rpc_assert(CheckEmailAddress(email), "incorrect e-mail: " + email)
+
+    if _context.all_packets_in_sandbox:
+        is_sandbox = True
+
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
-    pck = JobPacket(packet_name, priority, _context, notify_emails,
+    pck_cls = SandboxPacket if is_sandbox else LocalPacket
+    pck = pck_cls(packet_name, priority, _context, notify_emails,
                     wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
-                    kill_all_jobs_on_error=kill_all_jobs_on_error, isResetable=resetable,
+                    kill_all_jobs_on_error=kill_all_jobs_on_error, is_resetable=resetable,
                     notify_on_reset=notify_on_reset,
                     notify_on_skipped_reset=notify_on_skipped_reset)
     _scheduler.RegisterNewPacket(pck, wait_tags)
@@ -133,8 +152,8 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
     if pck is not None:
         if isinstance(shell, unicode):
             shell = shell.encode('utf-8')
-        parents = [pck.jobs[int(jid)] for jid in parents]
-        pipe_parents = [pck.jobs[int(jid)] for jid in pipe_parents]
+        parents = map(int, parents)
+        pipe_parents = map(int, pipe_parents)
         job = pck.rpc_add_job(shell, parents, pipe_parents,
                               set_tag and _scheduler.tagRef.AcquireTag(set_tag),
                               tries, max_err_len, retry_delay, pipe_fail,
@@ -146,15 +165,22 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
 
 @traced_rpc_method("info")
 def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPLICATE_NAMES_POLICY):
-    pck = _scheduler.tempStorage.PickPacket(pck_id)
+    queue = _scheduler.rpc_get_queue(queue_name)
+
+    pck = _scheduler.tempStorage.GetPacket(pck_id)
     if not pck:
         raise MakeNonExistedPacketException(pck_id)
+
+    if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
+        raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
+
+    _scheduler.tempStorage.PickPacket(pck_id) # pop packet
 
     packet_name = pck.name
     if packet_name_policy & (constants.DENY_DUPLICATE_NAMES_POLICY | constants.WARN_DUPLICATE_NAMES_POLICY) and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
 
-    _scheduler.AddPacketToQueue(queue_name, pck)
+    _scheduler.AddPacketToQueue(pck, queue)
 
 
 @traced_rpc_method("info")
@@ -168,6 +194,16 @@ def pck_moveto_queue(pck_id, src_queue, dst_queue):
         return
     raise MakeNonExistedPacketException(pck_id)
 
+
+@traced_rpc_method("info")
+def pck_list_worker_host_user_processes(pck_id):
+    pck = _scheduler.GetPacket(pck_id)
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+
+    return pck._graph_executor.list_all_user_processes() \
+        if isinstance(pck, SandboxPacket) \
+        else rem.common.list_all_user_processes()
 
 #########
 
@@ -272,14 +308,14 @@ def queue_status(queue_name):
 def queue_list(queue_name, filter, name_regex=None, prefix=None):
     name_regex = name_regex and re.compile(name_regex)
     q = _scheduler.rpc_get_queue(queue_name, create=False)
-    return [pck.id for pck in q.ListPackets(filter=filter, name_regex=name_regex, prefix=prefix)]
+    return [pck.id for pck in q.rpc_list_packets(filter=filter, name_regex=name_regex, prefix=prefix)]
 
 
 @readonly_method
 @traced_rpc_method()
 def queue_list_updated(queue_name, last_modified, filter=None):
     q = _scheduler.rpc_get_queue(queue_name, create=False)
-    return [pck.id for pck in q.ListPackets(last_modified=last_modified, filter=filter)]
+    return [pck.id for pck in q.rpc_list_packets(last_modified=last_modified, filter=filter)]
 
 
 @traced_rpc_method("info")
@@ -347,11 +383,11 @@ def pck_reset(pck_id, suspend=False, reset_tag=False, reset_message=None):
         raise MakeNonExistedPacketException(pck_id)
 
     if reset_tag:
-        tag = pck.done_indicator
+        tag = pck.done_tag
         if tag:
             tag.Reset(reset_message)
 
-    pck.Reset(suspend=suspend)
+    pck.rpc_reset(suspend=suspend)
 
 
 @traced_rpc_method()
@@ -381,6 +417,22 @@ def pck_add_binary(pck_id, binname, checksum):
         pck.rpc_add_binary(binname, file)
         return
     raise MakeNonExistedPacketException(pck_id)
+
+
+@traced_rpc_method()
+def pck_add_resource(pck_id, name, path):
+    pck = _scheduler.tempStorage.GetPacket(pck_id) or _scheduler.GetPacket(pck_id)
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+    pck.rpc_add_resource(name, path)
+
+
+@traced_rpc_method()
+def pck_resolve_resources(pck_id):
+    pck = _scheduler.tempStorage.GetPacket(pck_id) or _scheduler.GetPacket(pck_id)
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+    pck.rpc_resolve_resources()
 
 
 @readonly_method
@@ -438,11 +490,22 @@ def get_backupable_state():
 def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
 
+
+@traced_rpc_method("debug")
+def get_config():
+    NoneType = type(None)
+    return {
+        key: value
+            for key, value in _context.__dict__.items()
+                if isinstance(value, (int, str, float, bool, NoneType))
+    }
+
+
 class ApiServer(object):
-    def __init__(self, port, poolsize, scheduler, allow_backup_method=False, readonly=False):
+    def __init__(self, port, poolsize, scheduler, allow_debug_rpc_methods=False, readonly=False):
         self.scheduler = scheduler
         self.readonly = readonly
-        self.allow_backup_method = allow_backup_method
+        self.allow_debug_rpc_methods = allow_debug_rpc_methods
         self.rpcserver = AsyncXMLRPCServer(poolsize, ("", port), AuthRequestHandler, allow_none=True)
         self.port = port
         self.rpcserver.register_multicall_functions()
@@ -451,16 +514,16 @@ class ApiServer(object):
     def _non_readonly_func_stub(self, name):
         def stub(*args, **kwargs):
             raise NotImplementedError('Function %s is not available in readonly interface' % name)
-
+        stub.__name__ = name
         return stub
 
-    def register_function(self, func, name):
+    def register_function(self, func):
         if self.readonly:
             is_readonly_method = getattr(func, 'readonly_method', False)
             if not is_readonly_method:
-                self.rpcserver.register_function(self._non_readonly_func_stub(name), name)
+                self.rpcserver.register_function(self._non_readonly_func_stub(func.__name__))
                 return
-        self.rpcserver.register_function(func, name)
+        self.rpcserver.register_function(func)
 
     def register_all_functions(self):
         funcs = [
@@ -470,6 +533,7 @@ class ApiServer(object):
             check_tags,
             create_packet,
             get_backupable_state,
+            get_config,
             get_dependent_packets_for_tag,
             get_tag_local_state,
             list_cloud_tags_masks,
@@ -477,6 +541,8 @@ class ApiServer(object):
             list_tags,
             lookup_tags,
             pck_add_binary,
+            pck_add_resource,
+            pck_resolve_resources,
             pck_add_job,
             pck_addto_queue,
             pck_delete,
@@ -504,11 +570,12 @@ class ApiServer(object):
             update_tags,
         ]
 
-        if self.allow_backup_method:
+        if self.allow_debug_rpc_methods:
             funcs.append(do_backup)
+            funcs.append(pck_list_worker_host_user_processes)
 
         for func in funcs:
-            self.register_function(func, func.__name__)
+            self.register_function(func)
 
     def request_processor(self):
         rpc_fd = self.rpcserver.fileno()
@@ -542,17 +609,18 @@ class RemDaemon(object):
         self._started = threading.Event()
         self._should_stop = threading.Event()
         self._stopped = threading.Event()
+        self._backups_thread = None
 
         self.scheduler = scheduler
         self.api_servers = [
             ApiServer(context.manager_port, context.xmlrpc_pool_size, scheduler,
-                      allow_backup_method=context.allow_backup_rpc_method)
+                      allow_debug_rpc_methods=context.allow_debug_rpc_methods)
         ]
         if context.manager_readonly_port:
             self.api_servers.append(ApiServer(context.manager_readonly_port,
                                               context.readonly_xmlrpc_pool_size,
                                               scheduler,
-                                              allow_backup_method=context.allow_backup_rpc_method,
+                                              allow_debug_rpc_methods=context.allow_debug_rpc_methods,
                                               readonly=True))
 
         for srv in self.api_servers:
@@ -560,6 +628,9 @@ class RemDaemon(object):
 
         self.regWorkers = []
         self.timeWorker = None
+
+        self._backups_enabled = context.backups_enabled
+        self._working_job_max_count = context.working_job_max_count
 
         self._start()
 
@@ -605,6 +676,8 @@ class RemDaemon(object):
         self._stopped.set()
 
     def _stop(self):
+        delayed_executor.stop(soft=True)
+
         logging.debug("rem-server\tenter_stop")
 
         for server in self.api_servers:
@@ -634,26 +707,31 @@ class RemDaemon(object):
 
         logging.debug("rem-server\tworkers_stopped")
 
-    # TODO Make it nice
+        # TODO Make it nice
         self.scheduler.Stop2()
         logging.debug("rem-server\tjournal_stopped")
 
-        logging.debug("rem-server\tbefore_backups_thread_join")
-        self._backups_thread.join()
-        logging.debug("rem-server\tafter_backups_thread_join")
+        # TODO Better
+        if _context.sandbox_api_url:
+            _context.sandbox_action_queue.stop() # FIXME better to stop before final backup
+
+        if self._backups_thread:
+            logging.debug("rem-server\tbefore_backups_thread_join")
+            self._backups_thread.join()
+            logging.debug("rem-server\tafter_backups_thread_join")
 
         logging.debug("%s children founded after custom kill", len(multiprocessing.active_children()))
         for proc in multiprocessing.active_children():
             proc.terminate()
 
-    # TODO Make it nice
+        # TODO Make it nice
         self.scheduler.Stop3()
 
     def _start_workers(self):
         self.scheduler.Start()
         logging.debug("rem-server\tafter_scheduler_start")
 
-        self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self.scheduler.poolSize)]
+        self.regWorkers = [ThreadJobWorker(self.scheduler) for _ in xrange(self._working_job_max_count)]
 
         self.timeWorker = TimeTicker()
         self.timeWorker.AddCallbackListener(self.scheduler.schedWatcher)
@@ -669,8 +747,9 @@ class RemDaemon(object):
             server.start()
         logging.debug("rem-server\tafter_rpc_workers_start")
 
-        self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")
-        self._backups_thread.start()
+        if self._backups_enabled:
+            self._backups_thread = ProfiledThread(target=self._backups_loop, name_prefix="Backups")
+            self._backups_thread.start()
 
         self._run_thread = ProfiledThread(target=self._run, name_prefix="Daemon")
         self._run_thread.start()
@@ -751,7 +830,7 @@ def _init_fork_locking(ctx):
     set_timeout(ctx.backup_fork_lock_friendly_timeout)
 
 
-def start_daemon(ctx, sched, wait=True):
+def start_daemon(ctx, sched):
     global _context
     global _scheduler
 
@@ -810,7 +889,13 @@ def create_scheduler(ctx, restorer=None):
 
 
 def run_server(ctx):
-    osspec.set_process_title("[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else ""))
+    if ctx.server_process_title:
+        name = ctx.server_process_title
+    elif ctx.use_ekrokhalev_server_process_title:
+        name = "[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else "")
+    else:
+        name = 'remd'
+    osspec.set_process_title(name)
 
     def logged(f, *args):
         logging.debug("rem-server\tbefore_%s" % f.__name__)
@@ -857,20 +942,124 @@ def create_process_runners(ctx):
     ctx.aux_runner = create_aux_runner()
 
 
+def _init_sandbox(ctx):
+    ctx.sandbox = rem.sandbox.Client(ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
+    ctx.resource_sharing_subproc = subprocsrv.create_runner()
+
+    shr = rem.resource_sharing.Sharer(
+        subproc=ctx.resource_sharing_subproc,
+        sandbox=ctx.sandbox,
+        task_owner=ctx.sandbox_task_owner,
+        task_priority=ctx.sandbox_task_priority,
+    )
+
+    ctx.sandbox_resource_sharer = shr
+
+    shr.start()
+
+
+def _copy_executor_files(dst_root):
+    src_root = os.path.dirname(sys.modules[__name__].__file__)
+
+    if src_root == '':
+        src_root = '.'
+
+    shutil.copy(src_root + '/run_sandbox_packet.py', dst_root + '/')
+
+    def allow(filter):
+        return (lambda _, files: [f for f in files if not filter(f)])
+
+    allow_py = allow(lambda f: f.endswith('.py'))
+
+    shutil.copytree(src_root + '/rem', dst_root + '/rem', ignore=allow_py)
+    shutil.copytree(src_root + '/client', dst_root + '/client', ignore=allow_py)
+
+
+def _share_sandbox_executor(ctx):
+    with NamedTemporaryDir(prefix='rem_sbx_exe') as work_dir:
+        os.chmod(work_dir, 0775)
+
+        resource_dir = work_dir + '/out'
+        os.mkdir(resource_dir)
+        os.chmod(resource_dir, 0775)
+
+        _copy_executor_files(resource_dir)
+
+        archive_basename = 'rem_executor.tar'
+        archive_filename = work_dir + '/' + archive_basename
+
+        subprocess.check_call(['tar', '-C', resource_dir, '-cf', archive_filename, '.'])
+
+        res_id = ctx.sandbox_resource_sharer.share(
+            'REM_JOBPACKET_EXECUTOR',
+            description='%s @ %s' % (
+                os.uname()[1],
+                datetime.datetime.fromtimestamp(time.time()).strftime('%Y-%m-%dT%H:%M:%S')
+            ),
+
+            #name='executor',
+            #directory=resource_dir,
+            #files=['.'],
+
+            name=archive_basename,
+            directory=work_dir,
+            files=[archive_basename],
+
+            arch='linux',
+            ttl=ctx.sandbox_executor_resource_ttl # TODO Reshare at runtime
+        )
+
+        return res_id.get()
+
+
+def init(ctx):
+    init_logging(ctx)
+    create_process_runners(ctx)
+    rem.common.set_proc_runner(ctx.aux_runner)
+
+    delayed_executor.start()
+
+    if ctx.sandbox_api_url:
+        _init_sandbox(ctx)
+
+        def reshare_sandbox_executor():
+            ctx.sandbox_executor_resource_id = _share_sandbox_executor(ctx)
+
+        ctx._reshare_sandbox_executor = reshare_sandbox_executor
+
+        if not ctx.sandbox_executor_resource_id:
+            reshare_sandbox_executor()
+
+def create_context(config):
+    ctx = Context(config)
+
+# TODO Join all sandbox initializations
+    if ctx.sandbox_api_url:
+        ctx.sandbox_client = rem.sandbox.Client(
+            ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
+
+    # FIXME Separate queues for task creation and release resolve?
+        ctx.sandbox_action_queue = ActionQueue(
+            thread_count=ctx.sandbox_invoker_thread_pool_size,
+            thread_name_prefix='SbxIO')
+
+        ctx.sandbox_release_resolver = SandboxReleasesResolver(
+            ctx.sandbox_action_queue, ctx.sandbox_client)
+
+    return ctx
+
+
 def main():
     opts = parse_arguments()
 
-    ctx = Context(opts.config)
+    ctx = create_context(opts.config)
 
     if opts.mode == 'test':
         ctx.log_warn_level = 'debug'
-        ctd.log_to_stderr = True
+        ctx.log_to_stderr = True
         ctx.register_objects_creation = True
 
-    init_logging(ctx)
-
-    create_process_runners(ctx)
-    rem.common.set_proc_runner(ctx.aux_runner)
+    init(ctx)
 
     if opts.mode == "start":
         run_server(ctx)
@@ -887,6 +1076,12 @@ def main():
 
     if ctx._subprocsrv_runner:
         ctx._subprocsrv_runner.stop()
+
+    delayed_executor.stop(soft=False)
+
+    if hasattr(ctx, 'sandbox_resource_sharer'):
+        ctx.sandbox_resource_sharer.stop()
+        ctx.resource_sharing_subproc.stop()
 
     logging.debug("rem-server\texit_main")
 

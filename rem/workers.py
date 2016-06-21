@@ -43,13 +43,13 @@ class ThreadJobWorker(KillableWorker):
     def do(self):
         if not self.IsSuspended() and self.scheduler.alive:
             try:
-                self.job = self.scheduler.Get()
+                self.job = self.scheduler.get_job_to_run()
                 if self.job:
                     self.job.run()
             finally:
                 if self.job:
-                    #if hasattr(self.job, 'packetRef'):
-                        #logging.debug('ThreadJobWorker done_with %s from %s' % (self.job, self.job.packetRef))
+                    #if hasattr(self.job, 'pck'):
+                        #logging.debug('ThreadJobWorker done_with %s from %s' % (self.job, self.job.pck))
                     self.job = None
 
     def IsSuspended(self):

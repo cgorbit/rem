@@ -20,19 +20,8 @@ from heap import PriorityQueue
 import osspec
 from rem_logging import logger as logging
 from subprocess import CalledProcessError, MAXFD
-
-class RpcUserError(Exception):
-    def __init__(self, exc):
-        self.exc = exc
-
-    def __repr__(self):
-        return repr(self.exc)
-
-    def __str__(self):
-        return str(self.exc)
-
-def as_rpc_user_error(from_rpc, exc):
-    return RpcUserError(exc) if from_rpc else exc
+import subprocess
+from xmlrpc import RpcUserError, as_rpc_user_error, traced_rpc_method
 
 def logged(log_args=False, level="debug"):
     log_func = getattr(logging, level)
@@ -58,30 +47,6 @@ def logged(log_args=False, level="debug"):
                 raise
         return inner
     return inner
-
-def traced_rpc_method(level="debug"):
-    log_method = getattr(logging, level)
-    assert callable(log_method)
-
-    def traced_rpc_method(func):
-        def f(*args):
-            try:
-                return func(*args)
-            except RpcUserError:
-                _, e, tb = sys.exc_info()
-                e = e.exc
-                raise type(e), e, tb
-            except:
-                logging.exception("RPC method %s failed" % func.__name__)
-                raise
-
-        f.log_level = level
-        f.__name__ = func.__name__
-        f.__module__ = func.__module__
-
-        return f
-
-    return traced_rpc_method
 
 
 class FakeObjectRegistrator(object):
@@ -212,6 +177,9 @@ def runtime_object(init_value):
 def emptyset(*args):
     return set()
 
+def emptydict(*args):
+    return {}
+
 
 def zeroint(*args):
     return int()
@@ -248,10 +216,10 @@ class PickableLock(object):
         return self._object.__exit__(*args)
 
     def __getstate__(self):
-        return None
+        return True
 
     def __setstate__(self, state):
-        pass
+        self._object = fork_locking.Lock()
 
 
 class PickableRLock(object):
@@ -268,10 +236,10 @@ class PickableRLock(object):
         return self._object.__exit__(*args)
 
     def __getstate__(self):
-        return None
+        return True
 
     def __setstate__(self, state):
-        pass
+        self._object = fork_locking.RLock()
 
 
 """Legacy structs for correct deserialization from old backups"""
@@ -333,12 +301,12 @@ class TimedMap(PriorityQueue):
             obj.add(key, value)
         return obj
 
-    def add(self, obj, value, tm=None):
-        if obj not in self:
-            PriorityQueue.add(self, obj, (tm or time.time(), value))
+    def add(self, key, value, t=None):
+        if key not in self:
+            PriorityQueue.add(self, key, (t or time.time(), value))
 
-    def remove(self, obj):
-        return self.pop(obj)
+    def remove(self, key):
+        return self.pop(key)
 
 
 class PickableStdPriorityQueue(Unpickable(_object=StdPriorityQueue)):
@@ -409,8 +377,8 @@ def GeneralizedSet(priorAttr):
             if pck not in self:
                 PriorityQueue.add(self, pck, getattr(pck, priorAttr, 0))
 
-        def remove(self, obj):
-            return self.pop(obj)
+        def remove(self, pck):
+            return self.pop(pck)
 
     return _packset
 
@@ -418,31 +386,48 @@ def GeneralizedSet(priorAttr):
 class PackSet(GeneralizedSet("priority")): pass
 
 
-class FuncRunner(object):
+class SerializableFunction(object):
     """simple function running object with cPickle support
     WARNING: this class works only with pure function and nondynamic class methods"""
 
     def __init__(self, fn, args, kws):
-        self.object = None
-        if isinstance(fn, types.MethodType):
-            self.object = fn.im_self or fn.im_class
-            self.methName = fn.im_func.func_name
-        else:
-            self.fn = fn
+        self.callable = fn
         self.args = args
         self.kws = kws
 
     def __call__(self):
-        fn = getattr(self.object, self.methName, None) if self.object else self.fn
-        if callable(fn):
-            fn(*self.args, **self.kws)
+        return self.callable(*self.args, **self.kws)
+
+    def __getstate__(self):
+        callable = self.callable
+
+        if isinstance(callable, types.MethodType):
+            callable = (
+                callable.im_self or callable.im_class,
+                callable.im_func.func_name
+            )
+
+        return (callable, self.args, self.kws)
+
+    def __setstate__(self, state):
+        (callable, args, kws) = state
+
+        if isinstance(callable, tuple):
+            self.callable = getattr(callable[0], callable[1])
         else:
-            logging.error("FuncRunner\tobject %r can't be executed", fn)
+            self.callable = callable
+
+        self.args = args
+        self.kws = kws
 
     def __str__(self):
-        return str(getattr(self.object, self.methName, None)) if self.object \
-            else str(self.fn)
+        return str(self.callable)
 
+    def get_function_wo_args(self):
+        if self.args or self.kws:
+            raise ValueError()
+
+        return self.callable
 
 class BinaryFile(Unpickable(
     links=dict,
@@ -713,4 +698,23 @@ def wait(f, timeout=None, deadline=None):
         time.sleep(delay)
 
     return None
+
+
+class NamedTemporaryDir(object):
+    def __init__(self, *args, **kwargs):
+        self._args = args
+        self._kwargs = kwargs
+
+    def __enter__(self):
+        self.name = tempfile.mkdtemp(*self._args, **self._kwargs)
+        return self.name
+
+    def __exit__(self, e, t, bt):
+        shutil.rmtree(self.name)
+        self.name = None
+
+
+def list_all_user_processes():
+    p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
+    return [l.rstrip('\n') for l in p.stdout]
 

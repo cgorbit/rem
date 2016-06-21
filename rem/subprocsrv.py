@@ -724,6 +724,9 @@ class _Popen(object):
     def returncode(self):
         return self._exit_status.get_nonblock(None)
 
+    def get_returncode_future(self):
+        return self._exit_status
+
     def poll(self):
         return self.wait(timeout=0)
 
@@ -1273,7 +1276,7 @@ class RunnerPoolNaive(object):
     def start(self, *args, **kwargs):
         return self._get_impl().start(*args, **kwargs)
 
-    def stop():
+    def stop(self):
         self._good = []
 
 

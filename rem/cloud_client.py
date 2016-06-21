@@ -404,9 +404,17 @@ class Client(object):
         ret.Subscribe.Tags.extend(tags)
         return ret
 
-    def debug_server(self):
+    def fetch_my_subscriptions(self):
         msg = cloud_tags_pb2.TClientMessage()
-        msg.Debug.GetMySubscriptions = True;
+        msg.Debug.GetMySubscriptions = True; # TODO Use TGetMySubscriptions instead of Debug
+        return self._push(msg)
+
+    def ping(self):
+        msg = cloud_tags_pb2.TClientMessage()
+
+        ping = msg.Ping
+        ping.SetInParent()
+
         return self._push(msg)
 
     def subscribe(self, tags, with_future=True):

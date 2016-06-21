@@ -1,13 +1,12 @@
+# -*- coding: utf-8 -*-
 from __future__ import with_statement
 import os
 import time
 import datetime
 import sys
 
-from callbacks import CallbackHolder
-from common import FuncRunner, Unpickable, safeint, nullobject, zeroint, get_None, get_False
+from common import SerializableFunction, Unpickable, safeint
 import osspec
-import packet
 import constants
 import job_process
 import pgrpguard
@@ -23,14 +22,14 @@ def _RunnerWithFallbackFunctor(self, main, fallback):
     broken = [False]
 
     def impl(*args, **kwargs):
-        if [broken]:
+        if broken[0]:
             return fallback(*args, **kwargs)
 
         try:
             return main(*args, **kwargs)
 
         except subprocsrv.ServiceUnavailable:
-            broken = True
+            broken[0] = True
             return fallback(*args, **kwargs)
 
     return impl
@@ -135,39 +134,38 @@ class PackedExecuteResult(object): # for old backups
     pass
 
 
-class Job(Unpickable(err=nullobject,
-                     results=list,
+class Job(Unpickable(results=list,
                      tries=int,
                      pipe_fail=bool,
                      description=str,
                      max_working_time=(int, constants.KILL_JOB_DEFAULT_TIMEOUT),
                      notify_timeout=(int, constants.NOTIFICATION_TIMEOUT),
-                     working_time=int,
+                     cached_working_time=int,
                      output_to_status=bool)):
     ERR_PENALTY_FACTOR = 6
 
-    def __init__(self, shell, parents, pipe_parents, packetRef, maxTryCount, max_err_len=None,
+    def __init__(self, pck_id, shell, parents, pipe_parents, max_try_count, max_err_len=None,
                  retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
         super(Job, self).__init__()
-        self.maxTryCount = maxTryCount
+        self.id = id(self)
+        self.pck_id = pck_id
+        self.max_try_count = max_try_count
         self.shell = shell
         self.parents = parents
         self.inputs = pipe_parents
-        self.id = id(self)
         self.max_err_len = max_err_len
         self.retry_delay = retry_delay
         self.pipe_fail = pipe_fail
         self.description = description
         self.notify_timeout = notify_timeout
         self.max_working_time = max_working_time
-        self.packetRef = packetRef
         self.output_to_status = output_to_status
 
     def __repr__(self):
-        return "<Job(id: %s; packet: %s)>" % (self.id, self.packetRef.id)
+        return "<Job(id: %s; packet: %s)>" % (self.id, self.pck_id)
 
     def full_id(self):
-        return "%s.%s" % (self.packetRef.id, self.id)
+        return "%s.%s" % (self.pck_id, self.id)
 
     def __getstate__(self):
         return self.__dict__.copy()
@@ -181,24 +179,8 @@ class Job(Unpickable(err=nullobject,
         return DUMMY_COMMAND_CREATOR(self) if DUMMY_COMMAND_CREATOR \
                     else self.__make_run_args()
 
-    def _notify_long_execution(self, working_time):
-        self.cached_working_time = working_time
-        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.packetRef.name, self.id)
-        self.packetRef.SendJobLongExecutionNotification(self)
-
-    @staticmethod
-    def start_process(*args, **kwargs):
-        ctx = packet.PacketCustomLogic.SchedCtx # XXX
-        return ctx.run_job(*args, **kwargs)
-
     def last_result(self):
         return self.results[-1] if self.results else None
-
-    def _create_file_handles(self):
-        return self.packetRef._create_job_file_handles(self)
-
-    def get_working_directory(self):
-        return self.packetRef.directory
 
     def produce_legacy_stderr_output(self, filename):
         return self._produce_legacy_stderr_output(filename, self.max_err_len or _DEFAULT_STDERR_SUMMAY_LEN)
@@ -227,12 +209,10 @@ class Job(Unpickable(err=nullobject,
             ret += '\n' + stream.read()
         return ret
 
-    def on_done(self, runner):
-        self.packetRef.on_job_done(runner)
-
 
 class JobRunner(object):
-    def __init__(self, job):
+    def __init__(self, ops, job):
+        self._ops = ops
         self._job = job
         self._cancelled = False
 
@@ -257,7 +237,8 @@ class JobRunner(object):
             code = process.wait(deadline=start_time + job.notify_timeout)
 
             if code is None:
-                job._notify_long_execution(time.time() - start_time)
+                job.cached_working_time = time.time() - start_time
+                self._ops.notify_long_execution(job)
             else:
                 return code
 
@@ -271,15 +252,16 @@ class JobRunner(object):
 
     def _run_process_inner(self, argv, stdin, stdout, stderr):
         job = self._job
+        ops = self._ops
         self._start_time = time.time()
 
         try:
-            process = job.start_process(
+            process = ops.start_process(
                 argv,
                 stdout=stdout,
                 stdin=stdin,
                 stderr=stderr,
-                cwd=job.get_working_directory(),
+                cwd=ops.get_working_directory(),
             )
 
         except pgrpguard.Error as e:
@@ -288,6 +270,7 @@ class JobRunner(object):
 
         except Exception as e:
             self._process_start_error = e
+            logging.exception("Failed to start %s: %s" % (job, e))
             return False
 
         self._process = process
@@ -327,7 +310,7 @@ class JobRunner(object):
         argv = job.make_run_args()
 
         try:
-            stdin, stdout, stderr = job._create_file_handles()
+            stdin, stdout, stderr = self._ops.create_file_handles(job)
         except Exception as e:
             self._environment_error = e
             return
@@ -368,7 +351,7 @@ class JobRunner(object):
                                     self._stderr_summary)
             )
 
-        if self.returncode_robust != 0 and job.tries >= job.maxTryCount:
+        if self.returncode_robust != 0 and job.tries >= job.max_try_count:
             logging.info("Job's %s result: TriesExceededResult", job.id)
             append_result(TriesExceededResult(job.tries))
 
@@ -383,7 +366,7 @@ class JobRunner(object):
         try:
             try:
                 self._run()
-            except Exception as e:
+            except Exception:
                 # FIXME Do something more than logging?
                 logging.exception("Run job %s exception", job.id)
 
@@ -393,7 +376,7 @@ class JobRunner(object):
             self._append_results()
 
         finally:
-            job.on_done(self)
+            self._ops.on_job_done(self)
 
     def cancel(self):
         self._cancelled = True
@@ -415,17 +398,13 @@ class JobRunner(object):
     def job(self):
         return self._job
 
-    @property
-    def pck(self):
-        return self._job.packetRef
-
     def __repr__(self):
         return '<JobRunner for %s>' % repr(self._job)
 
 
 class FuncJob(object):
     def __init__(self, runner):
-        assert isinstance(runner, FuncRunner), "incorrent arguments for FuncJob initializing"
+        assert isinstance(runner, SerializableFunction), "incorrent arguments for FuncJob initializing"
         self.runner = runner
 
     def run(self):

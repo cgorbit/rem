@@ -51,8 +51,9 @@ def _create_logger(ctx):
         logHandler = StableRotateFileHandler(
             os.path.join(ctx.log_directory, ctx.log_filename),
             when="midnight", backupCount=ctx.log_backup_count)
-        logHandler.setFormatter(LogFormatter("%(asctime)s %(thread_id)s %(levelname)-8s %(module)s:\t%(message)s"))
         logger.addHandler(logHandler)
+
+    logger.handlers[0].setFormatter(LogFormatter("%(asctime)s %(thread_id)s %(levelname)-8s %(module)s:\t%(message)s"))
 
     logger.setLevel(log_level)
 

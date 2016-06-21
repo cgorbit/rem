@@ -15,14 +15,13 @@ from common import Unpickable, TimedMap, PickableLock, cleanup_directory, Binary
 import common as rem_common
 from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor, ETagEvent
 from journal import TagLogger
-from packet import PacketState, JobPacket
 from Queue import Queue
 import fork_locking
 from future import Promise, READY_FUTURE, CheckAllFuturesSucceed
 from profile import ProfiledThread
 from rem_logging import logger as logging
 
-__all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "PacketNamesStorage", "MessageStorage"]
+__all__ = ["GlobalPacketStorage", "BinaryStorage", "ShortStorage", "TagStorage", "MessageStorage"]
 
 
 class OnDiskTagsConvertParams(object):
@@ -81,7 +80,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
                 # Race with RPC
                 pck_id, (tm, pck) = self.packets.peak()
                 if tm < barrierTm:
-                    pck.RemoveAsOld()
+                    pck.destroy()
                     self.packets.pop(pck.id)
                 else:
                     break
@@ -92,9 +91,9 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
 
     def GetPacket(self, id):
         with self.lock:
-            idx = self.packets.revIndex.get(id, None)
-            if idx is not None:
-                return self.packets.values[idx][1]
+            descr = self.packets.get(id)
+            if descr:
+                return descr[1]
 
     def PickPacket(self, id):
         with self.lock:
@@ -103,7 +102,7 @@ class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
                 return pck[1][1]
 
     def ids(self):
-        return self.packets.revIndex.keys()
+        return self.packets.keys()
 
 
 class BinaryStorage(Unpickable(files=dict, lifeTime=(int, 3600), binDirectory=str)):
@@ -1151,44 +1150,6 @@ class TagStorage(object):
                     raise
 
             self.infile_items.sync()
-
-
-class PacketNamesStorage(ICallbackAcceptor):
-    def __init__(self, *args, **kwargs):
-        self.names = set(kwargs.get('names_list', []))
-        self.lock = fork_locking.Lock()
-
-    def __getstate__(self):
-        return {}
-
-    def Add(self, pck_name):
-        with self.lock:
-            self.names.add(pck_name)
-
-    def Update(self, names_list=None):
-        with self.lock:
-            self.names.update(names_list or [])
-
-    def Exist(self, pck_name):
-        return pck_name in self.names
-
-    def Delete(self, pck_name):
-        with self.lock:
-            if pck_name in self.names:
-                self.names.remove(pck_name)
-
-    def OnChange(self, packet_ref):
-        if isinstance(packet_ref, JobPacket) and packet_ref.state == PacketState.HISTORIED:
-            self.Delete(packet_ref.name)
-
-    def OnJobDone(self, job_ref):
-        pass
-
-    def OnJobGet(self, job_ref):
-        pass
-
-    def OnPacketReinitRequest(self, pck):
-        pass
 
 
 class MessageStorage(object):

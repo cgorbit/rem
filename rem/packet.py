@@ -1,20 +1,34 @@
+# -*- coding: utf-8 -*-
 from __future__ import with_statement
 import tempfile
 import os
 import time
 import shutil
 import errno
-import threading
+import sys
+import copy
+import re
+#import zlib
+#import cPickle as pickle
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
 from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
 from job import Job, JobRunner
 import osspec
-import fork_locking
 import messages
 from rem_logging import logger as logging
+import job_graph
+from job_graph import GraphState
+from packet_state import PacketState
+ImplState = PacketState
+import sandbox_remote_packet
+from sandbox_releases import MalformedResourceDescr
 
-class PacketState(object):
+_SANDBOX_RELEASE_PATH_RE = re.compile('sbx:([^/]+)(/[-/_a-zA-Z0-9.?*]*)?$')
+_INTEGER_RE = re.compile('^\d+$')
+
+
+class ReprState(object):
     CREATED = "CREATED"
     WORKABLE = "WORKABLE"               # working packet without pending jobs
     PENDING = "PENDING"                 # working packet with pending jobs (may have running jobs)
@@ -24,22 +38,6 @@ class PacketState(object):
     HISTORIED = "HISTORIED"             # temporary state before removal
     WAITING = "WAITING"                 # wait timeout for retry failed jobs (may have running jobs)
     NONINITIALIZED = "NONINITIALIZED"
-    # src -> dst
-    allowed = {
-        CREATED: (WORKABLE, SUSPENDED),
-        WORKABLE: (SUSPENDED, ERROR, SUCCESSFULL, PENDING, WAITING, NONINITIALIZED),
-        PENDING: (SUSPENDED, WORKABLE, ERROR, WAITING, NONINITIALIZED),
-        SUSPENDED: (WORKABLE, HISTORIED, WAITING, ERROR, NONINITIALIZED),
-        WAITING: (PENDING, SUSPENDED, ERROR, NONINITIALIZED),
-        ERROR: (SUSPENDED, HISTORIED, NONINITIALIZED),
-        SUCCESSFULL: (HISTORIED, NONINITIALIZED),
-        NONINITIALIZED: (CREATED,),
-        HISTORIED: ()}
-
-
-class PacketFlag:
-    USER_SUSPEND = 0x01              #suspended by user
-    RCVR_ERROR = 0x02              #recovering error detected
 
 
 class PacketCustomLogic(object):
@@ -50,54 +48,328 @@ class PacketCustomLogic(object):
         cls.SchedCtx = context
 
 
+class JobGraph(object):
+    def __init__(self, jobs, kill_all_jobs_on_error):
+        self.jobs = jobs
+        self.kill_all_jobs_on_error = kill_all_jobs_on_error
+
+
 def reraise(msg):
     t, e, tb = sys.exc_info()
     raise RuntimeError, RuntimeError('%s: %s' % (msg, e)), tb
 
 
-class JobPacketImpl(object):
-    """tags manipulation methods"""
+def always(ctor):
+    def always(*args):
+        return ctor()
+    return always
+
+
+# FIXME Use None instead of DummyGraphExecutor?
+
+class DummyGraphExecutor(object):
+    state = GraphState.PENDING_JOBS
+
+    def is_null(self):
+        return True
+
+    def produce_detailed_status(self):
+        return None
+
+    def get_working_jobs(self):
+        return []
+
+    def recover_after_backup_loading(self):
+        pass
+
+    def is_cancelling(self):
+        return False
+
+    def is_stopping(self):
+        return False
+
+    def vivify_jobs_waiting_stoppers(self):
+        pass
+
+    def reset(self):
+        pass
+
+    def reset_tries(self):
+        pass
+
+    def get_worker_state(self):
+        return None
+
+    def has_jobs_to_run(self):
+        raise NotImplementedError()
+
+
+DUMMY_GRAPH_EXECUTOR = DummyGraphExecutor()
+
+
+class PacketBase(Unpickable(
+                           lock=PickableRLock,
+
+                           jobs=dict,
+
+                           all_dep_tags=set,
+                           wait_dep_tags=set,
+
+                           job_done_tag=dict,
+                           #done_tag=object,
+
+                           bin_links=dict,
+                           sbx_files=dict,
+                           directory=lambda *args: args[0] if args else None,
+
+                           _repr_state=(str, ReprState.ERROR),
+                           state=(str, ImplState.BROKEN),
+
+                           notify_emails=list,
+                           is_resetable=(bool, True),
+                           notify_on_reset=(bool, False),
+                           notify_on_skipped_reset=(bool, True),
+                           resolved_releases=dict,
+                           unresolved_release_count=int,
+
+                           history=list,
+
+                           do_not_run=bool,
+                           destroying=bool,
+                           is_broken=bool,
+                          ),
+                CallbackHolder,
+                ICallbackAcceptor):
+
+    def __init__(self, name, priority, context, notify_emails, wait_tags=(),
+                 set_tag=None, kill_all_jobs_on_error=True, is_resetable=True,
+                 notify_on_reset=False, notify_on_skipped_reset=True):
+        super(PacketBase, self).__init__()
+        self.name = name
+        self.id = None
+        self.directory = None
+        self.queue = None
+        self.finish_status = None
+        self._saved_jobs_status = None
+
+        self._graph_executor = DUMMY_GRAPH_EXECUTOR
+
+        self._create_place(context)
+        self.id = os.path.split(self.directory)[-1]
+
+        self.files_modified = False
+        self.resources_modified = False
+
+        self.files_sharing = None
+        self.shared_files_resource_id = None
+        self.resolved_releases = {}
+        self.unresolved_release_count = 0
+
+        self.kill_all_jobs_on_error = kill_all_jobs_on_error
+        self.priority = priority
+        self.notify_emails = list(notify_emails)
+        self.is_resetable = is_resetable
+        self.done_tag = set_tag
+
+        self.tags_awaited = not wait_tags
+        self._set_waiting_tags(wait_tags)
+
+        self._update_state()
+
+    def _will_never_be_executed(self):
+        return self.is_broken or self.destroying
+
+    # TODO Test this code statically with mask
+    def _calc_state(self):
+        graph = self._graph_executor
+
+        if self.destroying:
+            if graph.is_cancelling():
+                assert graph.state & GraphState.CANCELLED
+                assert graph.state & GraphState.WORKING
+                return ImplState.DESTROYING
+            else:
+                assert graph.is_null()
+                return ImplState.HISTORIED
+
+        elif self.is_broken:
+            return ImplState.BROKEN # may be GraphState.WORKING
+
+        elif not self.queue:
+            return ImplState.UNINITIALIZED
+
+        elif self.wait_dep_tags and not self.tags_awaited:
+            return ImplState.TAGS_WAIT # may be GraphState.WORKING
+
+        elif not self.jobs:
+            return ImplState.SUCCESSFULL
+
+
+# FIXME do_not_run vs. finish_status priority?
+
+        elif self.do_not_run:
+            if self._is_graph_stopping():
+                assert graph.state & GraphState.WORKING, "Got %s" % graph.state
+                return ImplState.PAUSING
+            else:
+                assert graph.is_null()
+                return ImplState.PAUSED # Здесь можно обновлять файлы/ресурсы, но после этого...
+                            # мы должны быть уверены, что Граф будет stop/start'ed,
+                            # например, за счёт .files_modified/.resources_modified
+
+        elif self.finish_status is not None:
+            return ImplState.SUCCESSFULL if self.finish_status else ImplState.ERROR
+
+    # FIXME
+        elif graph.state == GraphState.TIME_WAIT:
+            return ImplState.TIME_WAIT
+
+        elif not graph.is_null():
+            if graph.is_cancelling():
+                assert graph.state & GraphState.WORKING
+                assert graph.state & GraphState.CANCELLED # FIXME | SUSPENDED
+                                                          # is_stopped contains SUSPENDED and CANCELLED
+                return ImplState.PREV_EXECUTOR_STOP_WAIT
+
+            else:
+                assert graph.state & GraphState.WORKING
+                return ImplState.RUNNING # WORKING ?| PENDING
+
+        elif self.files_sharing:
+            return ImplState.SHARING_FILES
+
+        elif self.unresolved_release_count:
+            return ImplState.RESOLVING_RELEASES
+
+        else:
+            return ImplState.PENDING
+
+    def _update_state(self):
+        new = self._calc_state()
+
+        if self.state != new:
+            self.state = new
+            logging.debug("packet %s\tnew impl state %r", self.name, new)
+
+            self._update_repr_state()
+
+            self._on_state_change(new)
+        else:
+            self._update_repr_state()
+
+        if self.queue:
+            self.queue.update_pending_jobs_state(self) # TODO only for LocalPacket actually
+
+    def _calc_repr_state(self):
+        if self.state == ImplState.RUNNING:
+            return ReprState.PENDING if self._graph_executor.state & GraphState.PENDING_JOBS \
+                else ReprState.WORKABLE
+
+        map = {
+            ImplState.UNINITIALIZED:    ReprState.CREATED,
+            ImplState.ERROR:            ReprState.ERROR,
+            ImplState.BROKEN:           ReprState.ERROR,
+            ImplState.PENDING:          ReprState.PENDING,
+            ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
+
+            ImplState.SHARING_FILES:    ReprState.PENDING,
+            ImplState.RESOLVING_RELEASES: ReprState.PENDING,
+
+            ImplState.TAGS_WAIT:        ReprState.SUSPENDED,
+            ImplState.PAUSED:           ReprState.SUSPENDED,
+            ImplState.PAUSING:          ReprState.SUSPENDED,
+
+            # Must be WORKABLE to support fast_restart (FIXME Don't remember why)
+            ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
+
+            ImplState.TIME_WAIT:        ReprState.WAITING,
+
+            ImplState.DESTROYING:       ReprState.WORKABLE,
+            ImplState.HISTORIED:        ReprState.HISTORIED,
+        }
+
+        return map[self.state]
+
+    def __getstate__(self):
+        sdict = CallbackHolder.__getstate__(self)
+
+        if sdict['done_tag']:
+            sdict['done_tag'] = sdict['done_tag'].name
+
+        job_done_tag = sdict['job_done_tag'] = sdict['job_done_tag'].copy()
+        for job_id, tag in job_done_tag.iteritems():
+            job_done_tag[job_id] = tag.name
+
+        if sdict['files_sharing']:
+            sdict['files_sharing'] = True
+            sdict['files_modified'] = True
+
+        return sdict
+
+    def _create_place_if_need(self):
+        #logging.info("packet init: %r %s", self, self._repr_state) # FIXME
+        if self.directory is None:
+            self._create_place(self._get_scheduler_ctx())
+
+    def __repr__(self):
+        return "<%s(id: %s; name: %s; state: %s)>" % (type(self).__name__, self.id, self.name, self._repr_state)
 
     def _set_waiting_tags(self, wait_tags):
         for tag in wait_tags:
             tag.AddCallbackListener(self)
-        self.allTags = set(tag.GetFullname() for tag in wait_tags)
-        self.waitTags = set(tag.GetFullname() for tag in wait_tags if not tag.IsLocallySet())
+        self.all_dep_tags = set(tag.GetFullname() for tag in wait_tags)
+        self.wait_dep_tags = set(tag.GetFullname() for tag in wait_tags if not tag.IsLocallySet())
 
     def _process_tag_set_event(self, tag):
-        tagname = tag.GetFullname()
-        if tagname in self.waitTags:
-            self.waitTags.remove(tagname)
-            if not self.waitTags and self.state == PacketState.SUSPENDED:
-                self._resume()
+        if self._will_never_be_executed():
+            return
 
-    def VivifyDoneTagsIfNeed(self, tagStorage):
+        tag_name = tag.GetFullname()
+
+        if tag_name in self.wait_dep_tags:
+            self.wait_dep_tags.remove(tag_name)
+
+            if not self.wait_dep_tags:
+                self.tags_awaited = True
+                self._share_files_as_resource_if_need()
+                self._update_state()
+
+    def vivify_done_tags_if_need(self, tagStorage):
         with self.lock:
-            if isinstance(self.done_indicator, str):
-                self.done_indicator = tagStorage.AcquireTag(self.done_indicator)
-            for jid, cur_val in self.job_done_indicator.iteritems():
+            if isinstance(self.done_tag, str):
+                self.done_tag = tagStorage.AcquireTag(self.done_tag)
+            for jid, cur_val in self.job_done_tag.iteritems():
                 if isinstance(cur_val, str):
-                    self.job_done_indicator[jid] = tagStorage.AcquireTag(cur_val)
+                    self.job_done_tag[jid] = tagStorage.AcquireTag(cur_val)
 
-    def UpdateTagDependencies(self, tagStorage):
+    # XXX ctx.allow_files_auto_sharing is for testing purposes
+    def vivify_resource_sharing(self):
+        if self.files_sharing:
+            raise NotImplementedError("Resource sharing vivify is not implemented")
+
+    def vivify_jobs_waiting_stoppers(self):
         with self.lock:
-            if isinstance(self.done_indicator, TagBase):
-                self.done_indicator = tagStorage.AcquireTag(self.done_indicator.name)
-            for jid in self.job_done_indicator:
-                if isinstance(self.job_done_indicator[jid], TagBase):
-                    self.job_done_indicator[jid] = tagStorage.AcquireTag(self.job_done_indicator[jid].name)
+            self._graph_executor.vivify_jobs_waiting_stoppers()
 
-            self.waitTags = tagset(self.waitTags)
-            for tag in map(tagStorage.AcquireTag, self.waitTags):
+    def update_tag_deps(self, tagStorage):
+        with self.lock:
+            if isinstance(self.done_tag, TagBase):
+                self.done_tag = tagStorage.AcquireTag(self.done_tag.name)
+            for jid in self.job_done_tag:
+                if isinstance(self.job_done_tag[jid], TagBase):
+                    self.job_done_tag[jid] = tagStorage.AcquireTag(self.job_done_tag[jid].name)
+
+            self.wait_dep_tags = tagset(self.wait_dep_tags)
+            for tag in map(tagStorage.AcquireTag, self.wait_dep_tags):
                 if tag.IsLocallySet():
                     self._process_tag_set_event(tag)
 
     def _release_links(self):
-        tmpLinks, self.binLinks = self.binLinks, {}
+        tmpLinks, self.bin_links = self.bin_links, {}
         while tmpLinks:
             binname, file = tmpLinks.popitem()
             if isinstance(file, BinaryFile):
-                # until race condition in _change_state will be fixed FIXME it's fixed
+                # 'try' was a workaround for race-conditions in self. Now j.i.c
                 try:
                     file.Unlink(self, binname)
                 except OSError as e:
@@ -111,21 +383,21 @@ class JobPacketImpl(object):
             else:
                 filehash = None
             if filehash is not None:
-                self.binLinks[binname] = filehash
+                self.bin_links[binname] = filehash
 
     def _create_link(self, binname, file):
         file.Link(self, binname)
-        self.binLinks[binname] = file
+        self.bin_links[binname] = file
 
     def _add_link(self, binname, file):
-        if binname in self.binLinks:
-            old_file = self.binLinks.pop(binname)
+        if binname in self.bin_links:
+            old_file = self.bin_links.pop(binname)
             if isinstance(old_file, BinaryFile):
                 old_file.Unlink(self, binname)
         if self.directory:
             self._create_link(binname, file)
         else:
-            self.binLinks[binname] = file.checksum
+            self.bin_links[binname] = file.checksum
 
     def _vivify_link(self, context, link):
         if isinstance(link, str):
@@ -135,7 +407,7 @@ class JobPacketImpl(object):
         return link
 
     def _create_links(self, context):
-        tmpLinks, self.binLinks = self.binLinks, {}
+        tmpLinks, self.bin_links = self.bin_links, {}
         while tmpLinks:
             binname, link = tmpLinks.popitem()
             file = self._vivify_link(context, link)
@@ -143,17 +415,10 @@ class JobPacketImpl(object):
                 self._create_link(binname, file)
 
     def _are_links_alive(self, context):
-        return all(self._vivify_link(context, link) for link in self.binLinks.itervalues())
+        return all(self._vivify_link(context, link) for link in self.bin_links.itervalues())
 
     def _release_place(self):
         with self.lock:
-            # 1. ERROR may contains running jobs in kill_all_jobs_on_error=False
-            # 2. SUSPENDED may contains running jobs
-            # 3. {ERROR, SUSPENDED} may become HISTORIED
-            if self._active_jobs:
-                logging.error("_release_place of %s in %s with active jobs" % (self.id, self.state))
-            self._kill_jobs_drop_results()
-
             self._release_links()
 
             if self.directory and os.path.isdir(self.directory):
@@ -163,9 +428,11 @@ class JobPacketImpl(object):
                     logging.exception("Packet %s release place error", self.id)
 
             self.directory = None
-            self.streams.clear()
 
+# TODO BROKEN
     def _create_place(self, context):
+        assert self._graph_executor.is_null() # FIXME
+
         if self.directory:
             raise RuntimeError("can't create duplicate working directory")
 
@@ -190,7 +457,6 @@ class JobPacketImpl(object):
         osspec.set_common_readable(self.directory)
         osspec.set_common_executable(self.directory)
         self._create_links(context)
-        self.streams.clear()
 
     def rpc_list_files(self):
         files = []
@@ -216,322 +482,119 @@ class JobPacketImpl(object):
         with file:
             return file.read()
 
-    def _apply_job_result(self, job, runner):
-        # TODO
-        # 1. kill_all_jobs_on_error=False doesn't work correctly:
-        #       Another running jobs may change ERROR to PENDING
-        # 2. WAITING doesn't work as good as possible:
-        #       1. if another jobs are running state must still be WORKABLE/PENDING,
-        #          and only later become WAITING (or never WAITING)
-        #       2. another running jobs' branches will not be continue to run
-        #          until stopWaiting()
-
-        if runner.returncode_robust == 0 and not runner.is_cancelled():
-            self.done.add(job.id)
-
-            if self.job_done_indicator.get(job.id):
-                self.job_done_indicator[job.id].Set()
-
-            for nid in self.edges[job.id]:
-                self.waitJobs[nid].remove(job.id)
-                if not self.waitJobs[nid]:
-                    self.leafs.add(nid)
-
-            if len(self.done) == len(self.jobs):
-                self._change_state(PacketState.SUCCESSFULL)
-
-            elif self.leafs and self.state != PacketState.WAITING:
-                self._change_state(PacketState.PENDING)
-
-        elif job.tries < job.maxTryCount:
-            self.leafs.add(job.id)
-
-            delay = job.retry_delay or job.ERR_PENALTY_FACTOR ** job.tries
-            self.waitingDeadline = time.time() + delay
-            self._change_state(PacketState.WAITING)
-            logging.debug("packet %s\twaiting for %s sec", self.name, delay)
-
-        else:
-            self.leafs.add(job.id)
-
-            self._change_state(PacketState.ERROR)
-
-            if self.kill_all_jobs_on_error:
-                self._kill_jobs_drop_results()
-
-
-class _ActiveJobs(object):
-    def __init__(self):
-        self._running = {} # From GetJobToRun moment
-        self._results = []
-        self._lock = threading.Lock()
-        self._empty = threading.Condition(self._lock)
-
-    def __nonzero__(self):
-        return bool(len(self))
-
-    # FIXME Non-obvious meaning?
-    def __len__(self):
-        with self._lock:
-            return len(self._running) + len(self._results)
-
-    def has_results(self):
-        return bool(self._results)
-
-    def has_running(self):
-        return bool(self._running)
-
-    def wait_running_empty(self):
-        if not self._running:
-            return
-
-        with self._lock:
-            while self._running:
-                self._empty.wait()
-
-    def add(self, runner):
-        with self._lock:
-            job_id = runner.job.id
-            #logging.debug('_running[%d] = %s' % (job_id, runner.job))
-            assert job_id not in self._running, "Job %d already in _running" % job_id
-            self._running[job_id] = runner
-
-    def on_done(self, runner):
-        with self._lock:
-            job_id = runner.job.id
-            #logging.debug('_running.pop(%d)' % job_id)
-            assert job_id in self._running, "No Job %d in _running" % job_id
-            self._running.pop(job_id)
-            self._results.append(runner)
-
-            if not self._running:
-                self._empty.notify_all()
-
-    def terminate(self):
-        for runner in self._running.values():
-            runner.cancel()
-
-    def pop_result(self):
-        return self._results.pop(0)
-
-
-def always(ctor):
-    def always(*args):
-        return ctor()
-    return always
-
-
-class JobPacket(Unpickable(lock=PickableRLock,
-                           jobs=dict,
-                           edges=dict,
-                           done=set,
-                           leafs=set,
-                           _active_jobs=always(_ActiveJobs),
-                           job_done_indicator=dict,
-                           waitingDeadline=int,
-                           allTags=set,
-                           waitTags=set,
-                           binLinks=dict,
-                           state=(str, PacketState.ERROR),
-                           history=list,
-                           notify_emails=list,
-                           flags=int,
-                           kill_all_jobs_on_error=(bool, True),
-                           _clean_state=(bool, False), # False for loading old backups
-                           isResetable=(bool, True),
-                           notify_on_reset=(bool, False),
-                           notify_on_skipped_reset=(bool, True),
-                           directory=lambda *args: args[0] if args else None,
-
-                           # FIXME equal to _active_jobs.{_running + _results}?
-                           # Need to be consistent with Queue.working under JobPacket.lock
-                           as_in_queue_working=always(set),
-                          ),
-                CallbackHolder,
-                ICallbackAcceptor,
-                JobPacketImpl):
-
-    INCORRECT = -1
-
-    # FIXME Why WORKABLE too?
-    # Actually WAITING and ERROR sometimes applicable too run jobs (see _apply_job_result)
-    _ALLOWED_TO_RUN_NEW_JOBS_STATES = [PacketState.WORKABLE, PacketState.PENDING]
-
-    def __init__(self, name, priority, context, notify_emails, wait_tags=(),
-                 set_tag=None, kill_all_jobs_on_error=True, isResetable=True,
-                 notify_on_reset=False, notify_on_skipped_reset=True):
-        super(JobPacket, self).__init__()
-        self.name = name
-        self.state = PacketState.NONINITIALIZED
-        self.history.append((self.state, time.time()))
-        self.id = None
-        self.directory = None
-        self.streams = {}
-        self.waitJobs = {}
-        self._init(context)
-        self.priority = priority
-        self.notify_emails = list(notify_emails)
-        self.id = os.path.split(self.directory)[-1]
-        self.kill_all_jobs_on_error = kill_all_jobs_on_error
-        self.isResetable = isResetable
-        self.done_indicator = set_tag
-        self._set_waiting_tags(wait_tags)
-        self.notify_on_reset = notify_on_reset
-        self.notify_on_skipped_reset = notify_on_skipped_reset
-
-    def __getstate__(self):
-        sdict = CallbackHolder.__getstate__(self)
-
-        if sdict['done_indicator']:
-            sdict['done_indicator'] = sdict['done_indicator'].name
-
-        job_done_indicator = sdict['job_done_indicator'] = sdict['job_done_indicator'].copy()
-        for job_id, tag in job_done_indicator.iteritems():
-            job_done_indicator[job_id] = tag.name
-
-        sdict.pop('waitingTime', None) # obsolete
-        sdict.pop('_working_empty', None) # obsolete
-        sdict.pop('_active_jobs', None)
-
-        return sdict
-
-    def _init(self, context):
-        logging.info("packet init: %r %s", self, self.state)
-        self._clean_state = True
-        if self.directory is None:
-            self._create_place(context)
-        self._change_state(PacketState.CREATED)
-
-    def __repr__(self):
-        return "<JobPacket(id: %s; name: %s; state: %s)>" % (self.id, self.name, self.state)
-
-    # TODO Don't store filehandles in self, only filenames
-
-    def _stream_file(self, jid, type):
-        stream = self.streams.get((type, jid), None)
-        if stream is not None:
-            if not stream.closed:
-                stream.close()
-            if stream.name != "<uninitialized file>":
-                return stream.name
-        filename = os.path.join(self.directory, "%s-%s" % (type, jid))
-        if os.path.isfile(filename):
-            return filename
-        return None
-
-    def _create_input(self, jid):
-        if jid in self.jobs:
-            filename = self._stream_file(jid, "in")
-            job = self.jobs[jid]
-            if filename is not None:
-                stream = self.streams[("in", jid)] = open(filename, "r")
-            elif len(job.inputs) == 0:
-                stream = self.streams[("in", jid)] = osspec.get_null_input()
-            elif len(job.inputs) == 1:
-                pid, = job.inputs
-                logging.debug("pid: %s, pck_id: %s", pid, self.id)
-                stream = self.streams[("in", jid)] = open(self._stream_file(pid, "out"), "r")
-            else:
-                with open(os.path.join(self.directory, "in-%s" % jid), "w") as writer:
-                    for pid in job.inputs:
-                        with open(self.streams[("out", pid)].name, "r") as reader:
-                            writer.write(reader.read()) # TODO chunks
-                stream = self.streams[("in", jid)] = open(writer.name, "r")
-            return stream
-        raise RuntimeError("alien job input request")
-
-    def _create_output(self, jid, type):
-        if jid in self.jobs:
-            filename = self._stream_file(jid, type)
-            if filename is None:
-                filename = os.path.join(self.directory, "%s-%s" % (type, jid))
-            stream = self.streams[(type, jid)] = open(filename, "w")
-            return stream
-        raise RuntimeError("alien job output request")
-
-    # We can't use lock here (deadlock)
-    # FIXME We can avoid locking here because call to _kill_jobs() in _release_place()
-    # garantee that pck.directory will exists
-    def _create_job_file_handles(self, job):
-        return (
-            self._create_input(job.id),
-            self._create_output(job.id, "out"),
-            self._create_output(job.id, "err")
-        )
-
-    def _can_change_state(self, state):
-        return state in PacketState.allowed[self.state]
-
-    def stopWaiting(self):
+    def _on_state_change(self, state):
         with self.lock:
-            if self.state == PacketState.WAITING:
-                self._change_state(PacketState.PENDING)
+            if self.queue:
+                self.queue._on_packet_state_change(self)
 
-    def _change_state(self, state):
-        with self.lock:
-            if state == self.state:
-                #logging.warning("packet %s useless state change to current %s" % (self.id, state))
-                return
+            if state == ImplState.HISTORIED:
+                self.FireEvent("change") # PacketNamesStorage
+                #self.queue = None
 
-            assert self._can_change_state(state), \
-                "packet %s\tincorrect state change request %r => %r" % (self.name, self.state, state)
-
-            self.state = state
-            self.history.append((self.state, time.time()))
-            logging.debug("packet %s\tnew state %r", self.name, self.state)
-
-            self.FireEvent("change") # queue.relocatePacket
-
-            if state == PacketState.ERROR:
+            if state in [ImplState.ERROR, ImplState.BROKEN]:
                 self._send_email_on_error_state()
 
-            if state == PacketState.SUCCESSFULL:
-                if self.done_indicator:
-                    self.done_indicator.Set()
+            elif state == ImplState.PENDING:
+                self._create_place_if_need()
 
-            if state in [PacketState.SUCCESSFULL, PacketState.HISTORIED]:
-                self._release_place() # will kill jobs if need
+            elif state == ImplState.SUCCESSFULL:
+                if self.done_tag:
+                    self.done_tag.Set()
+
+            if state in [ImplState.SUCCESSFULL, ImplState.HISTORIED, ImplState.BROKEN]:
+                assert self._graph_executor.is_null() # FIXME
+                self._release_place()
+
+    def _update_repr_state(self):
+        new = self._calc_repr_state()
+
+        if new == self._repr_state:
+            return
+
+        self._repr_state = new
+        self.history.append((new, time.time()))
+        logging.debug("packet %s\tnew state %r", self.name, new)
+
+        if new == ReprState.WAITING:
+            deadline = self._graph_executor.get_nearest_retry_deadline()
+            delay = max(deadline - time.time(), 0) if deadline else None
+            logging.debug("packet %s\twaiting for %s sec", self.name, delay)
+
+    def destroy(self):
+        if self.destroying:
+            return
+
+        g = self._graph_executor
+
+        if not(g.is_null() or self.do_not_run):
+            raise NonDestroyingStateError()
+
+        self.destroying = True
+
+        if not g.is_null():
+            g.cancel()
+
+        self._update_state()
 
     def rpc_remove(self):
         with self.lock:
-            new_state = PacketState.HISTORIED
-            if self.state == new_state:
-                return
-            if not self._can_change_state(new_state):
-                raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self.state))
-            self._change_state(new_state)
+            try:
+                self.destroy()
+            except NonDestroyingStateError:
+                raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
 
-    def RemoveAsOld(self):
-        with self.lock:
-            if self.state == PacketState.CREATED: # hack for ShortStorage
-                self._change_state(PacketState.SUSPENDED)
-            self._change_state(PacketState.HISTORIED)
+    #@staticmethod
+    #def _produce_compressed_job_status(graph_executor):
+        #status = graph_executor.produce_detailed_status()
+        #for job in status:
+            #job['results'] = [
+                #r.data for r in job['results']
+            #]
+
+        #return zlib.compress(pickle.dumps(status))
+
+    def _on_graph_executor_state_change(self):
+        state = self._graph_executor.state
+
+        if state == GraphState.SUCCESSFULL:
+            assert self._graph_executor.is_null()
+            self.finish_status = True
+            self._saved_jobs_status = self._graph_executor.produce_detailed_status()
+            #self._saved_jobs_status = self._produce_compressed_job_status(self._graph_executor)
+            self._graph_executor = DUMMY_GRAPH_EXECUTOR
+
+        elif state == GraphState.ERROR:
+            self.finish_status = False
+
+        self._update_state()
 
     def _mark_as_failed_on_recovery(self):
         with self.lock:
-            if self.check_flag(PacketFlag.RCVR_ERROR) and self.state == PacketState.ERROR:
+            if self.is_broken:
                 return
-
-            self._set_flag(PacketFlag.RCVR_ERROR)
-            self._change_state(PacketState.ERROR)
-
-            self._release_place()
+            self.is_broken = True
+            self._update_state()
 
     def _try_recover_directory(self, ctx):
+        prev_packets_directory, _ = os.path.split(self.directory)
+        actual_directory = os.path.join(ctx.packets_directory, self.id)
+
         if os.path.isdir(self.directory):
-            parentDir, dirname = os.path.split(self.directory)
-            if parentDir != ctx.packets_directory:
-                dst_loc = os.path.join(ctx.packets_directory, self.id)
+            if prev_packets_directory != ctx.packets_directory:
                 try:
-                    logging.debug("relocates directory %s to %s", self.directory, dst_loc)
-                    shutil.copytree(self.directory, dst_loc)
-                    self.directory = dst_loc
+                    logging.debug("relocates directory %s to %s", self.directory, actual_directory)
+                    shutil.copytree(self.directory, actual_directory)
+                    self.directory = actual_directory
                 except:
                     reraise("Failed to relocate directory")
 
         else:
+            if os.path.isdir(actual_directory):
+                self.directory = actual_directory
+                return # FIXME Recreate?
+
             if not self._are_links_alive(ctx):
-                raise RuntimeError("Not all links alive")
+                raise NotAllFileLinksAlive("Not all links alive")
 
             try:
                 self.directory = None
@@ -540,17 +603,15 @@ class JobPacket(Unpickable(lock=PickableRLock,
                 reraise("Failed to resurrect directory")
 
     def _try_recover_after_backup_loading(self, ctx):
-        if self.state == PacketState.ERROR and self.check_flag(PacketFlag.RCVR_ERROR) \
-                or self.state == PacketState.HISTORIED:
+        self._graph_executor.recover_after_backup_loading()
+
+        if self.state in [ImplState.BROKEN, ImplState.HISTORIED]:
             if self.directory:
                 self._release_place()
 
         # Can exists only in tempStorage or in backups wo locks+backup_in_child
-        elif self.state == PacketState.CREATED:
-            raise RuntimeError("Can't restore packets in CREATED state")
-
-        elif self.state == PacketState.NONINITIALIZED:
-            self._recover_noninitialized(ctx)
+        elif self.state == ImplState.UNINITIALIZED:
+            raise RuntimeError("Can't restore packets in UNINITIALIZED state")
 
         if self.directory:
             self._try_recover_directory(ctx)
@@ -559,8 +620,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
             if os.path.isdir(directory):
                 shutil.rmtree(directory, onerror=None)
 
-        self._init_job_deps_graph()
-        self._resume(resume_workable=True, silent_noop=True) # TODO write tests
+        self._update_state()
 
     def try_recover_after_backup_loading(self, ctx):
         descr = '[%s, directory = %s]' % (self, self.directory)
@@ -570,18 +630,6 @@ class JobPacket(Unpickable(lock=PickableRLock,
         except Exception as e:
             logging.exception("Failed to recover packet %s" % descr)
             self._mark_as_failed_on_recovery()
-
-    def _recover_noninitialized(self, ctx):
-        dir = None
-        if self.directory:
-            dir = self.directory
-        elif self.id:
-            dir = os.path.join(ctx.packets_directory, self.id)
-        else:
-            raise RuntimeError("No .id in NONINITIALIZED packet %s" % self.id)
-
-        self._release_place()
-        self._reinit(ctx)
 
     def _notify_incorrect_action(self):
         def make(ctx):
@@ -595,7 +643,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         def make(ctx):
             if not ctx.send_emails:
                 return
-            if not ctx.send_emergency_emails and self.check_flag(PacketFlag.RCVR_ERROR):
+            if not ctx.send_emergency_emails and self.state == ImplState.BROKEN:
                 return
             return messages.FormatPacketErrorStateMessage(ctx, self)
 
@@ -609,7 +657,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
         self._send_email(make)
 
-    def SendJobLongExecutionNotification(self, job):
+    def send_job_long_execution_notification(self, job):
         def make(ctx):
             with self.lock:
                 return messages.FormatLongExecutionWarning(ctx, job)
@@ -633,232 +681,101 @@ class JobPacket(Unpickable(lock=PickableRLock,
     def OnUndone(self, ref):
         pass
 
-    # Called in queue under packet lock
-    def _get_working_jobs(self):
-        return [self.jobs[jid] for jid in list(self.as_in_queue_working)]
-
-    def on_job_done(self, runner):
-        self._active_jobs.on_done(runner)
-
-        with self.lock:
-            self._apply_jobs_results()
-
-    def _process_jobs_results(self, processor):
-        active = self._active_jobs
-
-        while active.has_results():
-            runner = active.pop_result()
-            try:
-                self._process_job_result(processor, runner)
-            except Exception:
-                logging.exception("Failed to process job result for %s" % runner.job)
-
-    def _process_job_result(self, processor, runner):
-        job = runner.job
-        assert job.id in self.jobs
-        logging.debug("job %s\tdone [%s]", job.shell, job.last_result())
-        self.as_in_queue_working.discard(job.id) # FIXME Here or better somewhere between _apply_job_result lines?
-        self.FireEvent("job_done", job) # queue.working.discard(job)
-        if processor:
-            processor(job, runner)
-
-    def _apply_jobs_results(self):
-        self._process_jobs_results(self._apply_job_result)
-
-    def _drop_jobs_results(self):
-        def revert_leaf(job, runner):
-            self.leafs.add(job.id)
-        self._process_jobs_results(revert_leaf)
-
-    def _kill_jobs(self):
-        if self.state in self._ALLOWED_TO_RUN_NEW_JOBS_STATES:
-            logging.error("_kill_jobs on %s in %s" % (self.id, self.state))
-
-        active = self._active_jobs
-
-        active.terminate()
-        active.wait_running_empty()
-
-        self._close_streams()
-
-    def _kill_jobs_drop_results(self):
-        self._kill_jobs()
-        self._drop_jobs_results()
-
     def OnDone(self, ref):
         if isinstance(ref, TagBase):
             with self.lock:
-                if self.state != PacketState.HISTORIED:
+                if self.state != ImplState.HISTORIED: # FIXME
                     self._process_tag_set_event(ref)
 
     def rpc_add_job(self, shell, parents, pipe_parents, set_tag, tries,
-            max_err_len, retry_delay, pipe_fail, description, notify_timeout,
-            max_working_time, output_to_status):
-
+                    max_err_len, retry_delay, pipe_fail, description, notify_timeout,
+                    max_working_time, output_to_status):
         with self.lock:
-            # Actually, pck_add_job use only tempStorage, so SUSPENDED is not used
-            if self.state not in [PacketState.CREATED, PacketState.SUSPENDED]:
-                raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
+            if self.queue or self._will_never_be_executed():
+                raise RpcUserError(RuntimeError("Can't add jobs in %s state" % self._repr_state))
+            #if self.state != ImplState.UNINITIALIZED: # TODO
+                #raise RpcUserError(RuntimeError("incorrect state for \"Add\" operation: %s" % self.state))
 
-            parents = list(set(p.id for p in parents + pipe_parents))
-            pipe_parents = list(p.id for p in pipe_parents)
+            if max_err_len and max_err_len > self.MAX_ERR_LEN:
+                max_err_len = self.MAX_ERR_LEN
+
+            parents = list(set(parents + pipe_parents))
+            pipe_parents = list(set(pipe_parents))
 
             for dep_id in parents:
                 if dep_id not in self.jobs:
-                    raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.id)))
+                    raise RpcUserError(RuntimeError("No job with id = %s in packet %s" % (dep_id, self.pck_id)))
 
-            job = Job(shell, parents, pipe_parents, self, maxTryCount=tries,
+            job = Job(self.id, shell, parents, pipe_parents, max_try_count=tries,
                       max_err_len=max_err_len, retry_delay=retry_delay,
-                      pipe_fail=pipe_fail, description=description, notify_timeout=notify_timeout, max_working_time=max_working_time, output_to_status=output_to_status)
+                      pipe_fail=pipe_fail, description=description,
+                      notify_timeout=notify_timeout,
+                      max_working_time=max_working_time,
+                      output_to_status=output_to_status)
 
             self.jobs[job.id] = job
 
-            self._add_job_to_graph(job)
-
             if set_tag:
-                self.job_done_indicator[job.id] = set_tag
+                self.job_done_tag[job.id] = set_tag
 
             return job
-
-    def _add_job_to_graph(self, job):
-        # waitJobs[child] -> parents
-        # edges[parent]   -> children (constant between calls to Add)
-
-        parents = job.parents
-
-        self.edges[job.id] = []
-        for p in parents:
-            self.edges[p].append(job.id)
-
-        self.waitJobs[job.id] = [jid for jid in parents if jid not in self.done]
-
-        if not self.waitJobs[job.id]:
-            self.leafs.add(job.id)
-
-    def _init_job_deps_graph(self):
-        def visit(startJID):
-            st = [[startJID, 0]]
-            discovered.add(startJID)
-
-            while st:
-                # num - number of neighbours discovered
-                jid, num = st[-1]
-                adj = self.edges[jid]
-                if num < len(adj):
-                    st[-1][1] += 1
-                    nid = adj[num]
-                    self.waitJobs[nid].add(jid)
-                    if nid not in discovered:
-                        discovered.add(nid)
-                        st.append([nid, 0])
-                    elif nid not in finished:
-                        raise RuntimeError("job dependencies cycle exists")
-                else:
-                    st.pop()
-                    finished.add(jid)
-
-        with self.lock:
-            assert not self._active_jobs, "_init_job_deps_graph called when _active_jobs is not empty"
-
-            discovered = set()
-            finished = set()
-
-            self.waitJobs = {jid: set() for jid in self.jobs if jid not in self.done}
-
-            for jid in self.jobs:
-                if jid not in discovered and jid not in self.done:
-                    visit(jid)
-
-            self.leafs = set(jid for jid in discovered if not self.waitJobs[jid])
-
-    # FIXME Diese Funktion ist Wunderwaffe
-    def _resume(self, resume_workable=False, silent_noop=False):
-        allowed_states = [PacketState.CREATED, PacketState.SUSPENDED]
-        if resume_workable:
-            allowed_states.append(PacketState.WORKABLE)
-
-        if self.state in allowed_states and not self.check_flag(PacketFlag.USER_SUSPEND):
-            self._clear_flag(~0)
-
-            if self.waitTags:
-                new_state = PacketState.SUSPENDED
-            else:
-                if self.leafs:
-                    new_state = PacketState.PENDING
-                elif len(self.done) == len(self.jobs):
-                    new_state = PacketState.SUCCESSFULL
-                else:
-                    new_state = PacketState.WORKABLE
-
-            if silent_noop and new_state == self.state:
-                return
-
-            if new_state in [PacketState.PENDING, PacketState.SUCCESSFULL]:
-                self._change_state(PacketState.WORKABLE)
-
-            self._change_state(new_state)
-
-    def GetJobToRun(self):
-        with self.lock:
-            if self.state not in self._ALLOWED_TO_RUN_NEW_JOBS_STATES:
-                return self.INCORRECT
-
-            def get_job():
-                for jid in self.leafs:
-                    job = self.jobs[jid]
-                    self.FireEvent("job_get", job) # queue.working.add(job)
-                    self.as_in_queue_working.add(jid)
-                    self.leafs.remove(jid)
-                    return job
-
-            job = get_job()
-
-            if not job:
-                if self.state == PacketState.PENDING:
-                    self._change_state(PacketState.ERROR)
-                    self._kill_jobs_drop_results()
-                    self._notify_incorrect_action()
-                return self.INCORRECT
-
-            self._clean_state = False
-
-            if not self.leafs:
-                self._change_state(PacketState.WORKABLE)
-
-            runner = JobRunner(job)
-            self._active_jobs.add(runner)
-            return runner
-
-    def IsDone(self):
-        return self.state in (PacketState.SUCCESSFULL, PacketState.HISTORIED, PacketState.ERROR)
 
     def History(self):
         return self.history or []
 
-    # FIXME It's better for debug to allow this call from RPC without lock
-    #       * From messages it's called under lock actually
-    def Status(self):
-        return self._Status()
+    def _get_extended_state(self):
+        g = self._graph_executor
+        return (self.state, g.state, g.get_worker_state())
 
-    def _Status(self):
+    def _produce_clean_jobs_status(self):
+        return [
+            dict(
+                id=str(job.id),
+                shell=job.shell,
+                desc=job.description,
+                state="suspended" if job.parents else "pending",
+                results=[],
+                parents=map(str, job.parents or []),
+                pipe_parents=map(str, job.inputs or []),
+                output_filename=None,
+                wait_jobs=map(str, job.parents),
+            )
+                for jid, job in self.jobs.iteritems()
+        ]
+
+    # FIXME It's better for debug to allow this call from RPC without lock
+    #       * From messages it's called under lock
+    def Status(self):
+        return self._status()
+
+    def _status(self):
         history = self.History()
         total_time = history[-1][1] - history[0][1]
         wait_time = 0
 
         for ((state, start_time), (_, end_time)) in zip(history, history[1:] + [("", time.time())]):
-            if state in (PacketState.SUSPENDED, PacketState.WAITING):
+            if state in (ReprState.SUSPENDED, ReprState.WAITING):
                 wait_time += end_time - start_time
 
-        result_tag = self.done_indicator.name if self.done_indicator else None
+        result_tag = self.done_tag.name if self.done_tag else None
 
-        waiting_time = max(int(self.waitingDeadline - time.time()), 0) \
-            if self.state == PacketState.WAITING else None
+        waiting_time = None
+        if self.state == ImplState.TIME_WAIT:
+            deadline = self._graph_executor.get_nearest_retry_deadline()
+            if deadline:
+                waiting_time = max(int(deadline - time.time()), 0)
+            else:
+                logging.error("Packet %s in WAITING but has no get_nearest_retry_deadline" % self.id)
 
-        all_tags = list(self.allTags)
+        all_tags = list(self.all_dep_tags)
 
         status = dict(name=self.name,
-                      state=self.state,
-                      wait=list(self.waitTags),
+                      is_sandbox=isinstance(self, SandboxPacket),
+                      sandbox_task_id=None, # TODO # FIXME History of tasks? Or logs is enough?
+                      resolved_releases=self.resolved_releases,
+                      state=self._repr_state,
+                      extended_state=self._get_extended_state(),
+                      wait=list(self.wait_dep_tags),
                       all_tags=all_tags,
                       result_tag=result_tag,
                       priority=self.priority,
@@ -868,189 +785,165 @@ class JobPacket(Unpickable(lock=PickableRLock,
                       wait_time=wait_time,
                       last_modified=history[-1][1],
                       waiting_time=waiting_time)
+
         extra_flags = set()
-        if self.state == PacketState.ERROR and self.check_flag(PacketFlag.RCVR_ERROR):
+
+        if self.is_broken:
             extra_flags.add("can't-be-recovered")
-        if self.check_flag(PacketFlag.USER_SUSPEND):
+
+        if self.do_not_run:
             extra_flags.add("manually-suspended")
+
         if extra_flags:
             status["extra_flags"] = ";".join(extra_flags)
 
-        if self.state in (PacketState.ERROR, PacketState.SUSPENDED,
-                          PacketState.WORKABLE, PacketState.PENDING,
-                          PacketState.SUCCESSFULL, PacketState.WAITING):
-            status["jobs"] = []
-            for jid, job in self.jobs.iteritems():
-                result = job.last_result()
-                results = []
-                if result:
-                    results = [safeStringEncode(str(res)) for res in job.results]
+        if not self._is_dummy_graph_executor():
+            jobs = self._graph_executor.produce_detailed_status() \
+                or self._produce_clean_jobs_status()
+        elif self._saved_jobs_status:
+            jobs = self._saved_jobs_status
+        else:
+            jobs = self._produce_clean_jobs_status()
 
-                state = "done" if jid in self.done \
-                    else "working" if jid in self.as_in_queue_working \
-                    else "pending" if jid in self.leafs \
-                    else "errored" if result and not result.IsSuccessfull() \
-                    else "suspended"
+        status["jobs"] = jobs
 
-                wait_jobs = []
-                if self.state == PacketState.WORKABLE:
-                    wait_jobs = map(str, self.waitJobs.get(jid, []))
-
-                parents = map(str, job.parents or [])
-                pipe_parents = map(str, job.inputs or [])
-
-                output_filename = None
-
-                status["jobs"].append(
-                    dict(id=str(job.id),
-                         shell=job.shell,
-                         desc=job.description,
-                         state=state,
-                         results=results,
-                         parents=parents,
-                         pipe_parents=pipe_parents,
-                         output_filename=output_filename,
-                         wait_jobs=wait_jobs,
-                     )
-                )
         return status
+
+    def _check_add_files(self):
+        if not self._will_never_be_executed() or self.do_not_run:
+            return
+
+        raise RpcUserError(RuntimeError("Can't add files/resources in %s state" % self._repr_state))
 
     def rpc_add_binary(self, binname, file):
         with self.lock:
+            self._check_add_files()
+            self.files_modified = True
             self._add_link(binname, file)
-
-    def CheckFlag(self, flag):
-        return bool(self.flags & flag)
-
-    check_flag = CheckFlag
-
-    def _set_flag(self, flag):
-        self.flags |= flag
-
-    def _clear_flag(self, flag):
-        self.flags &= ~flag
 
     def rpc_suspend(self, kill_jobs=False):
         with self.lock:
-            if self.state == PacketState.ERROR and self.check_flag(PacketFlag.RCVR_ERROR):
-                raise RpcUserError(
-                    RuntimeError("Can't suspend ERROR'ed packet %s with RCVR_ERROR flag set" % self.id))
-            self._set_flag(PacketFlag.USER_SUSPEND)
-            self.Suspend(kill_jobs)
+            if self.state == ImplState.PAUSED:
+                return
 
-    def Suspend(self, kill_jobs=False):
-        with self.lock:
-            self._change_state(PacketState.SUSPENDED)
+            # FIXME suspend in SUCCESSFULL may mean: don't execute packet after restart/reset
 
-            if kill_jobs:
-                # FIXME In ideal world it's better to "apply" jobs that will be
-                # finished racy just before kill(2)
-                self._kill_jobs_drop_results()
+            if self.state in [
+                ImplState.SUCCESSFULL,
+                ImplState.BROKEN,
+                ImplState.DESTROYING,
+                ImplState.HISTORIED
+            ]:
+                raise RpcUserError(RuntimeError("Can't suspend in %s state" % self._repr_state))
+
+            self.finish_status = None # for ImplState.ERROR
+            self._saved_jobs_status = None
+
+            # XXX Previous implementation in addition did something like this:
+            # + self.tags_awaited = not self.wait_dep_tags
+
+            self.do_not_run = True
+
+            self._do_graph_suspend(kill_jobs)
+
+            self._update_state()
+
+    def _try_create_place_if_need(self):
+        try:
+            self._create_place_if_need()
+            return True
+        except Exception:
+            logging.exception("Failed to create place")
+            self.is_broken = True
+            self._graph_executor.cancel()
+            self._update_state()
+            return False
 
     def rpc_resume(self):
         with self.lock:
-            # FIXME raise on non-SUSPENDED states?
+            if not self.do_not_run:
+                return
 
-            if self.state == PacketState.SUSPENDED:
-                self._clear_flag(PacketFlag.USER_SUSPEND)
+            self.do_not_run = False
 
-                # TODO write tests
-                # Repeat legacy bullshit behaviour
-                for job in self.jobs.values():
-                    job.tries = 0
+            self._do_graph_resume()
+            self._share_files_as_resource_if_need()
 
-                self._resume()
+            self._update_state()
 
-    def _close_streams(self):
-        try:
-            for key, stream in self.streams.iteritems():
-                if stream is not None:
-                    if isinstance(stream, file):
-                        if not stream.closed:
-                            try:
-                                stream.close()
-                            except:
-                                pass
-        except:
-            logging.exception('Close stream error')
-
-    def _reset(self, suspend, tag_op):
-        def update_tags():
-            for tag, is_done in self._get_all_done_tags():
-                tag_op(tag, is_done)
-
-        # XXX force call to _change_state for packets without jobs
-        #if self._clean_state and self.jobs:
-            #update_tags()
-            #return
-
-        # if not(self.jobs) we will first reset, then set (by _reinit)
-
-        # TODO Test that job_done_indicator are reset
-        update_tags()
-
-        self._change_state(PacketState.NONINITIALIZED)
-
-        if not self._clean_state:
-            self._kill_jobs_drop_results()
-
-            self.done.clear()
-            for job in self.jobs.values():
-                job.results = []
-                job.tries = 0
-
-            self._init_job_deps_graph()
-
-        self._reinit(self._get_scheduler_ctx(), suspend)
-
-    def _reinit(self, ctx, suspend=False):
-        self._init(ctx)
-
-        if self.check_flag(PacketFlag.USER_SUSPEND) or suspend:
-            self._change_state(PacketState.SUSPENDED)
-        else:
-            self._resume()
-
-    def Reset(self, suspend=False):
-        with self.lock:
-            self._reset(suspend, lambda tag, _: tag.Unset())
+    def _update_done_tags(self, op):
+        for tag, is_done in self._get_all_done_tags():
+            op(tag, is_done)
 
     def _get_scheduler_ctx(self):
         return PacketCustomLogic.SchedCtx
         #return self._get_scheduler().context
 
     def _get_all_done_tags(self):
-        if self.done_indicator:
-            yield self.done_indicator, self.state == PacketState.SUCCESSFULL
+        if self.done_tag:
+            yield self.done_tag, self.state == ImplState.SUCCESSFULL
 
-        for job_id, tag in self.job_done_indicator.iteritems():
-            yield tag, job_id in self.done
+        for job_id, tag in self.job_done_tag.iteritems():
+            yield tag, job_id in self.succeed_jobs
 
     def OnReset(self, (ref, comment)):
         if isinstance(ref, TagBase):
             self._on_tag_reset(ref, comment)
 
-    def _on_tag_reset(self, ref, comment):
+    def _reset(self):
+        if self.wait_dep_tags:
+            self.tags_awaited = False
+        self._do_graph_reset()
+        self.finish_status = None
+        self._saved_jobs_status = None
+
+    def rpc_reset(self, suspend=False):
         with self.lock:
-            if self.state == PacketState.HISTORIED:
+            if self._will_never_be_executed():
                 return
 
-            tag_name = ref.GetFullname()
-            self.waitTags.add(tag_name)
+            self._update_done_tags(lambda tag, _: tag.Unset())
 
-            if self.state == PacketState.CREATED:
+            if not self.queue:
+                return # noop
+
+            self.do_not_run = suspend
+
+            self._reset()
+            self._share_files_as_resource_if_need()
+
+            self._update_state()
+
+    def _on_tag_reset(self, ref, comment):
+        with self.lock:
+            if self._will_never_be_executed():
+                return
+
+            # Legacy behaviour: add in any case
+            tag_name = ref.GetFullname()
+            self.wait_dep_tags.add(tag_name)
+
+            if not self.queue:
                 return
 
             def notify(will_reset):
                 self._send_reset_notification(tag_name, comment, will_reset)
 
-            if not self.isResetable:
+            if not self.is_resetable:
                 if self.notify_on_skipped_reset:
                     notify(False)
                 return
 
             if self.notify_on_reset:
                 notify(True)
+
+            # Reset or Unset emulates legacy behaviour
+            self._update_done_tags(
+                lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
+
+            self._reset()
+
+            self._update_state()
 
             # TODO "is_done and tag.Reset(comment)" is not kosher!
             # We need reset-if-need logic in cloud_tags_server proxy
@@ -1067,25 +960,435 @@ class JobPacket(Unpickable(lock=PickableRLock,
             #
             # FIXME This logic also may be added to local tags
 
-            # Reset or Unset emulates legacy behaviour
-            self._reset(False, lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
+    def _set_real_graph_executor_if_need(self):
+        if isinstance(self._graph_executor, DummyGraphExecutor):
+            self._set_real_graph_executor()
+
+    def _is_dummy_graph_executor(self):
+        return isinstance(self._graph_executor, DummyGraphExecutor)
+
+    def _set_real_graph_executor(self):
+        self._saved_jobs_status = None # j.i.c.
+        self._graph_executor = self._create_job_graph_executor()
+        self._graph_executor.init() # Circular references
 
     def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
         with self.lock:
-            if self.state not in [PacketState.CREATED, PacketState.SUSPENDED, PacketState.ERROR]:
-                raise as_rpc_user_error(
-                    from_rpc, RuntimeError("can't move 'live' packet between queues"))
+            self._check_can_move_beetwen_queues()
 
             if src_queue:
                 src_queue._detach_packet(self)
 
             if dst_queue:
+                # after _create_job_graph_executor() because of .has_pending_jobs()
                 dst_queue._attach_packet(self)
+            else:
+                self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
     def rpc_move_to_queue(self, src_queue, dst_queue):
-        self._move_to_queue(src_queue, dst_queue, from_rpc=True)
+        with self.lock:
+            if not self.queue:
+                raise RpcUserError(RuntimeError("Packet not yet attached to queue to call move"))
+
+            if self.destroying:
+                raise RpcUserError(RuntimeError("Packet is destroying"))
+
+            if not self._graph_executor.is_null():
+                raise RpcUserError(RuntimeError("Can't move packets with running jobs"))
+
+            if src_queue == dst_queue:
+                return
+
+            self._move_to_queue(src_queue, dst_queue, from_rpc=True)
 
     def _attach_to_queue(self, queue):
         with self.lock:
+            if self.queue:
+                raise RpcUserError(RuntimeError("Packet already attached to queue"))
+
+            if self.destroying:
+                raise RpcUserError(RuntimeError("Packet is destroying"))
+
             self._move_to_queue(None, queue)
-            self._resume()
+            self._share_files_as_resource_if_need()
+
+            self._update_state()
+
+    def make_job_graph(self):
+        # Without deepcopy self.jobs[*].{tries,result} will be modifed
+        # FIXME Use something else but deepcopy
+        return JobGraph(copy.deepcopy(self.jobs), self.kill_all_jobs_on_error)
+
+
+class _LocalPacketJobGraphOps(object):
+    def __init__(self, pck):
+        self.pck = pck
+
+    def get_io_directory(self):
+        return self.pck.directory
+
+    get_working_directory = get_io_directory
+
+    def on_state_change(self):
+        self.pck._on_graph_executor_state_change()
+
+    def stop_waiting(self, stop_id):
+        self.pck._stop_waiting(stop_id)
+
+    def del_working(self, job):
+        self.pck.queue._on_job_done(self, job)
+
+    def add_working(self, job):
+        self.pck.queue._on_job_get(self, job)
+
+    def job_done_successfully(self, job_id):
+        tag = self.pck.job_done_tag.get(job_id)
+        if tag:
+            tag.Set()
+
+    def create_job_runner(self, job):
+        return JobRunner(self, job)
+
+    def on_job_done(self, runner):
+        self.pck.on_job_done(runner)
+
+    def create_file_handles(self, job):
+        return self.pck._graph_executor.create_job_file_handles(job)
+
+    def notify_long_execution(self, job):
+        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, job.id)
+        self.pck.send_job_long_execution_notification(job)
+
+    def start_process(self, *args, **kwargs):
+        ctx = PacketCustomLogic.SchedCtx
+        return ctx.run_job(*args, **kwargs)
+
+
+#class NotAllowedStateChangeError(AssertionError):
+    #pass
+
+class NotAllFileLinksAlive(RuntimeError):
+    pass
+
+class NotWorkingStateError(RuntimeError):
+    pass
+
+class NonDestroyingStateError(RuntimeError):
+    pass
+
+
+class LocalPacket(PacketBase):
+    MAX_ERR_LEN = 2 ** 20
+
+    def _create_job_graph_executor(self):
+        return job_graph.JobGraphExecutor(
+            _LocalPacketJobGraphOps(self), # TODO Cyclic reference
+            self.id,
+            self.make_job_graph(),
+        )
+
+    def has_pending_jobs(self):
+        with self.lock:
+            return self.state in [ImplState.PENDING, ImplState.RUNNING] \
+                and bool(self._graph_executor.state & GraphState.PENDING_JOBS)
+
+    def get_job_to_run(self):
+        with self.lock:
+            def _raise():
+                raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
+
+            if self.state not in [ImplState.RUNNING, ImplState.PENDING]:
+                _raise()
+
+            self._set_real_graph_executor_if_need()
+
+            if not self._graph_executor.has_jobs_to_run():
+                _raise()
+
+            runner = self._graph_executor.get_job_to_run()
+            #self._update_state() called in JobGraphExecutor
+
+            return runner
+
+    # Called in queue under packet lock
+    def _get_working_jobs(self):
+        return self._graph_executor.get_working_jobs()
+
+    def on_job_done(self, runner):
+        self._graph_executor.on_job_done(runner)
+
+        with self.lock:
+            if not self._is_dummy_graph_executor():
+                self._graph_executor.apply_jobs_results()
+
+    def _create_job_file_handles(self, job):
+        return self._graph_executor.create_job_file_handles(job)
+
+    def _stop_waiting(self, stop_id):
+        with self.lock:
+            self._graph_executor.stop_waiting(stop_id)
+
+    def _check_can_move_beetwen_queues(self):
+        pass
+
+    def _do_graph_suspend(self, kill_jobs):
+        if kill_jobs:
+            self._graph_executor.cancel()
+
+    def _do_graph_resume(self):
+        self._graph_executor.reset_tries() # XXX
+
+    def _do_graph_reset(self):
+        self._graph_executor.reset()
+
+    def _is_graph_stopping(self):
+        return not self._graph_executor.is_null() and self.do_not_run
+
+    def _share_files_as_resource_if_need(self):
+        pass
+
+    def vivify_release_resolving(self):
+        pass
+
+
+class SandboxPacket(PacketBase):
+    MAX_ERR_LEN = 1024
+
+    def _do_graph_suspend(self, kill_jobs):
+        g = self._graph_executor
+        if not g.is_null(): # null in ERROR state
+            g.stop(kill_jobs)
+
+    def _do_graph_resume(self):
+        g = self._graph_executor
+
+        if not g.is_null() and not (self.files_modified or self.resources_modified):
+            g.try_soft_resume() # XXX reset_tries
+            # if fail -- when g._remote_packet becomes None
+            #         -- SandboxPacket becomes PENDING
+
+    def _do_graph_reset(self):
+        g = self._graph_executor
+
+        if not self.wait_dep_tags and not g.is_null() and not (self.files_modified or self.resources_modified):
+            g.try_soft_restart()
+        else:
+            g.reset()
+
+    def _is_graph_stopping(self):
+        return self._graph_executor.is_stopping()
+
+    # For production-ready:
+    #   1. write rem.storages.sharer_cache around rem.resource_sharing
+    #   2. share all small files of packet in single resource
+    #      and big files in different resources
+    def _share_files_as_resource_if_need(self):
+        with self.lock:
+            if self.queue and self.files_modified and not self.files_sharing and self.jobs:
+                self._share_files_as_resource()
+
+    def _share_files_as_resource(self):
+        with self.lock:
+            ctx = self._get_scheduler_ctx()
+            sharer = ctx.sandbox_resource_sharer
+
+            # FIXME Not guaranteed anyhow
+            assert self.directory
+
+            # Force REMOTE_COPY_RESOURCE to create directory even if len(self.bin_links) == 1
+            with open(self.directory + '/.force_multiple_files', 'w'):
+                pass
+
+            self.files_sharing = sharer.share(
+                'REM_JOBPACKET_ADDED_FILE_SET',
+                name='__auto_shared_files__',
+                directory=self.directory,
+                files=['.'] # FIXME self.bin_links.keys()
+            )
+
+            self.files_modified = False
+            self.files_sharing.subscribe(self._on_files_shared)
+
+            self._update_state()
+
+    def _on_files_shared(self, future):
+        with self.lock:
+            self.files_sharing = None
+
+            if self.files_modified:
+                self._share_files_as_resource()
+                return
+
+            # TODO Handle errors
+            self.shared_files_resource_id = future.get()
+            self.resources_modified = True
+
+            self._update_state()
+
+    def run(self, guard):
+        with self.lock:
+            if self.state != ImplState.PENDING:
+                raise NotWorkingStateError("Can't run jobs in % state" % self._repr_state)
+
+            # TODO Better
+            if self.resources_modified and not self._is_dummy_graph_executor():
+                self._graph_executor._custom_resources \
+                    = self._produce_job_graph_executor_custom_resources()
+            else:
+                self._set_real_graph_executor()
+
+            self.resources_modified = False
+
+            self._graph_executor.start(guard)
+
+            self._update_state()
+
+    def rpc_add_resource(self, name, path):
+        with self.lock:
+            if not path.startswith('sbx:'):
+                raise RpcUserError(ValueError())
+
+            PacketBase._check_add_files(self)
+
+            # Must comes first (contains check, may throw)
+            self._resolve_releases_if_need(path)
+
+            self.resources_modified = True
+            self.sbx_files[name] = path
+
+    def _resolve_releases_if_need(self, path):
+        m = _SANDBOX_RELEASE_PATH_RE.match(path)
+        if not m:
+            raise RpcUserError(RuntimeError("Malformed resource path '%s'" % path))
+
+        resource_descr = m.groups()[0]
+
+        if _INTEGER_RE.match(resource_descr):
+            return
+
+        # TODO Use parsed hashable Request instead of string descr
+
+        if resource_descr in self.resolved_releases:
+            return
+
+        try:
+            resolve = self._start_resolve_release(resource_descr)
+        except MalformedResourceDescr as e:
+            raise RpcUserError(ValueError(str(e)))
+
+        self.resolved_releases[resource_descr] = None
+        self.unresolved_release_count += 1
+        resolve()
+
+    # force re-resolve
+    def rpc_resolve_resources(self):
+        with self.lock:
+            for descr, res_id in self.resolved_releases.items():
+                if res_id is not None:
+                    resolve = self._start_resolve_release(descr)
+                    self.unresolved_release_count += 1
+                    self.resolved_releases[descr] = None
+                    resolve()
+
+    def _on_release_resolved(self, resource_descr, f):
+        with self.lock:
+            if not f.is_success():
+# TODO add error message to _status()
+                self.is_broken = True
+                self._update_state()
+                return
+
+            self.unresolved_release_count -= 1
+            self.resolved_releases[resource_descr] = f.get()
+
+            if not self.unresolved_release_count and self.state == ImplState.RESOLVING_RELEASES:
+                self._update_state()
+
+    def vivify_release_resolving(self):
+        with self.lock:
+            if self._will_never_be_executed():
+                return
+
+            to_resolve = [
+                resource_descr for resource_descr, resource_id in self.resolved_releases.items()
+                    if resource_id is None
+            ]
+
+            self.unresolved_release_count = len(to_resolve)
+
+            if not to_resolve:
+                return
+
+            for resource_descr in to_resolve:
+                self._start_resolve_release(resource_descr)()
+
+    # Implemented in 2 stages because # parse stage may throw and we don't want
+    # to modify self before it
+    def _start_resolve_release(self, descr):
+        ctx = self._get_scheduler_ctx()
+        resolver = ctx.sandbox_release_resolver
+
+        req = resolver.parse_resource_descr(descr)
+
+        def resolve():
+            # FIXME Use int result in resolve() if it ready
+            resolver.resolve(req
+                ).subscribe(lambda f: self._on_release_resolved(descr, f))
+
+        return resolve
+
+    def _produce_job_graph_executor_custom_resources(self):
+        assert not self.files_modified
+
+        files = {}
+
+        # FIXME Don't compute on each run?
+        for filename, path in self.sbx_files.items():
+            m = _SANDBOX_RELEASE_PATH_RE.match(path)
+            if m:
+                resource_descr, inner_path = m.groups()
+
+                if _INTEGER_RE.match(resource_descr):
+                    resource_id = int(resource_descr)
+                else:
+                    resource_id = self.resolved_releases[resource_descr]
+
+                path = 'sbx:%s%s' % (resource_id, inner_path or '')
+
+            files[filename] = path
+
+        if self.shared_files_resource_id:
+            files = files.copy()
+
+            prefix = 'sbx:%d/' % self.shared_files_resource_id
+
+            for filename in self.bin_links.keys():
+                files[filename] = prefix + filename
+
+        return files
+
+    def _create_job_graph_executor(self):
+        assert not self.files_modified
+        files = self._produce_job_graph_executor_custom_resources()
+
+        logging.debug('_create_job_graph_executor(%s): %s' % (self.id, files))
+
+        return sandbox_remote_packet.SandboxJobGraphExecutorProxy(
+            sandbox_remote_packet.SandboxPacketOpsForJobGraphExecutorProxy(self),
+            self.id,
+            self.make_job_graph(),
+            files,
+            #self.make_sandbox_task_params()
+        )
+
+    def _check_can_move_beetwen_queues(self):
+        pass
+
+    def _check_add_files(self):
+        PacketBase._check_add_files(self)
+
+        if not self._get_scheduler_ctx().allow_files_auto_sharing:
+            raise RpcUserError(RuntimeError("Can't add files to SandboxPacket"))
+
+
+from rem.packet_legacy import JobPacket

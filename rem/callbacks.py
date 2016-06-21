@@ -1,6 +1,6 @@
 import weakref
 import itertools
-from common import *
+from common import Unpickable
 from rem_logging import logger as logging
 
 class ETagEvent(object):
@@ -42,11 +42,14 @@ class CallbackHolder(Unpickable(callbacks=weakref.WeakKeyDictionary,
         if obj in self.nonpersistent_callbacks:
             del self.nonpersistent_callbacks[obj]
 
+    def __get_listeners(self):
+        return (ref() for ref in itertools.chain(self.callbacks.keyrefs(),
+                                                 self.nonpersistent_callbacks.keyrefs()))
+
     def FireEvent(self, event, reference=None, safe=False):
         bad_listeners = set()
 
-        for obj_ref in itertools.chain(self.callbacks.keyrefs(), self.nonpersistent_callbacks.keyrefs()):
-            obj = obj_ref()
+        for obj in self.__get_listeners():
             if isinstance(obj, ICallbackAcceptor):
                 try:
                     obj.AcceptCallback(reference or self, event)
@@ -60,6 +63,9 @@ class CallbackHolder(Unpickable(callbacks=weakref.WeakKeyDictionary,
 
         for obj in bad_listeners:
             self.DropCallbackListener(obj)
+
+    def _get_listeners_by_type(self, type):
+        return [obj for obj in self.__get_listeners() if isinstance(obj, type)]
 
     def GetListenersNumber(self):
         return len(self.callbacks)

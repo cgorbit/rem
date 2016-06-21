@@ -34,9 +34,8 @@ class PacketExecutionError(IMessageHelper):
         self.ctx = ctx
 
     def subject(self):
-        from packet import PacketFlag
-
-        reason = "packet recovering error" if self.pck.CheckFlag(PacketFlag.RCVR_ERROR) \
+# FIXME Use pck.state
+        reason = "packet recovering error" if self.pck.is_broken \
             else "packet execution error"
         return "[REM@%(sname)s] Task '%(pname)s': %(reason)s" % {"pname": self.pck.name, "reason": reason,
                                                                  "sname": self.ctx.network_name}
@@ -86,7 +85,7 @@ class EmergencyError(IMessageHelper):
 
 class TooLongWorkingWarning(IMessageHelper):
     def __init__(self, ctx, job):
-        self.pck = job.packetRef
+        self.pck = job.pck
         self.job = job
         self.ctx = ctx
 

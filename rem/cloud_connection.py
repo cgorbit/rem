@@ -33,7 +33,7 @@ def single_addr(addr):
 def from_description(descr):
     # nanny://token@nanny.yandex-team.ru/prod_rem_cloud_tags_proxy
     if descr.startswith('nanny://'):
-        m = re.match('^nanny://([a-z0-9]+)@([^/]+)/([\w-]+)$', descr)
+        m = re.match('^nanny://([a-zA-Z0-9-]+)@([^/]+)/([\w-]+)$', descr)
         if not m:
             raise ValueError("Malformed nanny description '%s'" % descr)
         token, host, service = m.groups()
