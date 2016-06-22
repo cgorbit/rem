@@ -157,6 +157,10 @@ class Client(object):
             #if res['status'] == 'ERROR':
                 #raise RuntimeError(res['message'])
 
+        @property
+        def hosts(self):
+            return self._api.get_task_hosts(self.id)
+
         @staticmethod
         def _start(api, id):
             res = api._make_call(
@@ -173,6 +177,9 @@ class Client(object):
 
     def Task(self, id):
         return self.TaskProxy(self, self._make_call('GET', '/task/%d' % id))
+
+    def get_task_hosts(self, id):
+        return self._make_call('GET', 'task/%d/audit/hosts' % id)
 
     def create_task(self, type, context, **kwargs):
         params = {
