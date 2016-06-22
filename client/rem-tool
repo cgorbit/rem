@@ -37,6 +37,10 @@ def print_pck_info(pck, extended=False):
         if job.state == "working": print "%sexec_shell=%s" % (" " * len(hd), job.shell)
 
     if extended:
+        last_error = getattr(pck, 'last_global_error', None)
+        if last_error:
+            print "\nError: %s" % last_error
+
         resolved_releases = getattr(pck, 'resolved_releases', None)
         if resolved_releases:
             print "\nResolved resources:"

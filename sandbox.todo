@@ -11,29 +11,25 @@ freshness@veles02 (PHASE_1)
        тогда его надо загасить (в текущем виде вообще AssertionError и не стартанёт)
 ----1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
 ----X. Не resume'ятся очереди sbx: при рестарте сервера
-    0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
-       таски такой переход осуществляют
 ----0. sky share результатами недоступен в Sandbox
 ----0. Some suitable way to create FRESHNESS_SCRIPTS resource
-    2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
-    3. Add some whole-packet _error_message from sandbox_remote_packet (display
-       in rem-tool and email messages)
-    3. rem-tool
+----2. Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
+----3. rem-tool
 ----    - is_sandbox=True (потому что sandbox_task_id ещё может не быть)
 ----    - last sandbox_task_id (link to web-page)
 ----    - resolved_releases?
-        - whole-packet error (if sandbox_remote_packet fail)
-    3. !Retriable /TIME_WAIT для EXCEPTION тасков
-        - EXCEPTION -- Temporary or Unknown
-        - FAILURE -- Permanent + __last_rem_error
-        * Or maybe both EXCEPTION + __last_rem_error
+----3. Add some whole-packet _error_message from sandbox_remote_packet
+       - email notifications
+       - rem-tool
+----3. !Retriable/TIME_WAIT для EXCEPTION тасков
 ----7. Cache locality
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
-    5. Unpickable всюду
-    6. проверить ещё раз "сереализуемость" всего зашедуленного (как бы всё-таки универсально?)
 
 
 production-quality (PHASE_2)
+    0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
+       таски такой переход осуществляют
+
 ----0. Создать группу в Sandbox для USER:LOW приоритета у пользователся robot-rem
 
     1. ttl на ресурсы выхлопа RUN_REM_JOBPACKET:

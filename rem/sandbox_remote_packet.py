@@ -19,7 +19,7 @@ import rem.sandbox as sandbox
 from rem.sandbox_tasks import TaskStateGroups, SandboxTaskStateAwaiter
 from rem_logging import logger as logging
 from job_graph import GraphState
-from rem.common import PickableLock
+from rem.common import PickableLock, Unpickable
 from rem.action_queue import ActionQueue
 
 remote_packets_dispatcher = None
@@ -273,7 +273,7 @@ prev_task: {prev_task}
         def handle_unknown_error(e):
             with pck._lock:
                 if not pck._target_stop_mode:
-                    pck._error = e
+                    pck.set_error(str(e), False)
                 self._mark_as_finished(pck, 'Unknown error while creating: %s' % e)
 
         # FIXME Invert logic: retry everything except permanent
@@ -345,12 +345,12 @@ prev_task: {prev_task}
                 # TODO Don't forget to take into account ._target_stop_mode in _on_task_status_change
 
                 # Here we don't know if task is really started
-                pck._is_error_pemanent = \
+                is_error_permanent = \
                     not isinstance(e, (sandbox.NetworkError, sandbox.ServerInternalError))
                     # TODO
+                pck.set_error(str(e), is_error_permanent)
 
                 pck._set_state(RemotePacketState.CHECKING_START_ERROR)
-                pck._error = e
 
             return
 
@@ -507,10 +507,16 @@ prev_task: {prev_task}
 
         #logging.debug('task #%s res_by_type: %s' % (pck._sandbox_task_id, json.dumps(res_by_type, indent=3)))
 
-        # TODO Handle KeyError: 'REM_JOBPACKET_EXECUTION_SNAPSHOT'
-
         with pck._lock:
-            pck._result_snapshot_resource_id = res_by_type['REM_JOBPACKET_EXECUTION_SNAPSHOT']['id']
+            resource = res_by_type.get('REM_JOBPACKET_EXECUTION_SNAPSHOT')
+            if not resource:
+                logging.error("No REM_JOBPACKET_EXECUTION_SNAPSHOT resource in %s" % pck._sandbox_task_id)
+                err = "No REM_JOBPACKET_EXECUTION_SNAPSHOT resource"
+                pck.set_error(err, False)
+                self._mark_as_finished(pck, err)
+                return
+
+            pck._result_snapshot_resource_id = resource['id']
 
             if pck._final_state is None:
                 pck._final_update_url = res_by_type['REM_JOBPACKET_GRAPH_UPDATE']['http']['proxy']
@@ -561,7 +567,7 @@ prev_task: {prev_task}
 
                 with pck._lock:
                     if pck._target_stop_mode != StopMode.CANCEL:
-                        pck._error = RuntimeError() # TODO
+                        pck.set_error("Can't fetch final update: status == %s" % resp.status_code, False) # TODO
                     self._mark_as_finished(pck)
 
                 return
@@ -573,7 +579,7 @@ prev_task: {prev_task}
 
             with pck._lock:
                 if pck._target_stop_mode != StopMode.CANCEL:
-                    pck._error = RuntimeError('Malformed last update resource data: %s' % e)
+                    pck.set_error('Malformed last update resource data: %s' % e, False)
                 self._mark_as_finished(pck)
 
             return
@@ -619,11 +625,10 @@ prev_task: {prev_task}
                     pass
 
                 elif state == RemotePacketState.CHECKING_START_ERROR:
-                    if pck._is_error_pemanent:
-                        self._mark_as_finished(pck, '_is_error_pemanent=True, DRAFT')
+                    if pck._is_error_permanent:
+                        self._mark_as_finished(pck, 'is_error_permanent=True, DRAFT')
                     else:
-                        pck._error = None
-                        pck._is_error_pemanent = None
+                        pck.reset_error()
                         pck._set_state(RemotePacketState.STARTING)
                         self._start_start_sandbox_task(pck)
 
@@ -647,13 +652,13 @@ prev_task: {prev_task}
                         pck._set_state(RemotePacketState.FETCHING_RESOURCE_LIST)
                         self._start_fetch_resource_list(pck)
                     else:
-                        pck._error = RuntimeError("Unknown task error")
-                        pck._is_error_pemanent = False
+                        pck.set_error("Unknown task error", False) # TODO
                         self._mark_as_finished(pck, 'Task TERMINATED and EXCEPTION/FAILURE')
 
                     # FIXME Does Sandbox delete task's meta info or it's always DELETED
 
                     # TODO Fetch and interpret ctx['__last_rem_error']
+
                     #TaskStatus.DELETING:
                     #TaskStatus.DELETED: # has context
                     #TaskStatus.FAILURE:
@@ -820,7 +825,9 @@ class Unreachable(AssertionError):
     pass
 
 
-class SandboxRemotePacket(object):
+class SandboxRemotePacket(Unpickable(
+                            _is_error_permanent=bool,
+                         )):
     def __init__(self, ops, pck_id, run_guard, snapshot_data,
                  snapshot_resource_id, custom_resources):
         self.id = pck_id
@@ -839,13 +846,21 @@ class SandboxRemotePacket(object):
         self._sched = None
         self._peer_addr = None
         self._error = None
-        self._is_error_pemanent = None # some guess
+        self._is_error_permanent = False # some guess
         self._final_state = None
         self._result_snapshot_resource_id = None
 
         self._succeeded_jobs = set()
 
         remote_packets_dispatcher.register_packet(self)
+
+    def set_error(self, err, is_permanent=False):
+        self._error = err
+        self._is_error_permanent = is_permanent
+
+    def reset_error(self):
+        self._error = None
+        self._is_error_permanent = False
 
     def __getstate__(self):
         sdict = self.__dict__.copy()
@@ -915,7 +930,22 @@ class PacketResources(object):
         self.resource_ids = resource_ids
 
 
-class SandboxJobGraphExecutorProxy(object):
+def _value_or_None(*args):
+    return args[0] if args else None
+
+
+def _value_or(default):
+    def _value_or(*args):
+        return args[0] if args else default
+    return _value_or
+
+
+class SandboxJobGraphExecutorProxy(Unpickable(
+                                    _tries=_value_or(5),
+                                  )):
+    MAX_TRY_COUNT = 5
+    RETRY_INTERVALS = [15, 300, 900, 3600]
+
     def __init__(self, ops, pck_id, graph, custom_resources):
         self._ops = ops
         self.lock = self._ops.lock
@@ -929,6 +959,7 @@ class SandboxJobGraphExecutorProxy(object):
         self._remote_time_wait_deadline = None
         self._prev_snapshot_resource_id = None
         self._error = None
+        self._tries = self.MAX_TRY_COUNT
 
         self.cancelled = False
         self.stopping = False
@@ -1001,6 +1032,9 @@ class SandboxJobGraphExecutorProxy(object):
             self._do_on_packet_terminated()
             self._update_state()
 
+    def get_global_error(self):
+        return self._error
+
     def _do_on_packet_terminated(self):
         def on_stop():
             self._prev_task_id = self._remote_packet._sandbox_task_id
@@ -1027,6 +1061,23 @@ class SandboxJobGraphExecutorProxy(object):
 
         if r._error:
             self._error = r._error
+
+            if r._is_error_permanent:
+                self._tries = 0
+
+            elif self._tries:
+                retry_idx = self.MAX_TRY_COUNT - self._tries - 1
+
+                delay = self.RETRY_INTERVALS[retry_idx] \
+                    if retry_idx < len(self.RETRY_INTERVALS) \
+                    else self.RETRY_INTERVALS[-1]
+
+                logging.debug("Packet %s in task %s failed. Will retry after %s seconds" % (
+                    self.pck_id, r._sandbox_task_id, delay))
+
+                self.time_wait_deadline = time.time() + delay
+
+                self._schedule_time_wait_stop()
 
         elif r._final_state == GraphState.TIME_WAIT:
             self.time_wait_deadline = r._last_update['nearest_retry_deadline']
@@ -1097,11 +1148,11 @@ class SandboxJobGraphExecutorProxy(object):
             elif self.result is not None:
                 return GraphState.SUCCESSFULL if self.result else GraphState.ERROR
 
-            elif self._error:
-                return GraphState.ERROR
-
             elif self.time_wait_deadline:
                 return GraphState.TIME_WAIT
+
+            elif self._error and not self._tries:
+                return GraphState.ERROR
 
             else:
                 return GraphState.PENDING_JOBS
@@ -1132,8 +1183,11 @@ class SandboxJobGraphExecutorProxy(object):
 
     def start(self, guard):
         with self.lock:
-            if self._remote_packet:
-                raise RuntimeError()
+            assert not self._remote_packet
+            assert self._tries
+
+            self._tries -= 1
+            self._error = None
 
             self._remote_packet = self._create_remote_packet(guard)
 
@@ -1152,6 +1206,9 @@ class SandboxJobGraphExecutorProxy(object):
                 self.result = None
                 self.remote_history = []
                 self.detailed_status = None
+                self._tries = self.MAX_TRY_COUNT
+            else:
+                self._tries += 1
 
             if not self._remote_packet:
                 return

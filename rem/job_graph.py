@@ -296,6 +296,9 @@ class JobGraphExecutor(Unpickable(
             self._create_output(job.id, "err")
         )
 
+    def get_global_error(self):
+        return None
+
     def _apply_job_result(self, job, runner):
         if runner.returncode_robust == 0 and not runner.is_cancelled():
             self.succeed_jobs.add(job.id)

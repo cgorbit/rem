@@ -73,6 +73,9 @@ class DummyGraphExecutor(object):
     def is_null(self):
         return True
 
+    def get_global_error(self):
+        return None
+
     def produce_detailed_status(self):
         return None
 
@@ -778,6 +781,7 @@ class PacketBase(Unpickable(
         status = dict(name=self.name,
                       is_sandbox=isinstance(self, SandboxPacket),
                       last_sandbox_task_id=self.last_sandbox_task_id, # TODO History of tasks
+                      last_global_error=self._graph_executor.get_global_error(),
                       resolved_releases=self.resolved_releases,
                       state=self._repr_state,
                       extended_state=self._get_extended_state(),
@@ -1176,10 +1180,12 @@ class SandboxPacket(PacketBase):
     def _do_graph_reset(self):
         g = self._graph_executor
 
-        if not self.wait_dep_tags and not g.is_null() and not (self.files_modified or self.resources_modified):
-            g.try_soft_restart()
-        else:
-            g.reset()
+        # TODO
+        #if not self.wait_dep_tags and not g.is_null() and not (self.files_modified or self.resources_modified):
+            #g.try_soft_restart()
+        #else:
+            #g.reset()
+        g.reset()
 
     def _is_graph_stopping(self):
         return self._graph_executor.is_stopping()
@@ -1238,9 +1244,11 @@ class SandboxPacket(PacketBase):
 
             # TODO Better
             if self.resources_modified and not self._is_dummy_graph_executor():
+                self._graph_executor.reset_tries() # FIXME
                 self._graph_executor._custom_resources \
                     = self._produce_job_graph_executor_custom_resources()
-            else:
+
+            elif self._is_dummy_graph_executor():
                 self._set_real_graph_executor()
 
             self.resources_modified = False
