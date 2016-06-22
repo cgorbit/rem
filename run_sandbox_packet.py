@@ -253,8 +253,6 @@ def _parse_listen_port(opt):
 if __name__ == '__main__':
     opts = parse_arguments()
 
-    raise RuntimeError("0xDEADBEAF")
-
     for attr in ['io_dir', 'work_dir', 'result_snapshot_file', 'last_update_message_file'] \
             + (['snapshot_file'] if opts.snapshot_file is not None else []):
         setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
