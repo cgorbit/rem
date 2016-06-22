@@ -1347,7 +1347,7 @@ class SandboxPacket(PacketBase):
         assert not self.files_modified
 
         files = {}
-        resources = []
+        resources = set()
 
         # FIXME Don't compute on each run?
         for filename, path in self.sbx_files.items():
@@ -1363,7 +1363,7 @@ class SandboxPacket(PacketBase):
             path = 'sbx:%s%s' % (resource_id, inner_path or '')
 
             files[filename] = path
-            resources.append(resource_id)
+            resources.add(resource_id)
 
         if self.shared_files_resource_id:
             files = files.copy()
@@ -1373,7 +1373,7 @@ class SandboxPacket(PacketBase):
             for filename in self.bin_links.keys():
                 files[filename] = prefix + filename
 
-        return sandbox_remote_packet.PacketResources(files, resources)
+        return sandbox_remote_packet.PacketResources(files, list(resources))
 
     def _create_job_graph_executor(self):
         assert not self.files_modified
