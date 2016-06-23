@@ -178,6 +178,8 @@ class PacketBase(Unpickable(
         self.priority = priority
         self.notify_emails = list(notify_emails)
         self.is_resetable = is_resetable
+        self.notify_on_reset = notify_on_reset
+        self.notify_on_skipped_reset = notify_on_skipped_reset
         self.done_tag = set_tag
 
         self.tags_awaited = not wait_tags
