@@ -82,6 +82,7 @@ class Context(object):
         self.pgrpguard_binary = config.safe_get("run", "process_wrapper", self.pgrpguard_binary)
         self.sandbox_api_url = config.safe_get("run", "sandbox_api_url", None)
         self.sandbox_api_token = config.safe_get("run", "sandbox_api_token", None)
+        self.sandbox_api_timeout = config.safe_getint("run", "sandbox_api_timeout", 15)
         self.sandbox_task_owner = config.safe_get("run", "sandbox_task_owner", None)
         self.sandbox_task_priority = config.safe_get("run", "sandbox_task_priority", None)
         self.sandbox_task_max_count = config.safe_getint("run", "sandbox_task_max_count", 50)
