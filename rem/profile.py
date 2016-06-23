@@ -6,6 +6,7 @@ import time
 import rem.osspec
 from rem_logging import logger as logging
 
+
 PROFILING_DIR = None
 try:
     import prctl
@@ -14,6 +15,7 @@ try:
 except ImportError:
     def set_thread_name(name):
         pass
+
 
 def __init():
     global PROFILING_DIR
@@ -26,8 +28,10 @@ def __init():
 
 __init()
 
+
 def _gettid():
     return rem.osspec.gettid() or 0
+
 
 class NamedThread(threading.Thread):
     def __init__(self, *args, **kwargs):
@@ -39,11 +43,12 @@ class NamedThread(threading.Thread):
 
     def _set_thread_name(self):
         set_thread_name('rem-' + self.name)
-        #logging.debug('ProfiledThread name for %d is %s' % (_gettid(), self.name))
+        logging.debug('ProfiledThread name for %d is %s' % (_gettid(), self.name))
 
     def run(self):
         self._set_thread_name()
         threading.Thread.run(self)
+
 
 class ProfiledThread(NamedThread):
     def _run_profiled(self, func):
