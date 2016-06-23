@@ -20,7 +20,7 @@ except ImportError:
 def __init():
     global PROFILING_DIR
 
-    PROFILING_DIR = os.environ.get('PROFILING_DIR', None)
+    PROFILING_DIR = os.environ.get('REM_PROFILING_DIR', None)
 
     if PROFILING_DIR:
         PROFILING_DIR += '/%d' % int(time.time())
@@ -43,11 +43,19 @@ class NamedThread(threading.Thread):
 
     def _set_thread_name(self):
         set_thread_name('rem-' + self.name)
-        logging.debug('ProfiledThread name for %d is %s' % (_gettid(), self.name))
+        logging.debug('NamedThread name for %d is %s' % (_gettid(), self.name))
 
     def run(self):
         self._set_thread_name()
-        threading.Thread.run(self)
+        self._do_run()
+
+    def _do_run(self):
+        try:
+            f = getattr(self, '_run', threading.Thread.run.__get__(self))
+            f()
+        except:
+            logging.exception('NamedThread %s [%d] failed' % (self.name, _gettid()))
+            raise
 
 
 class ProfiledThread(NamedThread):
@@ -58,10 +66,8 @@ class ProfiledThread(NamedThread):
         finally:
             profiler.dump_stats('%s/thread-%s-%d.profile' % (PROFILING_DIR, self.name, _gettid()))
 
-    def run(self):
-        self._set_thread_name()
-
-        func = getattr(self, '_run', threading.Thread.run.__get__(self))
+    def _do_run(self):
+        func = super(ProfiledThread, self)._do_run
 
         if PROFILING_DIR is not None:
             self._run_profiled(func)
