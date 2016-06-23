@@ -945,16 +945,11 @@ def create_process_runners(ctx):
 
 
 def _init_sandbox(ctx):
-    ctx.sandbox = rem.sandbox.Client(
-        ctx.sandbox_api_url,
-        ctx.sandbox_api_token,
-        timeout=ctx.sandbox_api_timeout)
-
     ctx.resource_sharing_subproc = subprocsrv.create_runner()
 
     shr = rem.resource_sharing.Sharer(
         subproc=ctx.resource_sharing_subproc,
-        sandbox=ctx.sandbox,
+        sandbox=ctx.sandbox_client,
         task_owner=ctx.sandbox_task_owner,
         task_priority=ctx.sandbox_task_priority,
     )
@@ -1042,7 +1037,9 @@ def create_context(config):
 # TODO Join all sandbox initializations
     if ctx.sandbox_api_url:
         ctx.sandbox_client = rem.sandbox.Client(
-            ctx.sandbox_api_url, ctx.sandbox_api_token, timeout=15.0)
+            ctx.sandbox_api_url,
+            ctx.sandbox_api_token,
+            timeout=ctx.sandbox_api_timeout)
 
     # FIXME Separate queues for task creation and release resolve?
         ctx.sandbox_action_queue = ActionQueue(
