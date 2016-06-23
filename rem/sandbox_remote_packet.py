@@ -1181,6 +1181,10 @@ class SandboxJobGraphExecutorProxy(Unpickable(
         with self.lock:
             self._remote_packet.restart()
 
+    def reset_tries(self):
+        with self.lock:
+            self._tries = self.MAX_TRY_COUNT
+
     def start(self, guard):
         with self.lock:
             assert not self._remote_packet
