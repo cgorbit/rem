@@ -19,8 +19,8 @@ freshness@veles02 (PHASE_1)
 ----    - last sandbox_task_id (link to web-page)
 ----    - resolved_releases?
 ----3. Add some whole-packet _error_message from sandbox_remote_packet
-       - email notifications
-       - rem-tool
+----   - email notifications
+----   - rem-tool
 ----3. !Retriable/TIME_WAIT для EXCEPTION тасков
 ----7. Cache locality
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
