@@ -50,11 +50,11 @@ class SandboxReleasesResolver(object):
             released=groups[0] is None or groups[0] == 'rel'
         )
 
+    def resolve_from_descr(self, descr):
+        return self.resolve(self.parse_resource_descr(descr))
+
     def resolve(self, req):
         logging.debug(str(req))
-
-        #import traceback
-        #logging.debug(''.join(traceback.format_stack()))
 
         with self._lock:
             rel = self._releases.get(req)
@@ -83,7 +83,7 @@ class SandboxReleasesResolver(object):
         # TODO Fail on permanent errors
         except Exception as e:
             #logging.warning('Failed to list_latest_releases for %s: %s' % (rel.request, e))
-            logging.exception('Failed to list_latest_releases for %s' % rel.request)
+            logging.exception('Failed to list_latest_releases for %s' % (rel.request,))
             delayed_executor.schedule(lambda : self._resolve(rel), timeout=self._RETRY_INTERVAL)
 
     # FIXME Move 2-step logic to rem.sandbox?
@@ -99,10 +99,9 @@ class SandboxReleasesResolver(object):
         rel.resolve_time = time.time()
 
         if not resource:
-            logging.warning("Failed to resolve %s" % request)
-            rel.promise.set(None, RuntimeError("Can't find resource %s" % request))
+            logging.warning("Failed to resolve %s" % (request,))
+            rel.promise.set(None, RuntimeError("Can't find resource %s" % (request,)))
             return
 
         logging.debug("%s resolved to %s" % (request, resource))
         rel.promise.set(resource['id'])
-
