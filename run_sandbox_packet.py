@@ -12,8 +12,9 @@ import rem.xmlrpc
 from rem.xmlrpc import is_xmlrpc_exception
 from rem.sandbox_remote_packet import WrongTaskIdError
 import errno
-import rem.common
+import json
 
+import rem.common
 import rem.sandbox_packet
 import rem.delayed_executor
 from rem.profile import ProfiledThread
@@ -41,6 +42,7 @@ def parse_arguments():
     p.add_argument('--result-snapshot-file', dest='result_snapshot_file')
     p.add_argument('--last-update-message-file', dest='last_update_message_file')
     p.add_argument('--listen-port', dest='listen_port')
+    p.add_argument('--resume-params', dest='resume_params')
 
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument('--snapshot-data', dest='snapshot_data')
@@ -329,7 +331,15 @@ if __name__ == '__main__':
     rpc_server = _create_rpc_server(pck, opts)
     rpc_server_addr = (os.uname()[1], rpc_server.server_address[1]) # TODO Better hostname
 
-    pck.start(opts.work_dir, opts.io_dir, rem_notifier.send_update)
+    reset_tries = json.loads(opts.resume_params).get('reset_tries', False) \
+        if opts.resume_params else False
+
+    pck.start(
+        opts.work_dir,
+        opts.io_dir,
+        rem_notifier.send_update,
+        reset_tries=reset_tries,
+    )
 
     ProfiledThread(target=rpc_server.serve_forever, name_prefix='RpcServer').start()
 

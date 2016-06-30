@@ -118,7 +118,7 @@ class Packet(object):
         self.__dict__.update(sdict)
         self._init_non_persistent()
 
-    def start(self, working_directory, io_directory, on_update):
+    def start(self, working_directory, io_directory, on_update, reset_tries=False):
         self._on_update = on_update
         self._working_directory = working_directory
         self._io_directory = io_directory
@@ -130,7 +130,8 @@ class Packet(object):
 
 # FIXME
         with self._lock:
-            self._graph_executor.reset_tries()
+            if reset_tries:
+                self._graph_executor.reset_tries()
             #self.resume()
             #self._do_not_run = False
 

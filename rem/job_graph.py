@@ -467,6 +467,7 @@ class JobGraphExecutor(Unpickable(
     def _reset_tries(self):
         self.jobs_to_run.update(self.failed_jobs)
         self.failed_jobs.clear()
+        self._cancel_all_wait_stoppers()
         for job in self.jobs.values():
             job.tries = 0
 

@@ -177,6 +177,7 @@ class RemotePacketsDispatcher(object):
             'RUN_REM_JOBPACKET',
             {
                 'rem_server_addr': ('%s:%d' % self._rpc_listen_addr),
+                'pck_id': pck.id,
                 'executor_resource': self._executor_resource_id,
                 'snapshot_data': wrap_string(pck._start_snapshot_data, 79) \
                     if pck._start_snapshot_data \
@@ -186,6 +187,9 @@ class RemotePacketsDispatcher(object):
                 'custom_resources': '=' + json.dumps(files_setup, indent=3),
                 'custom_resources_list': map(str, resource_ids),
                 'python_resource': self._sbx_python_resource_id,
+                'resume_params': json.dumps({
+                    'reset_tries': pck._reset_tries_at_start,
+                }),
             }
         )
 
@@ -827,9 +831,10 @@ class Unreachable(AssertionError):
 
 class SandboxRemotePacket(Unpickable(
                             _is_error_permanent=bool,
+                            _reset_tries_at_start=bool,
                          )):
     def __init__(self, ops, pck_id, run_guard, snapshot_data,
-                 snapshot_resource_id, custom_resources):
+                 snapshot_resource_id, custom_resources, reset_tries):
         self.id = pck_id
         self._run_guard = run_guard
         self._ops = ops
@@ -838,6 +843,7 @@ class SandboxRemotePacket(Unpickable(
         self._start_snapshot_resource_id = snapshot_resource_id
         self._start_snapshot_data = snapshot_data
         self._custom_resources = custom_resources
+        self._reset_tries_at_start = reset_tries
 
         self._target_stop_mode = StopMode.NONE
         self._sent_stop_mode   = StopMode.NONE # at least helpfull for backup loading
@@ -942,6 +948,7 @@ def _value_or(default):
 
 class SandboxJobGraphExecutorProxy(Unpickable(
                                     _tries=_value_or(5),
+                                    _has_pending_reset_tries=bool,
                                   )):
     MAX_TRY_COUNT = 5
     RETRY_INTERVALS = [15, 300, 900, 3600]
@@ -960,6 +967,7 @@ class SandboxJobGraphExecutorProxy(Unpickable(
         self._prev_snapshot_resource_id = None
         self._error = None
         self._tries = self.MAX_TRY_COUNT
+        self._has_pending_reset_tries = False
 
         self.cancelled = False
         self.stopping = False
@@ -981,6 +989,9 @@ class SandboxJobGraphExecutorProxy(Unpickable(
         return r.list_all_user_processes()
 
     def _create_remote_packet(self, guard):
+        reset_tries = self._has_pending_reset_tries
+        self._has_pending_reset_tries = False
+
         return SandboxRemotePacket(
             ops=self,
             run_guard=guard,
@@ -988,7 +999,8 @@ class SandboxJobGraphExecutorProxy(Unpickable(
             snapshot_data=_produce_snapshot_data(self.pck_id, self._graph) \
                 if not self._prev_snapshot_resource_id else None,
             snapshot_resource_id=self._prev_snapshot_resource_id,
-            custom_resources=self._custom_resources
+            custom_resources=self._custom_resources,
+            reset_tries=reset_tries,
         )
 
     def produce_detailed_status(self):
@@ -1107,6 +1119,11 @@ class SandboxJobGraphExecutorProxy(Unpickable(
         if self.time_wait_deadline:
             self._schedule_time_wait_stop()
 
+    def _cancel_time_wait(self):
+        self.time_wait_sched()
+        self.time_wait_sched = None
+        self.time_wait_deadline = None
+
     def _stop_time_wait(self, sched_id):
         with self.lock:
             if not self.time_wait_sched or self.time_wait_sched.id != sched_id:
@@ -1174,16 +1191,26 @@ class SandboxJobGraphExecutorProxy(Unpickable(
             self._update_state()
 
     def try_soft_resume(self):
+        raise NotImplementedError()
         with self.lock:
             self._remote_packet.resume()
 
     def try_soft_restart(self):
+        raise NotImplementedError()
         with self.lock:
             self._remote_packet.restart()
 
     def reset_tries(self):
         with self.lock:
             self._tries = self.MAX_TRY_COUNT
+
+            if self.time_wait_sched:
+                self._cancel_time_wait()
+
+            if self._prev_snapshot_resource_id:
+                self._has_pending_reset_tries = True
+
+            self._update_state()
 
     def start(self, guard):
         with self.lock:
@@ -1223,9 +1250,7 @@ class SandboxJobGraphExecutorProxy(Unpickable(
             self.cancelled = True
 
             if self.time_wait_sched:
-                self.time_wait_sched()
-                self.time_wait_sched = None
-                self.time_wait_deadline = None
+                self._cancel_time_wait()
 
             self._remote_packet.cancel()
             self._update_state()

@@ -1174,10 +1174,12 @@ class SandboxPacket(PacketBase):
     def _do_graph_resume(self):
         g = self._graph_executor
 
-        if not g.is_null() and not (self.files_modified or self.resources_modified):
-            g.try_soft_resume() # XXX reset_tries
+        #if not g.is_null() and not (self.files_modified or self.resources_modified):
+            #g.try_soft_resume() # XXX reset_tries
             # if fail -- when g._remote_packet becomes None
             #         -- SandboxPacket becomes PENDING
+
+        g.reset_tries()
 
     def _do_graph_reset(self):
         g = self._graph_executor
