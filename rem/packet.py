@@ -671,7 +671,7 @@ class PacketBase(Unpickable(
     def send_job_long_execution_notification(self, job):
         def make(ctx):
             with self.lock:
-                return messages.FormatLongExecutionWarning(ctx, job)
+                return messages.FormatLongExecutionWarning(ctx, self, job)
 
         self._send_email(make)
 

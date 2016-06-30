@@ -84,8 +84,8 @@ class EmergencyError(IMessageHelper):
 
 
 class TooLongWorkingWarning(IMessageHelper):
-    def __init__(self, ctx, job):
-        self.pck = job.pck
+    def __init__(self, ctx, pck, job):
+        self.pck = pck
         self.job = job
         self.ctx = ctx
 
@@ -156,5 +156,5 @@ def FormatPacketEmergencyError(ctx, pck):
 def FormatPacketResetNotificationMessage(*args, **kwargs):
     return ResetNotification(*args, **kwargs).make()
 
-def FormatLongExecutionWarning(ctx, job):
-    return TooLongWorkingWarning(ctx, job).make()
+def FormatLongExecutionWarning(ctx, pck, job):
+    return TooLongWorkingWarning(ctx, pck, job).make()
