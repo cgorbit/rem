@@ -1241,18 +1241,18 @@ class SandboxJobGraphExecutorProxy(Unpickable(
             else:
                 self._tries += 1
 
-            if not self._remote_packet:
-                return
+            if self.time_wait_sched:
+                self._cancel_time_wait()
 
             if self.cancelled:
+                self._update_state()
                 return
 
             self.cancelled = True
 
-            if self.time_wait_sched:
-                self._cancel_time_wait()
+            if self._remote_packet:
+                self._remote_packet.cancel()
 
-            self._remote_packet.cancel()
             self._update_state()
 
     def is_null(self):
