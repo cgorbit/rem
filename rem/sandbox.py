@@ -127,7 +127,7 @@ class Client(object):
         BASE_URL = 'task'
 
         def update(self, priority=None, owner=None, notifications=None, max_restarts=None,
-                         kill_timeout=None, description=None):
+                         kill_timeout=None, description=None, host=None):
             params = {
             }
             if priority is not None:
@@ -142,6 +142,8 @@ class Client(object):
                 params['kill_timeout'] = kill_timeout
             if description is not None:
                 params['description'] = description
+            if host is not None:
+                params['requirements'] = { 'host': host }
 
             if params:
                 self._make_call('PUT', 'task/%d' % self.id, params, succ_code=204, raw_result=True)
@@ -152,7 +154,7 @@ class Client(object):
             self._start(self._api, self.id)
 
         def get_context(self):
-            return self._api._make_call('GET', 'task/%d/context' % self.id)
+            return self._make_call('GET', 'task/%d/context' % self.id)
 
             #if res['status'] == 'ERROR':
                 #raise RuntimeError(res['message'])

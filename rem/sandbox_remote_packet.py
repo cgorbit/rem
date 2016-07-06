@@ -238,6 +238,7 @@ prev_task: {prev_task}
             priority=self._sbx_task_priority,
             notifications=[],
             description=description,
+            host=pck._host,
             #fail_on_any_error=True, # FIXME What is this?
         )
 
@@ -821,6 +822,16 @@ class RemotePacketState(object):
     }
 
 
+def _value_or_None(*args):
+    return args[0] if args else None
+
+
+def _value_or(default):
+    def _value_or(*args):
+        return args[0] if args else default
+    return _value_or
+
+
 class AlreadyTerminated(RuntimeError):
     pass
 
@@ -832,9 +843,10 @@ class Unreachable(AssertionError):
 class SandboxRemotePacket(Unpickable(
                             _is_error_permanent=bool,
                             _reset_tries_at_start=bool,
+                            _host=_value_or_None,
                          )):
     def __init__(self, ops, pck_id, run_guard, snapshot_data,
-                 snapshot_resource_id, custom_resources, reset_tries):
+                 snapshot_resource_id, custom_resources, reset_tries, host):
         self.id = pck_id
         self._run_guard = run_guard
         self._ops = ops
@@ -844,6 +856,7 @@ class SandboxRemotePacket(Unpickable(
         self._start_snapshot_data = snapshot_data
         self._custom_resources = custom_resources
         self._reset_tries_at_start = reset_tries
+        self._host = host
 
         self._target_stop_mode = StopMode.NONE
         self._sent_stop_mode   = StopMode.NONE # at least helpfull for backup loading
@@ -936,16 +949,6 @@ class PacketResources(object):
         self.resource_ids = resource_ids
 
 
-def _value_or_None(*args):
-    return args[0] if args else None
-
-
-def _value_or(default):
-    def _value_or(*args):
-        return args[0] if args else default
-    return _value_or
-
-
 class SandboxJobGraphExecutorProxy(Unpickable(
                                     _tries=_value_or(5),
                                     _has_pending_reset_tries=bool,
@@ -953,12 +956,13 @@ class SandboxJobGraphExecutorProxy(Unpickable(
     MAX_TRY_COUNT = 5
     RETRY_INTERVALS = [15, 300, 900, 3600]
 
-    def __init__(self, ops, pck_id, graph, custom_resources):
+    def __init__(self, ops, pck_id, graph, custom_resources, host=None):
         self._ops = ops
         self.lock = self._ops.lock
         self.pck_id = pck_id
         self._graph = graph
         self._custom_resources = custom_resources
+        self._host = host
 
         self._remote_packet = None
         self._prev_task_id = None
@@ -1001,6 +1005,7 @@ class SandboxJobGraphExecutorProxy(Unpickable(
             snapshot_resource_id=self._prev_snapshot_resource_id,
             custom_resources=self._custom_resources,
             reset_tries=reset_tries,
+            host=self._host,
         )
 
     def produce_detailed_status(self):

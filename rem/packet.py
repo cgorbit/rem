@@ -145,13 +145,15 @@ class PacketBase(Unpickable(
                            do_not_run=bool,
                            destroying=bool,
                            is_broken=bool,
+
+                           sandbox_host=_value_or_None,
                           ),
                 CallbackHolder,
                 ICallbackAcceptor):
 
     def __init__(self, name, priority, context, notify_emails, wait_tags=(),
                  set_tag=None, kill_all_jobs_on_error=True, is_resetable=True,
-                 notify_on_reset=False, notify_on_skipped_reset=True):
+                 notify_on_reset=False, notify_on_skipped_reset=True, sandbox_host=None):
         super(PacketBase, self).__init__()
         self.name = name
         self.id = None
@@ -173,6 +175,7 @@ class PacketBase(Unpickable(
         self.shared_files_resource_id = None
         self.resolved_releases = {}
         self.unresolved_release_count = 0
+        self.req_sandbox_host = sandbox_host
 
         self.kill_all_jobs_on_error = kill_all_jobs_on_error
         self.priority = priority
@@ -1398,6 +1401,7 @@ class SandboxPacket(PacketBase):
             self.id,
             self.make_job_graph(),
             resources,
+            host=self.req_sandbox_host,
             #self.make_sandbox_task_params()
         )
 

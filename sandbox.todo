@@ -27,6 +27,8 @@ freshness@veles02 (PHASE_1)
 
 
 production-quality (PHASE_2)
+    0. soft_reset лучше сделать для ресета тегов
+
     0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
        таски такой переход осуществляют
 

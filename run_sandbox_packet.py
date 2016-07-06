@@ -62,7 +62,7 @@ def with_task_id(f):
     return impl
 
 
-# XXX FIXME Use queue to execute methods?
+# XXX FIXME Use queue to execute methods async?
 class RpcMethods(object):
     def __init__(self, pck, task_id):
         self.pck = pck

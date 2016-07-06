@@ -804,6 +804,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
             if q.is_alive():
                 q._notify_has_pending_if_need()
 
+    def set_python_resource_id(self, id):
+        self._remote_packets_dispatcher._sbx_python_resource_id = id
+
+    def get_python_resource_id(self):
+        return self._remote_packets_dispatcher._sbx_python_resource_id
+
     def Stop1(self):
         if self._sandbox_packets_runner:
             self._sandbox_packets_runner.stop()

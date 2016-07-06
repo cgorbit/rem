@@ -232,7 +232,7 @@ class JobPacket(object):
 
     def __init__(self, connector, name, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
                  kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
-                 notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False):
+                 notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None):
         self.conn = connector
         self.proxy = connector.proxy
         if check_tag_uniqueness and self.proxy.check_tag(set_tag):
@@ -247,7 +247,7 @@ class JobPacket(object):
             args.extend([notify_on_reset, notify_on_skipped_reset])
 
         if is_sandbox:
-            args.append(is_sandbox)
+            args.extend([is_sandbox, sandbox_host])
 
         self.id = self.proxy.create_packet(*args)
 
@@ -681,7 +681,7 @@ class Connector(object):
 
     def Packet(self, pckname, priority=MAX_PRIORITY, notify_emails=[], wait_tags=(), set_tag=None,
                check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True,
-               notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False):
+               notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None):
         """создает новый пакет с именем pckname
             priority - приоритет выполнения пакета
             notify_emails - список почтовых адресов, для уведомления об ошибках
@@ -700,7 +700,8 @@ class Connector(object):
                 packet_name_policy=self.packet_name_policy,
                 notify_on_reset=notify_on_reset,
                 notify_on_skipped_reset=notify_on_skipped_reset,
-                is_sandbox=is_sandbox
+                is_sandbox=is_sandbox,
+                sandbox_host=sandbox_host,
             )
         except xmlrpclib.Fault, e:
             if 'DuplicatePackageNameException' in e.faultString:

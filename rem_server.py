@@ -120,7 +120,7 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
                   kill_all_jobs_on_error=True,
                   packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY,
                   resetable=True, notify_on_reset=False, notify_on_skipped_reset=True,
-                  is_sandbox=False):
+                  is_sandbox=False, sandbox_host=None):
 
     if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
@@ -138,7 +138,8 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
                     wait_tags=wait_tags, set_tag=set_tag and _scheduler.tagRef.AcquireTag(set_tag),
                     kill_all_jobs_on_error=kill_all_jobs_on_error, is_resetable=resetable,
                     notify_on_reset=notify_on_reset,
-                    notify_on_skipped_reset=notify_on_skipped_reset)
+                    notify_on_skipped_reset=notify_on_skipped_reset,
+                    sandbox_host=sandbox_host)
     _scheduler.RegisterNewPacket(pck, wait_tags)
     logging.info('packet %s registered as %s', packet_name, pck.id)
     return pck.id
@@ -493,6 +494,25 @@ def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
 
 
+@traced_rpc_method("warning")
+def set_python_resource_id(id):
+    if not _context.allow_python_resource_id_update:
+        raise RpcUserError(RuntimeError("Python resource id update disabled in config"))
+
+    try:
+        id = int(id)
+    except Exception as e:
+        raise RpcUserError(e)
+
+    _context.sandbox_python_resource_id = id # for get_config
+    _scheduler.set_python_resource_id(id)
+
+
+@traced_rpc_method("warning")
+def get_python_resource_id():
+    return _scheduler.get_python_resource_id()
+
+
 @traced_rpc_method("debug")
 def get_config():
     NoneType = type(None)
@@ -570,6 +590,8 @@ class ApiServer(object):
             set_tag,
             unset_tag,
             update_tags,
+            set_python_resource_id,
+            get_python_resource_id,
         ]
 
         if self.allow_debug_rpc_methods:
