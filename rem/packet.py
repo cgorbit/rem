@@ -146,7 +146,7 @@ class PacketBase(Unpickable(
                            destroying=bool,
                            is_broken=bool,
 
-                           sandbox_host=_value_or_None,
+                           req_sandbox_host=_value_or_None,
                           ),
                 CallbackHolder,
                 ICallbackAcceptor):
