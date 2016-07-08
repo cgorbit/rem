@@ -18,6 +18,7 @@ import rem.common
 import rem.sandbox_packet
 import rem.delayed_executor
 from rem.profile import ProfiledThread
+from rem.job_graph import GraphState
 
 
 class Context(object):
@@ -41,6 +42,7 @@ def parse_arguments():
     #p.add_argument('--result-status-file', dest='result_status_file', default='/dev/stdout')
     p.add_argument('--result-snapshot-file', dest='result_snapshot_file')
     p.add_argument('--last-update-message-file', dest='last_update_message_file')
+    p.add_argument('--last-update-user-summary-file', dest='last_update_user_summary_file')
     p.add_argument('--listen-port', dest='listen_port')
     p.add_argument('--resume-params', dest='resume_params')
 
@@ -252,12 +254,26 @@ def _parse_listen_port(opt):
         return port
 
 
+def _absolutize_fs_options(opts):
+    names = [
+        'io_dir',
+        'work_dir',
+        'result_snapshot_file',
+        'last_update_message_file',
+        'snapshot_file',
+        'last_update_user_summary_file',
+    ]
+
+    for name in names:
+        value = getattr(opts, name, None)
+        if value is not None:
+            setattr(opts, name, os.path.abspath(value))
+
+
 if __name__ == '__main__':
     opts = parse_arguments()
 
-    for attr in ['io_dir', 'work_dir', 'result_snapshot_file', 'last_update_message_file'] \
-            + (['snapshot_file'] if opts.snapshot_file is not None else []):
-        setattr(opts, attr, os.path.abspath(getattr(opts, attr)))
+    _absolutize_fs_options(opts)
 
 # TODO XXX Pass as it should be
     opts.listen_port = '15000-15999'
@@ -365,5 +381,10 @@ if __name__ == '__main__':
 
         with open(opts.last_update_message_file, 'w') as out:
             pickle.dump(last_update_message, out, 2)
+
+
+        if opts.last_update_user_summary_file:
+            with open(opts.last_update_user_summary_file, 'w') as out:
+                print >>out, json.dumps({'status': GraphState.str(pck.state)}, indent=3)
 
     logging.debug('after_all')
