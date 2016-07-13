@@ -1276,6 +1276,7 @@ class SandboxPacket(PacketBase):
 
             self.resources_modified = True
             self.sbx_files[name] = path
+            self._update_state()
 
     def _resolve_releases_if_need(self, path):
         m = _SANDBOX_RELEASE_PATH_RE.match(path)
@@ -1310,6 +1311,8 @@ class SandboxPacket(PacketBase):
                     self.unresolved_release_count += 1
                     self.resolved_releases[descr] = None
                     resolve()
+            self.resources_modified = True
+            self._update_state()
 
     def _on_release_resolved(self, resource_descr, f):
         with self.lock:
