@@ -94,6 +94,9 @@ class DummyGraphExecutor(object):
     def vivify_jobs_waiting_stoppers(self):
         pass
 
+    def cancel(self):
+        pass
+
     def reset(self):
         pass
 
