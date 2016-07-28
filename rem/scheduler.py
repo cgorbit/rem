@@ -128,6 +128,9 @@ class QueueList(object):
 
         return q
 
+    def list(self):
+        return list(self.__exists)
+
     def __contains__(self, q):
         return q.name in self.__exists
 
@@ -202,6 +205,9 @@ class SandboxPacketsRunner(object):
                 logging.warning('NotWorkingStateError idling: %s' %  pck)
 
             del guard
+
+    def list_queues_with_packets(self):
+        return self._queues.list()
 
     # For backup vivify
     def _acquire(self):
@@ -348,6 +354,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def rpc_get_queue(self, name, create=True):
         return self._queue(name, create, from_rpc=True)
+
+    def rpc_list_queues_with_jobs(self):
+        ret = self.queues_with_jobs.list()
+        if self._sandbox_packets_runner:
+            ret = ret + self._sandbox_packets_runner.list_queues_with_packets()
+        return ret
 
     def _add_queue_as_non_empty_if_need(self, q):
         # this racy code may add empty queue to queues_with_jobs,

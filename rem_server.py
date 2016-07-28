@@ -100,6 +100,7 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
 
 _scheduler = None
 _context = None
+_daemon = None
 
 
 def readonly_method(func):
@@ -513,6 +514,16 @@ def get_python_resource_id():
     return _scheduler.get_python_resource_id()
 
 
+@traced_rpc_method("warning")
+def sched_list_queues_with_jobs():
+    return _scheduler.rpc_list_queues_with_jobs()
+
+
+@traced_rpc_method("warning")
+def daemon_list_job_workers():
+    return [str(w.job) for w in _daemon.regWorkers]
+
+
 @traced_rpc_method("debug")
 def get_config():
     NoneType = type(None)
@@ -584,6 +595,8 @@ class ApiServer(object):
             queue_set_success_lifetime,
             queue_status,
             queue_suspend,
+            sched_list_queues_with_jobs,
+            daemon_list_job_workers,
             reset_tag,
             save_binary,
             set_backupable_state,
@@ -857,6 +870,7 @@ def _init_fork_locking(ctx):
 def start_daemon(ctx, sched):
     global _context
     global _scheduler
+    global _daemon
 
     _context = ctx
     _scheduler = sched
@@ -879,6 +893,7 @@ def start_daemon(ctx, sched):
     set_handler(signal_handler0)
 
     daemon = RemDaemon(sched, ctx)
+    _daemon = daemon
 
     def signal_handler1(sig, frame):
         _log_signal(sig)
@@ -892,6 +907,8 @@ def start_daemon(ctx, sched):
     def join():
         daemon.wait()
         set_handler(signal.SIG_DFL)
+        global _daemon
+        _daemon = None
 
     return daemon, join
 

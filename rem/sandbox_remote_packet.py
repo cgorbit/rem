@@ -52,6 +52,7 @@ class RemotePacketsDispatcher(object):
     _RPC_RESEND_INTERVAL = 20.0
     _FINAL_UPDATE_FETCH_TIMEOUT = 30.0
 
+    # It's better to use TOps than inheritence
     class TasksAwaiter(SandboxTaskStateAwaiter):
         def __init__(self, sandbox, dispatcher):
             SandboxTaskStateAwaiter.__init__(self, sandbox)
@@ -596,7 +597,7 @@ prev_task: {prev_task}
 
             self._mark_as_finished(pck, '_fetch_final_update')
 
-    def _on_task_status_change(self, task_id, task_status, status_group, can_has_res):
+    def _on_task_status_change(self, task_id, _, status_group, can_has_res):
         #with self.lock:
         if True:
             pck = self._by_task_id.get(task_id)
@@ -762,7 +763,7 @@ prev_task: {prev_task}
 
             if is_xmlrpc_exception(e, WrongTaskIdError) \
                     or isinstance(e, socket.error) and e.errno == errno.ECONNREFUSED:
-                return # FIXME Is enough?
+                return # FIXME Is enough? # STOP/SUSPEND->EXECUTING
 
             with pck._lock:
                 if pck._state != RemotePacketState.STARTED:

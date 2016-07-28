@@ -802,7 +802,9 @@ class PacketBase(Unpickable(
                       total_time=total_time,
                       wait_time=wait_time,
                       last_modified=history[-1][1],
-                      waiting_time=waiting_time)
+                      waiting_time=waiting_time,
+                      queue=self.queue.name if self.queue else None,
+                      )
 
         extra_flags = set()
 

@@ -25,6 +25,36 @@ freshness@veles02 (PHASE_1)
 ----7. Cache locality
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
 
+@!@!@!
+    6. Проверить про mapreduce-yt
+
+@!@!@!
+    5. PENDING not becomes WORKABLE $ rem-tool -q sbx:trofimenkov status
+        queue 'sbx:trofimenkov':    {
+            'error-lifetime': 604800, 'waited': 0, 'success-lifetime': 259200, 'working': 0, 'working-limit': 1, 'alive': True, 'suspended': 1, 'worked': 1, 'errored': 0, 'pending': 1}
+
+        SUSPENDED почему-то держит guard?
+
+    6. FIXME # STOP/SUSPEND->EXECUTING
+        def _do_stop_packet(self,
+            ...
+                or isinstance(e, socket.error) and e.errno == errno.ECONNREFUSED:
+            return # FIXME Is enough? # STOP/SUSPEND->EXECUTING
+        ...
+        def _cancel(self, need_reset):
+            ...
+            if self.cancelled:
+                self._update_state()
+                return
+
+----7. Пофиксил же
+        melton: Просто эти пакеты не застопились.packet
+            'pck-kMzR3a':	.name=freshness_check_fml_progress_1469494800,state=PENDINGrem-tool -u http://veles02.search.yandex.net:7104 stop -p pck-kMzR3a
+                xmlrpclib.Fault: <Fault 1: "<type 'exceptions.AttributeError'>:'DummyGraphExecutor' object has no attribute 'cancel'">
+        melton: Как бы их прибить?
+        melton: Точнее - как это сделать правильно
+        melton: А. suspend, потом stop
+
 
 production-quality (PHASE_2)
     0. soft_reset лучше сделать для ресета тегов
@@ -68,128 +98,10 @@ production-quality (PHASE_2)
         FIXME Почему меня тащили по skynet?
               Потому что локальный sandbox и не работало по HTTP?
     4. python.tar.gz: больше модулей
-    5. обновление дефолтного python.tar.gz без рестарта?
+----5. обновление дефолтного python.tar.gz без рестарта?
     6. per-jobpacket python.tar.gz?
     7. cancel'ить WrongTaskIdError-таски в соответствие текущему стейту:
         1. периодический ping на тасках -- не оперативно, может не быть дырок
     --> 2. при старте с бэкапа получать список работающих тасков и убивать ненужные
 
     9. soft_restart, soft_resume
-
---------------------------------------------------------------------------------
-
-shared-folder: 4755
-    foobar.py
-    hello.txt
-
-two-files.tar: 4753
-    file1
-    file2
-
-geodata3.bin: 4751
-
-
-{
-    "_1": "sbx:4755/*.py",
-    "4753-1": "sbx:4753/file1",
-    "4753-as-folder": "sbx:4753/",
-    "4753-as-archive": "sbx:4753",
-    "_2": "sbx:4753/*",
-    "geodata3.bin": "sbx:4751",
-    "4755-folder": "sbx:4755/"
-}
-
---------------------------------------------------------------------------------
-
-1. продлевать время жизни ресурсам?
-
-2. files:
-    0. python
-    1. dpkg -l | grep python-
-
-    2. NER: /Berkanavt/freshness/data/ner
-
-    AddFiles
-        2. Z2: /Berkanavt/freshness/scripts/rem
-        4. Z2: yandex-search-freshness-spok-feed-finder (/Berkanavt/freshness/bin/feed_finder)
-
-3. pck-XXXX и симлинки в них можно оставить прям для простоты
-
-4. Большие файлы джойнить в единые ресурсы не хочу.
-   Маленькие -- не знаю, клеить или нет. Почему-то хочется клеить.
-
-5.
-{
-    'foo27': '/usr/bin/foo27',
-    'blockstat.txt': 'sbx:1232131142',
-    '_any_alias_': 'sbx:1232131142/*', # may be archive
-    'feed_finder': 'sbx:1232131142/feed_finder', # may be archive
-}
-
-[
-    '/usr/bin/foo27',        # 'foo27': '/usr/bin/foo27'
-    ('/usr/bin', ['foo27']), # 'foo27': '/usr/bin/foo27'
-    ('sbx:1232131142', ['foo27', 'scripts/rem/foobar.py']),
-]
-python_path='scripts'
-
-    root/
-        python/
-            # REM_JOBPACKET_EXECUTOR_PYTHON
-
-        custom_resources/
-            ... # ARCADIA_PROJECT, ...
-
-        added_files/
-            28347234234234/
-                6a83598a817398e94d197ca13f74d587
-
-            41434243423423/
-                d2eb8379e609ef386f3166a824ab4835
-
-            30934902580302/
-                freshness_conf.py
-                freshness.py
-                nirvana.py
-                svn.py
-                media_portraits.py
-        io/
-            1234491104411.stderr
-            ...
-            2340942093493.stdout
-
-        executor/ # REM_JOBPACKET_EXECUTOR
-
-        work/
-            querydata_indexer  -> ../added_files/6a83598a817398e94d197ca13f74d587
-            feed_finder        -> ../added_files/d2eb8379e609ef386f3166a824ab4835
-            freshness_conf.py  -> ../30934902580302/freshness_pool.py
-            freshness.py       -> ../30934902580302/freshness.py
-            nirvana.py         -> ../30934902580302/nirvana.py
-            svn.py             -> ../30934902580302/svn.py
-            media_portraits.py -> ../30934902580302/media_portraits.py
-
-
-5.
-    Task: REM_JOBPACKET_EXECUTION
-
-        Input resources:
-            REM_JOBPACKET_EXECUTOR
-
-            REM_JOBPACKET_PYTHON # rem.cfg.run.sandbox_python_resource
-
-            REM_JOBPACKET_ADDED_FILE
-
-            # FIXME
-            REM_JOBPACKET_ADDED_FILE_SET
-                freshness_pool.py
-                fml.py
-
-        Output resources:
-            REM_JOBPACKET_EXECUTION_SNAPSHOT # intermediate
-            REM_JOBPACKET_EXECUTION_RESULTS
-
-
-o Если "все" джобы ждут на WAITING, нет смысла держать sandbox-thread
-
-o Что делать с не достаточно общим shebang у python-скриптов?
