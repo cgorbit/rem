@@ -188,7 +188,7 @@ class QueueBase(Unpickable(
             pck.queue = None
             self.packets.discard(pck)
             self._on_packet_detach(pck)
-        self._move_packet(pck, None)
+        self._update_by_user_state(pck, None)
 
     def filter_packets(self, filter=None, name_regex=None, prefix=None,
                        min_mtime=None, max_mtime=None, user_labels=None):
