@@ -33,7 +33,8 @@ freshness@veles02 (PHASE_1)
         queue 'sbx:trofimenkov':    {
             'error-lifetime': 604800, 'waited': 0, 'success-lifetime': 259200, 'working': 0, 'working-limit': 1, 'alive': True, 'suspended': 1, 'worked': 1, 'errored': 0, 'pending': 1}
 
-        SUSPENDED почему-то держит guard?
+        rem.queue.Queue неправильно переключается между статусами
+        (stash@{0}: On master: Fix ->SUSPENDED in SandboxQueue)
 
     6. FIXME # STOP/SUSPEND->EXECUTING
         def _do_stop_packet(self,
@@ -46,14 +47,6 @@ freshness@veles02 (PHASE_1)
             if self.cancelled:
                 self._update_state()
                 return
-
-----7. Пофиксил же
-        melton: Просто эти пакеты не застопились.packet
-            'pck-kMzR3a':	.name=freshness_check_fml_progress_1469494800,state=PENDINGrem-tool -u http://veles02.search.yandex.net:7104 stop -p pck-kMzR3a
-                xmlrpclib.Fault: <Fault 1: "<type 'exceptions.AttributeError'>:'DummyGraphExecutor' object has no attribute 'cancel'">
-        melton: Как бы их прибить?
-        melton: Точнее - как это сделать правильно
-        melton: А. suspend, потом stop
 
 
 production-quality (PHASE_2)
