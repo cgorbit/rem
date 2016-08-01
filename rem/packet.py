@@ -150,13 +150,15 @@ class PacketBase(Unpickable(
                            is_broken=bool,
 
                            req_sandbox_host=_value_or_None,
+                           user_labels=_value_or_None,
                           ),
                 CallbackHolder,
                 ICallbackAcceptor):
 
     def __init__(self, name, priority, context, notify_emails, wait_tags=(),
                  set_tag=None, kill_all_jobs_on_error=True, is_resetable=True,
-                 notify_on_reset=False, notify_on_skipped_reset=True, sandbox_host=None):
+                 notify_on_reset=False, notify_on_skipped_reset=True, sandbox_host=None,
+                 user_labels=None):
         super(PacketBase, self).__init__()
         self.name = name
         self.id = None
@@ -165,6 +167,7 @@ class PacketBase(Unpickable(
         self.finish_status = None
         self._saved_jobs_status = None
         self.last_sandbox_task_id = None
+        self.user_labels = user_labels
 
         self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
@@ -537,7 +540,7 @@ class PacketBase(Unpickable(
             delay = max(deadline - time.time(), 0) if deadline else None
             logging.debug("packet %s\twaiting for %s sec", self.name, delay)
 
-    def destroy(self):
+    def _destroy(self):
         if self.destroying:
             return
 
@@ -553,10 +556,14 @@ class PacketBase(Unpickable(
 
         self._update_state()
 
+    def destroy(self):
+        with self.lock:
+            self._destroy()
+
     def rpc_remove(self):
         with self.lock:
             try:
-                self.destroy()
+                self._destroy()
             except NonDestroyingStateError:
                 raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
 
@@ -804,6 +811,7 @@ class PacketBase(Unpickable(
                       last_modified=history[-1][1],
                       waiting_time=waiting_time,
                       queue=self.queue.name if self.queue else None,
+                      labels=self.user_labels,
                       )
 
         extra_flags = set()

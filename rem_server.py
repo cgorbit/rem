@@ -121,7 +121,7 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
                   kill_all_jobs_on_error=True,
                   packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY,
                   resetable=True, notify_on_reset=False, notify_on_skipped_reset=True,
-                  is_sandbox=False, sandbox_host=None):
+                  is_sandbox=False, sandbox_host=None, user_labels=None):
 
     if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
@@ -140,7 +140,8 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
                     kill_all_jobs_on_error=kill_all_jobs_on_error, is_resetable=resetable,
                     notify_on_reset=notify_on_reset,
                     notify_on_skipped_reset=notify_on_skipped_reset,
-                    sandbox_host=sandbox_host)
+                    sandbox_host=sandbox_host,
+                    user_labels=user_labels)
     _scheduler.RegisterNewPacket(pck, wait_tags)
     logging.info('packet %s registered as %s', packet_name, pck.id)
     return pck.id
@@ -309,17 +310,24 @@ def queue_status(queue_name):
 
 @readonly_method
 @traced_rpc_method()
-def queue_list(queue_name, filter, name_regex=None, prefix=None):
+def queue_list(queue_name, filter, name_regex=None, prefix=None, min_mtime=None, max_mtime=None, user_labels=None):
     name_regex = name_regex and re.compile(name_regex)
     q = _scheduler.rpc_get_queue(queue_name, create=False)
-    return [pck.id for pck in q.rpc_list_packets(filter=filter, name_regex=name_regex, prefix=prefix)]
+    return [
+        pck.id for pck in q.filter_packets(
+                                filter=filter,
+                                name_regex=name_regex,
+                                prefix=prefix,
+                                min_mtime=min_mtime,
+                                max_mtime=max_mtime,
+                                user_labels=user_labels)]
 
 
 @readonly_method
 @traced_rpc_method()
-def queue_list_updated(queue_name, last_modified, filter=None):
+def queue_list_updated(queue_name, min_mtime, filter=None):
     q = _scheduler.rpc_get_queue(queue_name, create=False)
-    return [pck.id for pck in q.rpc_list_packets(last_modified=last_modified, filter=filter)]
+    return [pck.id for pck in q.filter_packets(min_mtime=min_mtime, filter=filter)]
 
 
 @traced_rpc_method("info")

@@ -8,7 +8,7 @@ from rem_logging import logger as logging
 
 
 class ByUserState(Unpickable(
-                       pending=PackSet.create,
+                       pending=set,
                        working=set,
                        worked=TimedSet.create,
                        errored=TimedSet.create,
@@ -30,16 +30,7 @@ class ByUserState(Unpickable(
 
 
 class QueueBase(Unpickable(
-                       by_user_state=ByUserState,
-
-                    # LocalQueue # TODO move
-                       working_jobs=emptydict,
-                       packets_with_pending_jobs=PackSet.create,
-
-                    # SandboxQueue # TODO move
-                       working_packets=emptyset,
-                       #_pending_packets <=> by_user_state['pending']
-
+                       packets=set,
                        is_suspended=bool,
                        lock=PickableRLock,
                        working_limit=(int, 1),
@@ -47,6 +38,16 @@ class QueueBase(Unpickable(
                        successfull_default_lifetime=int,
                        errored_lifetime=(int, 0),
                        errored_default_lifetime=int,
+
+                       by_user_state=ByUserState,
+
+                       # LocalQueue
+                       working_jobs=emptydict,
+                       packets_with_pending_jobs=PackSet.create,
+
+                       # SandboxQueue
+                       working_packets=set, # FIXME
+                       pending_packets=PackSet.create,
                     )
                 ):
 
@@ -60,9 +61,9 @@ class QueueBase(Unpickable(
         # pending used to run SandboxPacket's
         PacketState.PENDING: "pending",
 
-        PacketState.PREV_EXECUTOR_STOP_WAIT: "suspended", # FIXME
-        PacketState.SHARING_FILES: "suspended", # FIXME
-        PacketState.RESOLVING_RELEASES: "suspended", # FIXME
+        PacketState.PREV_EXECUTOR_STOP_WAIT: "working", # FIXME suspended
+        PacketState.SHARING_FILES: "suspended",
+        PacketState.RESOLVING_RELEASES: "suspended",
 
         PacketState.RUNNING:    "working",
         PacketState.DESTROYING: "working",
@@ -84,7 +85,7 @@ class QueueBase(Unpickable(
 
     def __getstate__(self):
         sdict = getattr(super(QueueBase, self), "__getstate__", lambda: self.__dict__)()
-# FIXME Bullshit: copy without lock
+        # FIXME copy without lock
         with self.lock:
             by_user_state = sdict['by_user_state']
             for qname, q in by_user_state.items():
@@ -137,9 +138,12 @@ class QueueBase(Unpickable(
         with self.lock:
             if not(dest_queue and pck in dest_queue):
                 logging.debug("queue %s\tmoving packet %s typed as %s", self.name, pck.name, pck._repr_state)
-                self._move_packet(pck, dest_queue)
+                self._update_by_user_state(pck, dest_queue)
+            if pck.state == PacketState.HISTORIED:
+                self.packets.discard(pck)
+            self._do_relocate_packet(pck)
 
-    def _find_packet_queue(self, pck):
+    def _find_packet_user_state_queue(self, pck):
         ret = None
         for qname, queue in self.by_user_state.items():
             if pck in queue:
@@ -148,20 +152,18 @@ class QueueBase(Unpickable(
                 ret = queue
         return ret
 
-    def _move_packet(self, pck, dst_queue):
+    def _update_by_user_state(self, pck, dst_queue):
         with self.lock:
-            src_queue = self._find_packet_queue(pck)
+            src_queue = self._find_packet_user_state_queue(pck)
 
             if src_queue == dst_queue:
                 return
 
             if src_queue is not None:
-                self._on_before_remove(pck)
                 src_queue.remove(pck)
 
             if dst_queue is not None:
                 dst_queue.add(pck)
-                self._on_after_add(pck)
 
     def is_alive(self):
         return not self.is_suspended
@@ -175,6 +177,7 @@ class QueueBase(Unpickable(
                     % (pck, self._PACKET_CLASS.__name__, self.name))
 
             pck.queue = self
+            self.packets.add(pck)
             self._on_packet_attach(pck)
 
         self.relocate_packet(pck)
@@ -183,32 +186,46 @@ class QueueBase(Unpickable(
         with self.lock:
             assert pck.queue is self, "packet %s is not in queue %s" % (pck.id, self.name)
             pck.queue = None
+            self.packets.discard(pck)
             self._on_packet_detach(pck)
         self._move_packet(pck, None)
 
-    def ListAllPackets(self):
-        return itertools.chain(*(self.by_user_state[qname] for qname in self.VIEW_BY_ORDER))
-
-    def _filter_packets(self, filter=None):
-        if filter is None:
-            return self.ListAllPackets()
-
-        return list(self.by_user_state[filter])
-
-    def rpc_list_packets(self, filter=None, name_regex=None, prefix=None, last_modified=None):
+    def filter_packets(self, filter=None, name_regex=None, prefix=None,
+                       min_mtime=None, max_mtime=None, user_labels=None):
         if filter == 'all':
             filter = None
+
         with self.lock:
-            packets = []
-            for pck in self._filter_packets(filter):
-                if name_regex and not name_regex.match(pck.name):
-                    continue
-                if prefix and not pck.name.startswith(prefix):
-                    continue
-                if last_modified and (not pck.History() or pck.History()[-1][1] < last_modified):
-                    continue
-                packets.append(pck)
+            packets = self.packets if filter is None else self.by_user_state[filter]
+            packets = list(packets)
+
+        if name_regex is None and prefix is None \
+            and min_mtime is None and max_mtime is None \
+            and not user_labels:
             return packets
+
+        matched = []
+
+        for pck in packets:
+            if name_regex and not name_regex.match(pck.name):
+                continue
+
+            if prefix and not pck.name.startswith(prefix):
+                continue
+
+            if min_mtime is not None or max_mtime is not None:
+                history = pck.History()
+                mtime = history[-1][1] if history else None
+                if min_mtime is not None and mtime < min_mtime \
+                    or max_mtime is not None and mtime > max_mtime:
+                    continue
+
+            if user_labels and (not pck.user_labels or not all(l in pck.user_labels for l in user_labels)):
+                continue
+
+            matched.append(pck)
+
+        return matched
 
     def Resume(self):
         self.is_suspended = False
@@ -233,8 +250,10 @@ class QueueBase(Unpickable(
         self.working_limit = int(lmtValue)
         self._on_change_working_limit()
 
+
     def Empty(self):
-        return not any(self.by_user_state[subq_name] for subq_name in self.VIEW_BY_ORDER)
+        #return not any(self.by_user_state[subq_name] for subq_name in self.VIEW_BY_ORDER)
+        return not self.packets
 
 
 class LocalQueue(QueueBase):
@@ -250,8 +269,6 @@ class LocalQueue(QueueBase):
         )
 
     def _notify_has_pending_if_need(self):
-        #logging.debug('_notify_has_pending_if_need ... %s' % self.has_startable_jobs())
-# FIXME Optimize
         if self.has_startable_jobs() and self.scheduler:
             self.scheduler._on_job_pending(self)
 
@@ -286,7 +303,6 @@ class LocalQueue(QueueBase):
         for job in pck._get_working_jobs():
             self.working_jobs.pop(job, None)
 
-# FIXME Optimize
         self.packets_with_pending_jobs.discard(pck)
 
     def has_startable_jobs(self):
@@ -325,10 +341,7 @@ class LocalQueue(QueueBase):
                 if pck in self.packets_with_pending_jobs:
                     self.packets_with_pending_jobs.remove(pck)
 
-    def _on_before_remove(self, pck):
-        pass
-
-    def _on_after_add(self, pck):
+    def _do_relocate_packet(self, pck):
         pass
 
 
@@ -339,13 +352,13 @@ class SandboxQueue(QueueBase):
         return '<SandboxQueue %s; work=%d; pend=%d; lim=%s at 0x%x>' % (
             self.name,
             len(self.working_packets),
-            len(self._pending_packets),
+            len(self.pending_packets),
             self.working_limit,
             id(self)
         )
 
     def _notify_has_pending_if_need(self):
-        if self._pending_packets and self.scheduler:
+        if self.pending_packets and self.scheduler:
             self.scheduler._on_packet_pending(self) # XXX not under lock!
 
     def _on_change_working_limit(self):
@@ -354,17 +367,24 @@ class SandboxQueue(QueueBase):
     def _on_resume(self):
         self._notify_has_pending_if_need()
 
-    @property
-    def _pending_packets(self):
-        return self.by_user_state['pending']
-
     def relocate_packet(self, pck):
         QueueBase.relocate_packet(self, pck)
         self._notify_has_pending_if_need()
 
+    def _do_relocate_packet(self, pck):
+        if pck.state == PacketState.PENDING:
+            self.pending_packets.add(pck)
+        else:
+            self.pending_packets.discard(pck)
+
+        if pck.state in PacketState.StatesWithNotEmptyExecutor:
+            self.working_packets.add(pck)
+        else:
+            self.working_packets.discard(pck)
+
     def has_startable_packets(self):
         with self.lock:
-            return self._pending_packets \
+            return self.pending_packets \
                 and len(self.working_packets) < self.working_limit \
                 and self.is_alive()
 
@@ -373,20 +393,10 @@ class SandboxQueue(QueueBase):
             if not self.has_startable_packets():
                 return None
 
-            return self._pending_packets.peak()[0]
+            return self.pending_packets.peak()[0]
 
     def _on_packet_attach(self, pck):
         pass
-
-    def _on_before_remove(self, pck):
-        #else:
-    # TODO
-        self.working_packets.discard(pck)
-
-    def _on_after_add(self, pck):
-# FIXME Optimize
-        if not pck._graph_executor.is_null():
-            self.working_packets.add(pck)
 
     def _on_packet_detach(self, pck):
         self.working_packets.discard(pck)

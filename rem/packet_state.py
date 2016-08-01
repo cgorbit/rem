@@ -15,3 +15,10 @@ class PacketState(object):
     BROKEN        = 'IS_BROKEN'
     DESTROYING    = 'IS_DESTROYING'
     HISTORIED     = 'IS_HISTORIED'
+
+    StatesWithNotEmptyExecutor = frozenset([
+        RUNNING,
+        PAUSING,
+        PREV_EXECUTOR_STOP_WAIT,
+        DESTROYING,
+    ])
