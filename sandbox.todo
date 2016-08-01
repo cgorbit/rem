@@ -25,10 +25,8 @@ freshness@veles02 (PHASE_1)
 ----7. Cache locality
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
 
-@!@!@!
-    6. Проверить про mapreduce-yt
+----6. Проверить про mapreduce-yt
 
-@!@!@!
     5. PENDING not becomes WORKABLE $ rem-tool -q sbx:trofimenkov status
         queue 'sbx:trofimenkov':    {
             'error-lifetime': 604800, 'waited': 0, 'success-lifetime': 259200, 'working': 0, 'working-limit': 1, 'alive': True, 'suspended': 1, 'worked': 1, 'errored': 0, 'pending': 1}
@@ -50,7 +48,8 @@ freshness@veles02 (PHASE_1)
 
 
 production-quality (PHASE_2)
-    0. soft_reset лучше сделать для ресета тегов
+    0. soft_restart, soft_resume
+       (soft_reset лучше сделать для ресета тегов)
 
     0. Пересоздавать таск, если он долго не ENQUE*->EXECUTING, а при этом другие
        таски такой переход осуществляют
@@ -65,12 +64,12 @@ production-quality (PHASE_2)
                 -- протухший REM_JOBPACKET_EXECUTION_SNAPSHOT
                 (или, что гораздо менее вероятно, python (и то, если только дефолтный))
 
-    1. latest_release/latest_resource syntax
+----1. latest_release/latest_resource syntax
        - a. резолвинг сразу после create_packet, b. сразу после len(wait_dep_tags) == 0
        - кэш живёт секунд 5
        - pck_re_resolve_resources
 
-    6. различать причины ошибок в RunRemJobPacket
+????6. различать причины ошибок в RunRemJobPacket
         * Для PHASE_1 можно всё считать Retriable
         # FIXME Но как тогда уведомлять об ошибках, если они Retriable?
 
@@ -86,15 +85,18 @@ production-quality (PHASE_2)
               # TODO отличаться temporary ошибку в sync_resource от permanent
               # 1. NoSuchResource, 2. others
 
-    2. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
+????2. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
+
     3. PARALLEL resources sync?
         FIXME Почему меня тащили по skynet?
               Потому что локальный sandbox и не работало по HTTP?
+
     4. python.tar.gz: больше модулей
+
 ----5. обновление дефолтного python.tar.gz без рестарта?
+
     6. per-jobpacket python.tar.gz?
+
     7. cancel'ить WrongTaskIdError-таски в соответствие текущему стейту:
         1. периодический ping на тасках -- не оперативно, может не быть дырок
     --> 2. при старте с бэкапа получать список работающих тасков и убивать ненужные
-
-    9. soft_restart, soft_resume

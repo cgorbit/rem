@@ -748,7 +748,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         q.UpdateContext(ctx)
         q.scheduler = self
 
-        for pck in list(q.ListAllPackets()):
+        for pck in list(q.list_all_packets()):
             pck.update_tag_deps(self.tagRef)
             pck.try_recover_after_backup_loading(ctx)
             q.relocate_packet(pck) # j.i.c force?
@@ -784,7 +784,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
     def Start(self):
         for q in self.qRef.itervalues():
-            for pck in list(q.ListAllPackets()):
+            for pck in list(q.list_all_packets()):
                 pck.vivify_jobs_waiting_stoppers()
                 pck.vivify_release_resolving()
 
