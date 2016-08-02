@@ -435,10 +435,11 @@ class TagReprModifier(object):
         except Exception:
             logging.exception("Failed to process tag update %s" % (update,))
 
-        try:
-            self._connection_manager.RegisterTagEvent(tag, event, msg)
-        except Exception:
-            logging.exception("Failed to pass update to ConnectionManager %s" % (update,))
+        if self._connection_manager:
+            try:
+                self._connection_manager.RegisterTagEvent(tag, event, msg)
+            except Exception:
+                logging.exception("Failed to pass update to ConnectionManager %s" % (update,))
 
     def _worker(self, queue):
         while True:
@@ -876,6 +877,8 @@ class TagStorage(object):
         self._modify_local_tags([(tag, event, msg)], with_future=False)
 
     def IsRemoteTagName(self, tagname):
+        if not self.remote_tags_enabled:
+            return False
         return ':' in tagname
 
     def AcquireTag(self, tagname):
@@ -1087,8 +1090,8 @@ class TagStorage(object):
 
     def UpdateContext(self, context):
         self.db_file = context.tags_db_file
+        self.remote_tags_enabled = not context.disable_remote_tags
         self.DBConnect()
-        self.conn_manager = context.Scheduler.connManager
         self._journal.UpdateContext(context)
         self._repr_modifier.UpdateContext(context)
         self._cloud_tags_server = context.cloud_tags_server
