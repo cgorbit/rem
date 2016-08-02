@@ -16,7 +16,7 @@ import threading
 
 import fork_locking
 from job import FuncJob, SerializableFunction
-from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject
+from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject, copy_ctor_or_none
 from connmanager import ConnectionManager
 from packet import LocalPacket, PacketBase, PacketState, PacketCustomLogic
 import packet
@@ -272,7 +272,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                            tempStorage=ShortStorage,
                            #storage with knowledge about nonassigned packets (packets that was created but not yet assigned to appropriate queue)
                            schedWatcher=SchedWatcher, #watcher for time scheduled events
-                           connManager=lambda *args: ConnectionManager(args[0]) if args else None, #connections to others rems
+                           connManager=copy_ctor_or_none(ConnectionManager),
                            packetNamesTracker=PacketNamesStorage,
                            _remote_packets_dispatcher=sandbox_remote_packet.RemotePacketsDispatcher,
                         ),
