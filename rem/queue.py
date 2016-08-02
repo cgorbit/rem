@@ -115,7 +115,8 @@ class QueueBase(Unpickable(
 
     def relocate_packet(self, pck):
         dest_queue_name = None if pck.state == PacketState.HISTORIED \
-            else pck._repr_state.lower()
+                                  or pck.state == PacketState.UNINITIALIZED \
+                               else pck._repr_state.lower()
 
         dest_queue = self.by_user_state[dest_queue_name] if dest_queue_name else None
 
