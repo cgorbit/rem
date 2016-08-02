@@ -292,8 +292,8 @@ class PacketBase(Unpickable(
             ImplState.PENDING:          ReprState.PENDING,
             ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
 
-            ImplState.SHARING_FILES:    ReprState.PENDING,
-            ImplState.RESOLVING_RELEASES: ReprState.PENDING,
+            ImplState.SHARING_FILES:    ReprState.SUSPENDED,
+            ImplState.RESOLVING_RELEASES: ReprState.SUSPENDED,
 
             ImplState.TAGS_WAIT:        ReprState.SUSPENDED,
             ImplState.PAUSED:           ReprState.SUSPENDED,
