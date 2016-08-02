@@ -69,7 +69,6 @@ class Context(object):
         self.successfull_packet_lifetime = config.getint("store", "success_packet_lifetime")
         self.tags_db_file = config.get("store", "tags_db_file")
         self.recent_tags_file = config.get("store", "recent_tags_file")
-        self.remote_tags_db_file = config.safe_get("store", "remote_tags_db_file")
         self.fix_bin_links_at_startup = config.safe_getboolean("store", "fix_bin_links_at_startup", True)
 
         self.server_process_title = config.safe_get("run", "server_process_title", None)
@@ -124,9 +123,21 @@ class Context(object):
 
         self.manager_port = config.getint("server", "port")
         self.manager_readonly_port = config.safe_getint("server", "readonly_port")
-        self.system_port = config.safe_getint("server", "system_port")
-        self.network_topology = config.safe_get("server", "network_topology")
-        self.network_name = config.safe_get("server", "network_hostname")
+
+        self.disable_remote_tags = config.safe_getboolean("server", "disable_remote_tags", False)
+
+        self.system_port = None if self.disable_remote_tags \
+            else config.safe_getint("server", "system_port")
+
+        self.remote_tags_db_file = None if self.disable_remote_tags \
+            else config.safe_get("store", "remote_tags_db_file")
+
+        self.network_topology = None if self.disable_remote_tags \
+            else config.safe_get("server", "network_topology")
+
+        self.network_name = None if self.disable_remote_tags \
+            else config.safe_get("server", "network_hostname")
+
         self.send_emails = config.getboolean("server", "send_emails")
         self.send_emergency_emails = config.safe_getboolean("server", "send_emergency_emails")
         self.mailer_thread_count = config.safe_getint("server", "mailer_thread_count", 1)

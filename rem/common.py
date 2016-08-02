@@ -718,3 +718,12 @@ def list_all_user_processes():
     p = subprocess.Popen(["ps", "x", "-o", "command"], stdout=subprocess.PIPE)
     return [l.rstrip('\n') for l in p.stdout]
 
+
+def copy_ctor_or_none(ctor):
+    def create(*args):
+        if args and args[0] is not None:
+            rhs = args[0]
+            return ctor(rhs)
+        else:
+            return None
+    return create

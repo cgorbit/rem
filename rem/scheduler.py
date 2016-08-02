@@ -16,7 +16,7 @@ import threading
 
 import fork_locking
 from job import FuncJob, SerializableFunction
-from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject
+from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject, copy_ctor_or_none
 from connmanager import ConnectionManager
 from packet import LocalPacket, PacketBase, PacketState, PacketCustomLogic
 import packet
@@ -272,7 +272,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                            tempStorage=ShortStorage,
                            #storage with knowledge about nonassigned packets (packets that was created but not yet assigned to appropriate queue)
                            schedWatcher=SchedWatcher, #watcher for time scheduled events
-                           connManager=ConnectionManager, #connections to others rems
+                           connManager=copy_ctor_or_none(ConnectionManager),
                            packetNamesTracker=PacketNamesStorage,
                            _remote_packets_dispatcher=sandbox_remote_packet.RemotePacketsDispatcher,
                         ),
@@ -303,7 +303,10 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.binStorage.UpdateContext(self.context)
         self.tagRef.UpdateContext(self.context)
         PacketCustomLogic.UpdateContext(self.context)
-        self.connManager.UpdateContext(self.context)
+        if self.connManager and self.context.disable_remote_tags:
+            self.connManager = None
+        if self.connManager:
+            self.connManager.UpdateContext(self.context)
         self.HasScheduledTask = fork_locking.Condition(self.lock)
         self.schedWatcher.UpdateContext(self.context)
 
@@ -769,8 +772,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
         pck.AddCallbackListener(self.packetNamesTracker)
 
     def RegisterNewPacket(self, pck, wait_tags):
-        for tag in wait_tags:
-            self.connManager.Subscribe(tag)
+        if self.connManager:
+            for tag in wait_tags:
+                self.connManager.Subscribe(tag)
         self.tempStorage.StorePacket(pck)
 
     def GetPacket(self, pck_id):
@@ -798,8 +802,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.alive = True
             self.HasScheduledTask.notify_all()
 
-        self.connManager.Start()
-        logging.debug("after_connection_manager_start")
+        if self.connManager:
+            self.connManager.Start()
+            logging.debug("after_connection_manager_start")
 
         self._sandbox_packets_runner = None
         if self.context.sandbox_api_url:
@@ -827,7 +832,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def Stop1(self):
         if self._sandbox_packets_runner:
             self._sandbox_packets_runner.stop()
-        self.connManager.Stop()
+        if self.connManager:
+            self.connManager.Stop()
         with self.lock:
             self.alive = False
             self.HasScheduledTask.notify_all()
@@ -846,9 +852,6 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.Stop1()
         self.Stop2()
         self.Stop3()
-
-    def GetConnectionManager(self):
-        return self.connManager
 
     def OnTaskPending(self, ref):
         self.Notify(ref)
