@@ -639,7 +639,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
     @classmethod
     @common.logged()
     def _convert_backup_to_v3(cls, sdict, registrator):
-        raise NotImplementedError()
+        for q in registrator.queues:
+            q.convert_to_v3()
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):

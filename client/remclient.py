@@ -190,7 +190,11 @@ class Queue(object):
             waiting   - пакеты, ожидающие таймаут, после возникшей ошибки
             working   - пакеты, работающие в данный момент
         возвращается список объектов типа JobPacketInfo"""
-        assert filter in ("errored", "suspended", "worked", "waiting", "pending", "working", "all")
+        assert filter in [
+            "errored", "suspended", "worked", "waiting", "pending", "working", "all",
+            "error", "successfull", "workable"
+        ]
+
         args = [self.name, filter, name_regex, prefix]
         if min_mtime is not None or max_mtime is not None or user_labels is not None:
             args += [min_mtime, max_mtime, user_labels]

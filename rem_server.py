@@ -310,7 +310,8 @@ def queue_status(queue_name):
 
 @readonly_method
 @traced_rpc_method()
-def queue_list(queue_name, filter, name_regex=None, prefix=None, min_mtime=None, max_mtime=None, user_labels=None):
+def queue_list(queue_name, filter, name_regex=None, prefix=None, min_mtime=None,
+               max_mtime=None, user_labels=None):
     name_regex = name_regex and re.compile(name_regex)
     q = _scheduler.rpc_get_queue(queue_name, create=False)
     return [

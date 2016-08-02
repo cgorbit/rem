@@ -155,6 +155,30 @@ class PacketBase(Unpickable(
                 CallbackHolder,
                 ICallbackAcceptor):
 
+    # The legacy
+    IMPL_TO_REPR_STATE_MAPPING = {
+        ImplState.UNINITIALIZED:    ReprState.CREATED,
+        ImplState.ERROR:            ReprState.ERROR,
+        ImplState.BROKEN:           ReprState.ERROR,
+        ImplState.PENDING:          ReprState.PENDING,
+        ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
+
+        ImplState.SHARING_FILES:    ReprState.SUSPENDED,
+        ImplState.RESOLVING_RELEASES: ReprState.SUSPENDED,
+
+        ImplState.TAGS_WAIT:        ReprState.SUSPENDED,
+        ImplState.PAUSED:           ReprState.SUSPENDED,
+        ImplState.PAUSING:          ReprState.SUSPENDED,
+
+        # Must be WORKABLE to support fast_restart (FIXME Don't remember why)
+        ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
+
+        ImplState.TIME_WAIT:        ReprState.WAITING,
+
+        ImplState.DESTROYING:       ReprState.WORKABLE,
+        ImplState.HISTORIED:        ReprState.HISTORIED,
+    }
+
     def __init__(self, name, priority, context, notify_emails, wait_tags=(),
                  set_tag=None, kill_all_jobs_on_error=True, is_resetable=True,
                  notify_on_reset=False, notify_on_skipped_reset=True, sandbox_host=None,
@@ -274,41 +298,18 @@ class PacketBase(Unpickable(
             self._update_repr_state()
 
             self._on_state_change(new)
-        else:
-            self._update_repr_state() # ImplState.RUNNING: 1. PENDING, 2. WORKABLE
+        #else:
+            #self._update_repr_state() # ImplState.RUNNING: 1. PENDING, 2. WORKABLE
 
         if self.queue:
             self.queue.update_pending_jobs_state(self) # TODO only for LocalPacket actually
 
     def _calc_repr_state(self):
-        if self.state == ImplState.RUNNING:
-            return ReprState.PENDING if self._graph_executor.state & GraphState.PENDING_JOBS \
-                else ReprState.WORKABLE
+        #if self.state == ImplState.RUNNING:
+            #return ReprState.PENDING if self._graph_executor.state & GraphState.PENDING_JOBS \
+                #else ReprState.WORKABLE
 
-        map = {
-            ImplState.UNINITIALIZED:    ReprState.CREATED,
-            ImplState.ERROR:            ReprState.ERROR,
-            ImplState.BROKEN:           ReprState.ERROR,
-            ImplState.PENDING:          ReprState.PENDING,
-            ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
-
-            ImplState.SHARING_FILES:    ReprState.SUSPENDED,
-            ImplState.RESOLVING_RELEASES: ReprState.SUSPENDED,
-
-            ImplState.TAGS_WAIT:        ReprState.SUSPENDED,
-            ImplState.PAUSED:           ReprState.SUSPENDED,
-            ImplState.PAUSING:          ReprState.SUSPENDED,
-
-            # Must be WORKABLE to support fast_restart (FIXME Don't remember why)
-            ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
-
-            ImplState.TIME_WAIT:        ReprState.WAITING,
-
-            ImplState.DESTROYING:       ReprState.WORKABLE,
-            ImplState.HISTORIED:        ReprState.HISTORIED,
-        }
-
-        return map[self.state]
+        return self.IMPL_TO_REPR_STATE_MAPPING[self.state]
 
     def __getstate__(self):
         sdict = CallbackHolder.__getstate__(self)

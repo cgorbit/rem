@@ -7,19 +7,16 @@ from common import emptyset, emptydict, TimedSet, PackSet, PickableRLock, Unpick
 from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError, NonDestroyingStateError
 from rem_logging import logger as logging
 
-"""
-    1. Плохо, что ByUserState.pending больше не в порядке выполнения
-
-    2. ByUserState сейчас не соответсвует ReprState (PENDING <=> WORKABLE, PENDING)
-"""
 
 class ByUserState(Unpickable(
-                       pending=set,
-                       working=set,
-                       worked=TimedSet.create,
-                       errored=TimedSet.create,
+                       pending=PackSet.create, # PackSet is for meaningfull order for user
+                       workable=set,
+                       successfull=TimedSet.create,
+                       error=TimedSet.create,
                        suspended=set,
-                       waited=set,
+                       waiting=set,
+                       #paused=set, TODO
+                       #tags_wait=set,
                  )):
 
     def items(self):
@@ -57,32 +54,11 @@ class QueueBase(Unpickable(
                     )
                 ):
 
-    VIEW_BY_ORDER = "pending", "waited", "errored", "suspended", "working", "worked"
-
-    VIEW_BY_STATE = {
-        PacketState.PAUSED:    "suspended",
-        PacketState.PAUSING:   "suspended",
-        PacketState.TAGS_WAIT: "suspended",
-
-        # pending used to run SandboxPacket's
-        PacketState.PENDING: "pending",
-
-        PacketState.PREV_EXECUTOR_STOP_WAIT: "working", # FIXME suspended
-        PacketState.SHARING_FILES: "suspended",
-        PacketState.RESOLVING_RELEASES: "suspended",
-
-        PacketState.RUNNING:    "working",
-        PacketState.DESTROYING: "working",
-
-        PacketState.SUCCESSFULL: "worked",
-
-        PacketState.TIME_WAIT: "waited",
-
-        PacketState.ERROR:  "errored",
-        PacketState.BROKEN: "errored",
-
-        PacketState.UNINITIALIZED: None, # stored in ShortStorage
-        PacketState.HISTORIED:     None,
+    LEGACY_FILTER_NAMING = {
+        'waited':   'waiting',
+        'errored':  'error',
+        'working':  'workable',
+        'worked':   'successfull',
     }
 
     def __init__(self, name):
@@ -113,8 +89,8 @@ class QueueBase(Unpickable(
         self.scheduler = context.Scheduler
 
     def forgetOldItems(self):
-        self._forget_queue_old_items(self.by_user_state.worked, self.successfull_lifetime or self.successfull_default_lifetime)
-        self._forget_queue_old_items(self.by_user_state.errored, self.errored_lifetime or self.errored_default_lifetime)
+        self._forget_queue_old_items(self.by_user_state.workable, self.successfull_lifetime or self.successfull_default_lifetime)
+        self._forget_queue_old_items(self.by_user_state.error, self.errored_lifetime or self.errored_default_lifetime)
 
     def _forget_queue_old_items(self, queue, ttl):
         threshold = time.time() - ttl
@@ -138,7 +114,9 @@ class QueueBase(Unpickable(
                 pass
 
     def relocate_packet(self, pck):
-        dest_queue_name = self.VIEW_BY_STATE[pck.state]
+        dest_queue_name = None if pck.state == PacketState.HISTORIED \
+            else pck._repr_state.lower()
+
         dest_queue = self.by_user_state[dest_queue_name] if dest_queue_name else None
 
         with self.lock:
@@ -204,9 +182,11 @@ class QueueBase(Unpickable(
         if filter == 'all':
             filter = None
 
+        filter = self.LEGACY_FILTER_NAMING.get(filter, filter)
+
         with self.lock:
             packets = self.packets if filter is None else self.by_user_state[filter]
-            packets = list(packets)
+            packets = list(packets) # FIXME fast enough (better than do all under locking)
 
         if name_regex is None and prefix is None \
             and min_mtime is None and max_mtime is None \
@@ -229,7 +209,8 @@ class QueueBase(Unpickable(
                     or max_mtime is not None and mtime > max_mtime:
                     continue
 
-            if user_labels and (not pck.user_labels or not all(l in pck.user_labels for l in user_labels)):
+            if user_labels and (not pck.user_labels \
+                                or not all(l in pck.user_labels for l in user_labels)):
                 continue
 
             matched.append(pck)
@@ -263,6 +244,26 @@ class QueueBase(Unpickable(
     def Empty(self):
         #return not any(self.by_user_state[subq_name] for subq_name in self.VIEW_BY_ORDER)
         return not self.packets
+
+    def convert_to_v3(self):
+        by_user_state = self.by_user_state
+        d = by_user_state.__dict__
+
+        d['waiting'] = d.pop('waited')
+        d['error'] = d.pop('errored')
+        d['workable'] = d.pop('working')
+        d['successfull'] = d.pop('worked')
+
+        self.packets = set(
+            itertools.chain(
+                self.pending,
+                self.workable,
+                self.successfull,
+                self.error,
+                self.suspended,
+                self.waiting,
+            )
+        )
 
 
 class LocalQueue(QueueBase):
@@ -412,5 +413,10 @@ class SandboxQueue(QueueBase):
 
     def update_pending_jobs_state(self, pck):
         pass
+
+    def convert_to_v3(self):
+        super(SandboxQueue, self).convert_to_v3()
+        self.pending_packets = PackSet.create(list(self.by_user_state.pending))
+
 
 from rem.queue_legacy import Queue
