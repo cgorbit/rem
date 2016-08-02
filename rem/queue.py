@@ -6,6 +6,11 @@ from common import emptyset, emptydict, TimedSet, PackSet, PickableRLock, Unpick
 from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError, NonDestroyingStateError
 from rem_logging import logger as logging
 
+"""
+    1. Плохо, что ByUserState.pending больше не в порядке выполнения
+
+    2. ByUserState сейчас не соответсвует ReprState (PENDING <=> WORKABLE, PENDING)
+"""
 
 class ByUserState(Unpickable(
                        pending=set,
@@ -188,7 +193,7 @@ class QueueBase(Unpickable(
             pck.queue = None
             self.packets.discard(pck)
             self._on_packet_detach(pck)
-        self._update_by_user_state(pck, None)
+            self._update_by_user_state(pck, None)
 
     def list_all_packets(self):
         return self.packets

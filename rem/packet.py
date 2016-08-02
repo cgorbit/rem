@@ -275,7 +275,7 @@ class PacketBase(Unpickable(
 
             self._on_state_change(new)
         else:
-            self._update_repr_state()
+            self._update_repr_state() # ImplState.RUNNING: 1. PENDING, 2. WORKABLE
 
         if self.queue:
             self.queue.update_pending_jobs_state(self) # TODO only for LocalPacket actually
