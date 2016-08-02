@@ -170,6 +170,8 @@ class PacketBase(Unpickable(
         ImplState.PAUSED:           ReprState.SUSPENDED,
         ImplState.PAUSING:          ReprState.SUSPENDED,
 
+        ImplState.RUNNING:          ReprState.WORKABLE,
+
         # Must be WORKABLE to support fast_restart (FIXME Don't remember why)
         ImplState.PREV_EXECUTOR_STOP_WAIT: ReprState.WORKABLE,
 
