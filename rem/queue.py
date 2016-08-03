@@ -257,12 +257,12 @@ class QueueBase(Unpickable(
 
         self.packets = set(
             itertools.chain(
-                self.by_user_state.pending,
-                self.by_user_state.workable,
-                self.by_user_state.successfull,
-                self.by_user_state.error,
-                self.by_user_state.suspended,
-                self.by_user_state.waiting,
+                by_user_state.pending,
+                by_user_state.workable,
+                by_user_state.successfull,
+                by_user_state.error,
+                by_user_state.suspended,
+                by_user_state.waiting,
             )
         )
 
