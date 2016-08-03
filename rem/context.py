@@ -138,6 +138,11 @@ class Context(object):
         self.network_name = None if self.disable_remote_tags \
             else config.safe_get("server", "network_hostname")
 
+        if not self.disable_remote_tags and not (
+            self.system_port and self.remote_tags_db_file
+            and self.network_topology and self.network_name):
+            raise ValueError("Incomplete setup for remote tags")
+
         self.send_emails = config.getboolean("server", "send_emails")
         self.send_emergency_emails = config.safe_getboolean("server", "send_emergency_emails")
         self.mailer_thread_count = config.safe_getint("server", "mailer_thread_count", 1)

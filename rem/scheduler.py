@@ -303,10 +303,15 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.binStorage.UpdateContext(self.context)
         self.tagRef.UpdateContext(self.context)
         PacketCustomLogic.UpdateContext(self.context)
+
         if self.connManager and self.context.disable_remote_tags:
             self.connManager = None
+        elif not self.connManager and not self.context.disable_remote_tags:
+            self.connManager = ConnectionManager()
+
         if self.connManager:
             self.connManager.UpdateContext(self.context)
+
         self.HasScheduledTask = fork_locking.Condition(self.lock)
         self.schedWatcher.UpdateContext(self.context)
 
