@@ -89,7 +89,7 @@ class QueueBase(Unpickable(
         self.scheduler = context.Scheduler
 
     def forgetOldItems(self):
-        self._forget_queue_old_items(self.by_user_state.workable, self.successfull_lifetime or self.successfull_default_lifetime)
+        self._forget_queue_old_items(self.by_user_state.successfull, self.successfull_lifetime or self.successfull_default_lifetime)
         self._forget_queue_old_items(self.by_user_state.error, self.errored_lifetime or self.errored_default_lifetime)
 
     def _forget_queue_old_items(self, queue, ttl):
