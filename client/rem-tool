@@ -31,7 +31,7 @@ def print_pck_info(pck, extended=False):
            getattr(pck, 'notify_emails', None),
            getattr(pck, 'is_sandbox', False),
            last_sandbox_task_id,
-           getattr(pck, 'labels', [])
+           getattr(pck, 'labels', []) or [],
           )
 
     for job in pck.jobs:
