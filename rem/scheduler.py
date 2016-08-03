@@ -642,6 +642,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
         for q in registrator.queues:
             q.convert_to_v2()
 
+        for pck in registrator.packets:
+            pck.convert_to_v2()
+
     @classmethod
     @common.logged()
     def _convert_backup_to_v3(cls, sdict, registrator):
