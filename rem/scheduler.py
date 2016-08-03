@@ -301,10 +301,10 @@ class Scheduler(Unpickable(lock=PickableRLock,
             self.initBackupSystem(context)
             context.registerScheduler(self)
 
-            if self.connManager and self.context.disable_remote_tags:
-                self.connManager = None
-            elif not self.connManager and not self.context.disable_remote_tags:
-                self.connManager = ConnectionManager()
+        if self.connManager and self.context.disable_remote_tags:
+            self.connManager = None
+        elif not self.connManager and not self.context.disable_remote_tags:
+            self.connManager = ConnectionManager()
 
         self.binStorage.UpdateContext(self.context)
         self.tagRef.UpdateContext(self.context)

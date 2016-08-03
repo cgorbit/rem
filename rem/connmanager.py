@@ -298,7 +298,6 @@ class MapSetDB(object):
 
 
 class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
-                                   scheduledTasks=TimedSet.create,
                                    lock=PickableLock,
                                    alive=(bool, False),
                                    tags_file=str),
@@ -541,7 +540,6 @@ class ConnectionManager(Unpickable(topologyInfo=TopologyInfo,
 
     def __getstate__(self):
         sdict = self.__dict__.copy()
-        sdict["scheduledTasks"] = self.scheduledTasks.copy()
         sdict.pop("scheduler", None)
         sdict.pop("rpcserver", None)
         sdict.pop("acceptors", None)
