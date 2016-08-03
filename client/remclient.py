@@ -179,7 +179,7 @@ class Queue(object):
         """возвращает краткую информацию о запущенных/выполненных задачах"""
         return self.proxy.queue_status(self.name)
 
-    def ListPackets(self, filter, name_regex=None, prefix=None, min_mtime=None, max_mtime=None, user_labels=None):
+    def ListPackets(self, filter, name_regex=None, prefix=None, min_mtime=None, max_mtime=None, labels=None):
         """возвращает список пакетов из очереди, подпадающих под действие фильтра
         возможные значения парметра filter:
             all       - все пакеты
@@ -196,8 +196,8 @@ class Queue(object):
         ]
 
         args = [self.name, filter, name_regex, prefix]
-        if min_mtime is not None or max_mtime is not None or user_labels is not None:
-            args += [min_mtime, max_mtime, user_labels]
+        if min_mtime is not None or max_mtime is not None or labels is not None:
+            args += [min_mtime, max_mtime, labels]
         plist = self.proxy.queue_list(*args)
         return [JobPacketInfo(self.conn, pck_id) for pck_id in plist]
 
@@ -240,7 +240,7 @@ class JobPacket(object):
     def __init__(self, connector, name, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
                  kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
                  notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None,
-                 user_labels=None):
+                 labels=None):
         self.conn = connector
         self.proxy = connector.proxy
         if check_tag_uniqueness and self.proxy.check_tag(set_tag):
@@ -251,14 +251,14 @@ class JobPacket(object):
             kill_all_jobs_on_error, packet_name_policy, resetable,
         ]
 
-        if notify_on_reset or not notify_on_skipped_reset or is_sandbox or user_labels:
+        if notify_on_reset or not notify_on_skipped_reset or is_sandbox or labels:
             args.extend([notify_on_reset, notify_on_skipped_reset])
 
-        if is_sandbox or user_labels:
+        if is_sandbox or labels:
             args.extend([is_sandbox, sandbox_host])
 
-        if user_labels:
-            args.append(user_labels)
+        if labels:
+            args.append(labels)
 
         self.id = self.proxy.create_packet(*args)
 
@@ -693,7 +693,7 @@ class Connector(object):
     def Packet(self, pckname, priority=MAX_PRIORITY, notify_emails=[], wait_tags=(), set_tag=None,
                check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True,
                notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None,
-               user_labels=None):
+               labels=None):
         """создает новый пакет с именем pckname
             priority - приоритет выполнения пакета
             notify_emails - список почтовых адресов, для уведомления об ошибках
@@ -714,7 +714,7 @@ class Connector(object):
                 notify_on_skipped_reset=notify_on_skipped_reset,
                 is_sandbox=is_sandbox,
                 sandbox_host=sandbox_host,
-                user_labels=user_labels
+                labels=labels
             )
         except xmlrpclib.Fault, e:
             if 'DuplicatePackageNameException' in e.faultString:

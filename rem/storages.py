@@ -387,6 +387,7 @@ class TagReprModifier(object):
     _STOP_INDICATOR = object()
 
     def __init__(self, pool_size=100):
+        logging.debug('+ TagReprModifier()')
         self._connection_manager = None
         self._pool_size = pool_size
         self._queues  = [Queue() for _ in xrange(pool_size)]
@@ -396,8 +397,10 @@ class TagReprModifier(object):
 
     def UpdateContext(self, ctx):
         self._connection_manager = ctx.Scheduler.connManager
+        logging.debug('+ TagReprModifier.UpdateContext(%s)' % self._connection_manager)
 
     def add(self, update, with_future=False):
+        logging.debug('+ TagReprModifier.add(%s)' % update)
         queue = self._queues[hash(update[0].GetFullname()) % len(self._queues)]
         promise = Promise() if with_future else None
         queue.put((update, promise))
@@ -436,6 +439,7 @@ class TagReprModifier(object):
             logging.exception("Failed to process tag update %s" % (update,))
 
         if self._connection_manager:
+            logging.debug('+ TagReprModifier._process_update._connection_manager.RegisterTagEvent(%s)' % update)
             try:
                 self._connection_manager.RegisterTagEvent(tag, event, msg)
             except Exception:

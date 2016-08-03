@@ -24,13 +24,14 @@ def print_pck_info(pck, extended=False):
     workTime = pck.GetWorkingTime()
     hd = "packet '%s':" % pck.pck_id
     last_sandbox_task_id = getattr(pck, 'last_sandbox_task_id', None)
-    print "%s\tname=%s,state=%s;wait=%r,priority=%s;working_time=%s;result_tag=%s;last_update='%s';notify_emails=%s;is_sandbox=%s;last_sandbox_task_id=%s" \
+    print "%s\tname=%s,state=%s;wait=%r,priority=%s;working_time=%s;result_tag=%s;last_update='%s';notify_emails=%s;is_sandbox=%s;last_sandbox_task_id=%s,labels=%s" \
         % (hd, pck.name, pck.state, 
            pck.wait, pck.priority, workTime, pck.result_tag, 
            time.strftime("%Y/%m/%d-%H:%M:%S", time.localtime(pck.history[-1][1]) if pck.history else "none"),
            getattr(pck, 'notify_emails', None),
            getattr(pck, 'is_sandbox', False),
            last_sandbox_task_id,
+           getattr(pck, 'labels', [])
           )
 
     for job in pck.jobs:
@@ -242,6 +243,7 @@ def parse_args():
     parser.add_option("--labels")
     parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
     parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
+    parser.add_option("-l", "--labels", dest="labels", action='append', help="")
     opt, args = parser.parse_args()
 
     if not args:
