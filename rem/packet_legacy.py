@@ -187,6 +187,8 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
         self._repr_state = state # to avoid duplicates in pck.history
 
+        self.req_sandbox_host = None
+
         if state == ReprState.SUCCESSFULL:
             #pass
             g = self._create_job_graph_executor()

@@ -651,6 +651,9 @@ class Scheduler(Unpickable(lock=PickableRLock,
         for q in registrator.queues:
             q.convert_to_v3()
 
+        for pck in registrator.packets:
+            pck.user_labels = None
+
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):
         import cPickle as pickle
