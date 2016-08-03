@@ -1,4 +1,4 @@
-from rem.packet import ReprState, ImplState, LocalPacket, DUMMY_GRAPH_EXECUTOR, always
+from rem.packet import ReprState, LocalPacket, DUMMY_GRAPH_EXECUTOR, always
 from rem.common import Unpickable, PickableRLock
 from rem.callbacks import CallbackHolder, ICallbackAcceptor
 from rem.queue import LocalQueue
@@ -27,6 +27,21 @@ def _check_graph_consistence(g):
 
     if sorted(l1) != sorted(l2):
         raise RuntimeError("%s != %s" % (sorted(l1), sorted(l2)))
+
+
+def _complete_waitJobs(pck_id, g):
+    child_to_parents = g.child_to_parents
+
+    fixed = False
+
+    for job in g.jobs.values():
+        if job.parents:
+            if job.id not in child_to_parents:
+                fixed = True
+                child_to_parents[job.id] = set([])
+
+    if fixed:
+        logging.debug('!!!Incomplete .waitJobs in %s!!!' % pck_id)
 
 
 class JobPacket(Unpickable(lock=PickableRLock,
@@ -87,7 +102,7 @@ class JobPacket(Unpickable(lock=PickableRLock,
         pckd.pop('flags')
 
         if state == ReprState.SUCCESSFULL and self.do_not_run:
-            logging.warning("SUCCESSFULL and USER_SUSPEND in %s" % self.id)
+            #logging.warning("SUCCESSFULL and USER_SUSPEND in %s" % self.id)
             self.do_not_run = False
 
         pckd.pop('streams') # FIXME Overhead: will re-concat multi-deps
@@ -212,10 +227,13 @@ class JobPacket(Unpickable(lock=PickableRLock,
 
             g.state = g._calc_state()
 
+            # FIXME bug? waitJobs may not contain all jobs-with-parents
+            _complete_waitJobs(self.id, g)
+
             try:
                 _check_graph_consistence(g)
             except Exception as e:
-                raise RuntimeError("Inconsistent job graph in %s: %s" % (self.id, e))
+                raise AssertionError("Inconsistent job graph in %s: %s" % (self.id, e))
 
         self.state = self._calc_state()
         self._update_repr_state()
