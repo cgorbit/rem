@@ -9,6 +9,7 @@ perun (PHASE_0)
 freshness@veles02 (PHASE_1)
     0. packet._notify_has_pending_if_need может не создать директорию для SandboxPacket,
        тогда его надо загасить (в текущем виде вообще AssertionError и не стартанёт)
+
 ----1. VIVIFY SandboxJobGraphExecutorProxy.time_wait_sched
 ----X. Не resume'ятся очереди sbx: при рестарте сервера
 ----0. sky share результатами недоступен в Sandbox
@@ -23,11 +24,12 @@ freshness@veles02 (PHASE_1)
 ----   - rem-tool
 ----3. !Retriable/TIME_WAIT для EXCEPTION тасков
 ----7. Cache locality
+
     4. пролонгация REM_JOBPACKET_EXECUTOR: через ttl или reshare
 
 ----6. Проверить про mapreduce-yt
 
-    5. PENDING not becomes WORKABLE $ rem-tool -q sbx:trofimenkov status
+----5. PENDING not becomes WORKABLE $ rem-tool -q sbx:trofimenkov status
         queue 'sbx:trofimenkov':    {
             'error-lifetime': 604800, 'waited': 0, 'success-lifetime': 259200, 'working': 0, 'working-limit': 1, 'alive': True, 'suspended': 1, 'worked': 1, 'errored': 0, 'pending': 1}
 
