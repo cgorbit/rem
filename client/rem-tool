@@ -240,7 +240,6 @@ def parse_args():
     parser.add_option("-P", "--prefix", dest="prefix", help="name prefix for filtering list of tags or packets")
     parser.add_option("--min-mtime")
     parser.add_option("--max-mtime")
-    parser.add_option("--labels")
     parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
     parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
     parser.add_option("-l", "--labels", dest="labels", action='append', help="")
