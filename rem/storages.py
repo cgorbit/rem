@@ -950,13 +950,13 @@ class TagStorage(object):
         updates = []
 
         for tag_name, tag in self.inmem_items.iteritems():
-            must_be_cloud = self._is_cloud_tag_name(tag_name)
+            must_be_cloud = self._is_cloud_tag_name(tag_name) \
+                and not tag.IsRemote() # Hack for disable_remote_tags
 
             if must_be_cloud == tag.IsCloud():
                 continue
 
             elif must_be_cloud:
-                # FIXME Do we need to write to YT the Unset?
                 if tag.IsLocallySet():
                     updates.append((tag_name, ETagEvent.Set))
 
@@ -1021,7 +1021,7 @@ class TagStorage(object):
                 if not self._has_cloud_setup():
                     logging.error("Tag %s is cloud on disk storage, but no setup for" \
                         " cloud in config. Restart server with proper setup!" % tagname)
-            else:
+            elif not tag.IsRemote(): # Hack for disable_remote_tags
                 if self._is_cloud_tag_name(tag.GetFullname()):
                     logging.error("Tag %s is not cloud on disk storage, but must be." \
                         " Convert tags in disk storage!" % tagname)
