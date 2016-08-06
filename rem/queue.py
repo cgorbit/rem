@@ -207,15 +207,13 @@ class QueueBase(Unpickable(
                 continue
 
             if min_mtime is not None or max_mtime is not None:
-                history = pck.History()
-                mtime = history[-1][1] if history else None
+                mtime = pck.History()[-1][1]
                 if min_mtime is not None and mtime < min_mtime \
                     or max_mtime is not None and mtime > max_mtime:
                     continue
 
             if min_ctime is not None or max_ctime is not None:
-                history = pck.History()
-                ctime = history[0][1] if history else None
+                ctime = pck.History[0][1]
                 if min_ctime is not None and ctime < min_ctime \
                     or max_ctime is not None and ctime > max_ctime:
                     continue
