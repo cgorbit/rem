@@ -310,18 +310,22 @@ def queue_status(queue_name):
 
 @readonly_method
 @traced_rpc_method()
-def queue_list(queue_name, filter, name_regex=None, prefix=None, min_mtime=None,
-               max_mtime=None, user_labels=None):
+def queue_list(queue_name, filter, name_regex=None, prefix=None,
+               min_mtime=None, max_mtime=None,
+               min_ctime=None, max_ctime=None,
+               user_labels=None):
     name_regex = name_regex and re.compile(name_regex)
     q = _scheduler.rpc_get_queue(queue_name, create=False)
     return [
         pck.id for pck in q.filter_packets(
-                                filter=filter,
-                                name_regex=name_regex,
-                                prefix=prefix,
-                                min_mtime=min_mtime,
-                                max_mtime=max_mtime,
-                                user_labels=user_labels)]
+                                filter,
+                                name_regex,
+                                prefix,
+                                min_mtime,
+                                max_mtime,
+                                min_ctime,
+                                max_ctime,
+                                user_labels)]
 
 
 @readonly_method

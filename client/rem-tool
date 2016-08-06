@@ -205,6 +205,8 @@ class ListCommander(ICommander):
                                     self.options.prefix,
                                     self.options.min_mtime,
                                     self.options.max_mtime,
+                                    self.options.min_ctime,
+                                    self.options.max_ctime,
                                     self.options.labels)
             pckList = remclient.JobPacketInfo.multiupdate(pckList)
             for pck in sorted(pckList, key=lambda p : p.name):
@@ -397,8 +399,10 @@ def parse_args():
     parser.add_option("-F", "--filter", dest="filter", default="all", help="set targets filter (for listing packets in queue")
     parser.add_option("-N", "--name", dest="name", help="name regexp for filtering list of tags or packets")
     parser.add_option("-P", "--prefix", dest="prefix", help="name prefix for filtering list of tags or packets")
-    parser.add_option("--min-mtime")
-    parser.add_option("--max-mtime")
+    parser.add_option("--min-mtime", type="int")
+    parser.add_option("--max-mtime", type="int")
+    parser.add_option("--min-ctime", type="int")
+    parser.add_option("--max-ctime", type="int")
     parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
     parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
     parser.add_option("--all-deps", dest="show_all_dep_tags", action="store_const", const=True, help="Show all tags not only tags to wait")

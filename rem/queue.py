@@ -179,7 +179,9 @@ class QueueBase(Unpickable(
         return self.packets
 
     def filter_packets(self, filter=None, name_regex=None, prefix=None,
-                       min_mtime=None, max_mtime=None, user_labels=None):
+                       min_mtime=None, max_mtime=None,
+                       min_ctime=None, max_ctime=None,
+                       user_labels=None):
         if filter == 'all':
             filter = None
 
@@ -191,6 +193,7 @@ class QueueBase(Unpickable(
 
         if name_regex is None and prefix is None \
             and min_mtime is None and max_mtime is None \
+            and min_ctime is None and max_ctime is None \
             and not user_labels:
             return packets
 
@@ -208,6 +211,13 @@ class QueueBase(Unpickable(
                 mtime = history[-1][1] if history else None
                 if min_mtime is not None and mtime < min_mtime \
                     or max_mtime is not None and mtime > max_mtime:
+                    continue
+
+            if min_ctime is not None or max_ctime is not None:
+                history = pck.History()
+                ctime = history[0][1] if history else None
+                if min_ctime is not None and ctime < min_ctime \
+                    or max_ctime is not None and ctime > max_ctime:
                     continue
 
             if user_labels and (not pck.user_labels \

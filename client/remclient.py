@@ -179,7 +179,10 @@ class Queue(object):
         """возвращает краткую информацию о запущенных/выполненных задачах"""
         return self.proxy.queue_status(self.name)
 
-    def ListPackets(self, filter, name_regex=None, prefix=None, min_mtime=None, max_mtime=None, labels=None):
+    def ListPackets(self, filter, name_regex=None, prefix=None,
+                    min_mtime=None, max_mtime=None,
+                    min_ctime=None, max_ctime=None
+                    labels=None):
         """возвращает список пакетов из очереди, подпадающих под действие фильтра
         возможные значения парметра filter:
             all       - все пакеты
@@ -196,8 +199,10 @@ class Queue(object):
         ]
 
         args = [self.name, filter, name_regex, prefix]
-        if min_mtime is not None or max_mtime is not None or labels is not None:
-            args += [min_mtime, max_mtime, labels]
+        if min_mtime is not None or max_mtime is not None \
+           or min_ctime is not None or max_ctime is not None \
+           or labels is not None:
+            args += [min_mtime, max_mtime, min_ctime, max_ctime, labels]
         plist = self.proxy.queue_list(*args)
         return [JobPacketInfo(self.conn, pck_id) for pck_id in plist]
 
