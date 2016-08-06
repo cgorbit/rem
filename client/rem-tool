@@ -96,7 +96,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False):
         pck_id=color_if_need(pck.pck_id, EColor.Black, EFormat.Bold),
         pck_name=color_if_need(pck.name, EColor.Black, EFormat.Bold),
         pck_state_old=color_if_need(pck.state, state_color),
-        pck_state_new=getattr(pck, 'extended_state', [[None, None, None, []]])[0][3:],
+        pck_state_new=getattr(pck, 'extended_state', ['IS_-'])[0][3:],
         time_from_pck_name=color_if_need(time_descr, EColor.Black, EFormat.Italic),
         dep_tags=produce_dep_tags_str(pck, show_all_tags),
         pck_priority=pck.priority,
