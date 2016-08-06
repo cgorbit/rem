@@ -1,10 +1,19 @@
 #!/usr/bin/env python
+
+import os
+import sys
 import time
 import optparse
 import ConfigParser
 import json
+import re
+import datetime
 
 import remclient
+
+USE_COLOR = False
+TIMESTAMP_RE = re.compile('(?:[^0-9]|^)(1\d{9})(?:[^0-9]|$)')
+USE_NEW_OUTPUT_FORMAT = False
 
 class ICommander(object):
     def __init__(self, opt, action):
@@ -20,22 +29,113 @@ class ICommander(object):
         return self.conn.__exit__(*args)
 
 
-def print_pck_info(pck, extended=False):
-    workTime = pck.GetWorkingTime()
-    hd = "packet '%s':" % pck.pck_id
-    last_sandbox_task_id = getattr(pck, 'last_sandbox_task_id', None)
-    print "%s\tname=%s,state=%s;wait=%r,priority=%s;working_time=%s;result_tag=%s;last_update='%s';notify_emails=%s;is_sandbox=%s;last_sandbox_task_id=%s,labels=%s" \
-        % (hd, pck.name, pck.state, 
-           pck.wait, pck.priority, workTime, pck.result_tag, 
-           time.strftime("%Y/%m/%d-%H:%M:%S", time.localtime(pck.history[-1][1]) if pck.history else "none"),
-           getattr(pck, 'notify_emails', None),
-           getattr(pck, 'is_sandbox', False),
-           last_sandbox_task_id,
-           getattr(pck, 'labels', []) or [],
-          )
+class EFormat(object):
+    Bold = 1
+    Italic = 3
 
-    for job in pck.jobs:
-        if job.state == "working": print "%sexec_shell=%s" % (" " * len(hd), job.shell)
+class EColor(object):
+    Black = 30
+    Green = 32
+    Red = 31
+    Blue = 34
+    Yellow = 33
+
+
+def color_if_need(o, color, format=None):
+    if not USE_COLOR or color == EColor.Black and format is None:
+        return str(o)
+    return '\033[%02d;%02dm%s\033[00m' % (format if format is not None else 0, color, o)
+
+
+def get_pck_name_time_descr(name):
+    m = TIMESTAMP_RE.search(name)
+    if not m:
+        return ''
+    t = datetime.datetime.fromtimestamp(int(m.groups()[0]))
+    return t.isoformat()
+
+def produce_dep_tags_str(pck, show_all):
+    all_tags = sorted(pck.all_tags if show_all else pck.wait)
+
+    if not USE_COLOR:
+        return '[' + ', '.join(all_tags) + ']'
+
+    set_tags = set(all_tags) - set(pck.wait)
+
+    return '[' + \
+        ', '.join([
+            color_if_need(tag, EColor.Black if tag in set_tags else EColor.Blue)
+                for tag in all_tags
+        ]) \
+        + ']'
+
+def print_pck_info(pck, extended=False, show_all_tags=False):
+    workTime = pck.GetWorkingTime()
+    color_by_state = {
+        'SUCCESSFULL': EColor.Green,
+        'ERROR': EColor.Red,
+        'WAITING': EColor.Red,
+        'WORKABLE': EColor.Yellow,
+        'PENDING': EColor.Yellow,
+        'SUSPENDED': EColor.Blue,
+    }
+
+    state_color = color_by_state.get(pck.state, EColor.Black)
+
+    def color_by_state_if_need(o, format=None):
+        return color_if_need(o, state_color, format)
+
+    last_sandbox_task_id = getattr(pck, 'last_sandbox_task_id', None)
+    is_sandbox = getattr(pck, 'is_sandbox', False)
+
+    time_descr = get_pck_name_time_descr(pck.name)
+
+    history_mtime = datetime.datetime.fromtimestamp(int(pck.history[-1][1])) if pck.history else None
+
+    info_fields = dict(
+        pck_id=color_if_need(pck.pck_id, EColor.Black, EFormat.Bold),
+        pck_name=color_if_need(pck.name, EColor.Black, EFormat.Bold),
+        pck_state_old=color_if_need(pck.state, state_color),
+        pck_state_new=getattr(pck, 'extended_state', [[None, None, None, []]])[0][3:],
+        time_from_pck_name=color_if_need(time_descr, EColor.Black, EFormat.Italic),
+        dep_tags=produce_dep_tags_str(pck, show_all_tags),
+        pck_priority=pck.priority,
+        working_time=color_if_need(workTime, EColor.Yellow),
+        done_tag=pck.result_tag,
+        history_mtime_old=(history_mtime.strftime('%Y/%m/%d-%H:%M:%S') if history_mtime else None),
+        history_mtime=(history_mtime.isoformat() if history_mtime else None),
+        notify_emails=getattr(pck, 'notify_emails', None),
+        notify_emails_short=[email[:-15] if email.endswith('@yandex-team.ru') else email for email in (pck.notify_emails or [])],
+        is_sandbox=(color_if_need(is_sandbox, EColor.Red, EFormat.Italic) if is_sandbox else is_sandbox),
+        last_sandbox_task_id=last_sandbox_task_id,
+        user_labels=(getattr(pck, 'labels', []) or []),
+    )
+
+    if USE_NEW_OUTPUT_FORMAT:
+        format = "{pck_id}  {pck_state_old}/{pck_state_new}  {pck_name}  {time_from_pck_name}" \
+            "  wait={dep_tags},priority={pck_priority};working_time={working_time}" \
+            ";result_tag={done_tag};last_update='{history_mtime}'" \
+            ";notify_emails={notify_emails_short};is_sandbox={is_sandbox};" \
+            "last_sandbox_task={last_sandbox_task_id};labels={user_labels}"
+    else:
+        format = "packet '{pck_id}':\tname={pck_name},state={pck_state_old};wait={dep_tags}" \
+            ",priority={pck_priority};working_time={working_time}" \
+            ";result_tag={done_tag};last_update='{history_mtime_old}'" \
+            ";notify_emails={notify_emails};is_sandbox={is_sandbox}" \
+            ";last_sandbox_task={last_sandbox_task_id},labels={user_labels}"
+
+    print format.format(**info_fields)
+
+    def color_job_command(cmd):
+        return color_if_need(cmd, EColor.Black, EFormat.Bold)
+
+    if not USE_NEW_OUTPUT_FORMAT:
+        for job in pck.jobs:
+            if job.state == "working":
+                print "%sexec_shell=%s" % (
+                    " " * len(pck.pck_id),
+                    color_job_command(job.shell),
+                )
 
     if extended:
         last_error = getattr(pck, 'last_global_error', None)
@@ -51,15 +151,43 @@ def print_pck_info(pck, extended=False):
         if last_sandbox_task_id is not None:
             print '\nSandbox url: https://sandbox.yandex-team.ru/task/%d/view' % last_sandbox_task_id
 
-        print ''
+        #print '\nHistory:'
+        if USE_NEW_OUTPUT_FORMAT:
+            print
         for status, tstamp in pck.history:
             print "\t[%s] %s" % (time.ctime(tstamp), status)
 
-        print ''
+        color_by_job_state = {
+            'done': EColor.Green,
+            'errored': EColor.Red,
+            'working': EColor.Yellow,
+            'pending': EColor.Yellow,
+            'suspended': EColor.Blue,
+        }
+
         for job in pck.jobs:
-            print "[SUBJOB %s] id: %s,\tshell: %s" % (getattr(job, 'desc', ''), getattr(job, 'id', None), job.shell)
+            results_joined =  "\n".join(i.data for i in job.results)
+            matches = re.findall(r'\bstarted: (\d{4}/\d\d/\d\d \d\d:\d\d:\d\d)', results_joined)
+            job.last_start_time = int(datetime.datetime.strptime(matches[-1], '%Y/%m/%d %H:%M:%S').strftime('%s')) \
+                if matches else None
+
+        for job in sorted(pck.jobs, key=lambda j: j.last_start_time):
+            job_state_color = color_by_job_state.get(job.state, EColor.Black)
+
+            fields = dict(
+                descr=job.desc,
+                id=color_if_need(job.id, job_state_color),
+                command=color_job_command(job.shell),
+            )
+
+            format = "\n[{id}]\t{command}" \
+                if USE_NEW_OUTPUT_FORMAT \
+                else "[SUBJOB {descr}] id: {id},\tshell: {command}"
+
+            print format.format(**fields)
+
             if not getattr(job, 'wait_jobs', None):
-                print job.state
+                print color_if_need(job.state, job_state_color)
             else:
                 print "%s (waiting for jobs: %s)" % (job.state, ', '.join(str(j.id) for j in job.wait_jobs))
             print "\n".join(i.data.replace("\n", "\n\t") for i in job.results)
@@ -79,8 +207,8 @@ class ListCommander(ICommander):
                                     self.options.max_mtime,
                                     self.options.labels)
             pckList = remclient.JobPacketInfo.multiupdate(pckList)
-            for pck in pckList:
-                print_pck_info(pck)
+            for pck in sorted(pckList, key=lambda p : p.name):
+                print_pck_info(pck, show_all_tags=self.options.show_all_dep_tags)
         elif self.options.list_tags:
             for tag, value in sorted(self.conn.ListObjects("tags", self.options.name, self.options.prefix)):
                 print ("+" if value else "-"), tag
@@ -170,7 +298,7 @@ class StatusCommander(ICommander):
             print "queue '%s':\t%r" % (self.options.queue, q.Status())
         if self.options.packet:
             pck = self.conn.PacketInfo(self.options.packet)
-            print_pck_info(pck, extended=True)
+            print_pck_info(pck, extended=True, show_all_tags=self.options.show_all_dep_tags)
         if self.options.tag:
             tag = self.conn.Tag(self.options.tag)
             print "tag %s value: %s" % (tag.name, tag.Check())
@@ -221,13 +349,44 @@ def rem_url_from_cfg(path):
     cfg.read(path)
     return 'http://{}:{}/'.format(cfg.get('server', 'network_hostname'), cfg.get('server', 'port'))
 
+
+def init_color_mode(opt_color_mode):
+    class EColorMode(object):
+        Disabled = 0
+        Enabled  = 1
+        Auto     = 2
+
+    color_mode_map = {
+        'always':   EColorMode.Enabled,
+        'yes':      EColorMode.Enabled,
+        'force':    EColorMode.Enabled,
+
+        'never':    EColorMode.Disabled,
+        'none':     EColorMode.Disabled,
+        'no':       EColorMode.Disabled,
+
+        'auto':     EColorMode.Auto,
+        'tty':      EColorMode.Auto,
+        'if-tty':   EColorMode.Auto,
+    }
+
+    color_mode = color_mode_map.get(opt_color_mode)
+    if color_mode is None:
+        raise MalformedOption("Bad value for --color")
+
+    global USE_COLOR
+    USE_COLOR = bool(
+        color_mode == EColorMode.Enabled
+        or color_mode == EColorMode.Auto and os.isatty(1))
+
+
 def parse_args():
     descr = "%prog [options] action\npossible actions:"
     for action in sorted(_DISP_COMMANDS.keys()):
         descr += '\n    {:8} - {}'.format(action, _DISP_COMMANDS[action][1])
 
     parser = optparse.OptionParser(descr)
-    parser.add_option("-u", "--url", help="set REM server url")
+    parser.add_option("-u", "--url", help="set REM server url (also REM_TOOL_DEFAULT_SERVER environment variable)")
     parser.add_option('--rem-cfg', help='pathname of REM configuration file')
     parser.add_option("-q", "--queue", dest="queue", help="set target queue name")
     parser.add_option("-p", "--packet", dest="packet", help="set target packet id")
@@ -242,32 +401,49 @@ def parse_args():
     parser.add_option("--max-mtime")
     parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
     parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
+    parser.add_option("--all-deps", dest="show_all_dep_tags", action="store_const", const=True, help="Show all tags not only tags to wait")
     parser.add_option("-l", "--labels", dest="labels", action='append', help="")
+    parser.add_option("--port", help="")
+    parser.add_option("--color", dest='color_mode', default=os.environ.get('REM_TOOL_COLOR_MODE', 'auto'), help="color mode: auto (by default), never, always. Also REM_TOOL_COLOR_MODE environment variable")
+    parser.add_option("--new", action='store_true', dest='new_output_format', default=os.environ.get('REM_TOOL_NEW_OUTPUT_FORMAT', 'no').lower() in ['yes', '1'], help="New experimental output format (also REM_TOOL_NEW_OUTPUT_FORMAT environment variable)")
+
     opt, args = parser.parse_args()
 
     if not args:
         parser.error('need action')
+
     if len(args) > 1:
         parser.error('only one action at a time')
+
     action = args[0]
     if not action in _DISP_COMMANDS:
         parser.error('unknown action "{}", use one of: {}'.format(action, ', '.join(sorted(_DISP_COMMANDS.keys()))))
 
+    init_color_mode(opt.color_mode)
+
+    global USE_NEW_OUTPUT_FORMAT
+    USE_NEW_OUTPUT_FORMAT = opt.new_output_format
+
+    if opt.url and opt.rem_cfg:
+        parser.error("options -u (--url) and --rem-cfg are mutually exclusive")
+
+    default_rem_server = os.environ.get('REM_TOOL_DEFAULT_SERVER')
+
     if opt.url:
-        if opt.rem_cfg:
-            parser.error("options -u (--url) and --rem-cfg are mutually exclusive")
+        pass
+    elif opt.rem_cfg:
+        opt.url = rem_url_from_cfg(opt.rem_cfg)
+    elif opt.port:
+        opt.url = 'http://localhost:%d' % int(opt.port)
+    elif default_rem_server:
+        opt.url = default_rem_server
     else:
-        if opt.rem_cfg:
-            opt.url = rem_url_from_cfg(opt.rem_cfg)
-        else:
-            """
-            Leave intact for production.
-            For local/testing REM you could use one of "opt.url =" lines in
-            order to shorten command line of rem-tool call.
-            """
-            parser.error('specify -u (--url) or --rem-cfg')
-            # opt.url = 'http://localhost:8104/'
-            # opt.url = rem_url_from_cfg('./rem.cfg')
+        """
+        Leave intact for production.
+        For local/testing REM you could use one of "opt.url =" lines in
+        order to shorten command line of rem-tool call.
+        """
+        parser.error('specify -u (--url) or --rem-cfg or --port')
 
     return opt, action
 
