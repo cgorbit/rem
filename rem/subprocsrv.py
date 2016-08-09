@@ -48,7 +48,7 @@ class StopServiceResponseMessage(object):
 
 class NewTaskParamsMessage(object):
     def __init__(self, args, stdin=None, stdout=None, stderr=None, setpgrp=False,
-                 cwd=None, shell=False, use_pgrpguard=False):
+                 cwd=None, shell=False, use_pgrpguard=False, env_update=None):
         self.task_id = None
         self.args = args
         self.stdin = stdin # string or None
@@ -58,6 +58,7 @@ class NewTaskParamsMessage(object):
         self.cwd = cwd # filename or None
         self.shell = shell # filename or None
         self.use_pgrpguard = use_pgrpguard
+        self.env_update = env_update
 
 
 class SendSignalRequestMessage(object):
@@ -479,7 +480,12 @@ class _Server(object):
 
                 running_task.on_before_exec() # Must run after _modify_signals
 
-                os.execvp(args[0], args)
+                if task.env_update:
+                    env = os.environ.copy()
+                    env.update(task.env_update)
+                    os.execvpe(args[0], args, task.env_update)
+                else:
+                    os.execvp(args[0], args)
 
             except BaseException as e:
                 exit_code = 64

@@ -114,7 +114,7 @@ class SubprocsrvProcess(object):
     BEFORE_KILL_DELAY = _ProcessProxyBase.BEFORE_KILL_DELAY
 
     def __init__(self, runner, argv, stdin=None, stdout=None, stderr=None,
-                 setpgrp=False, cwd=None, shell=False, use_pgrpguard=False):
+                 setpgrp=False, cwd=None, shell=False, use_pgrpguard=False, env_update=None):
 
         self._signal_was_sent = False
 
@@ -126,7 +126,7 @@ class SubprocsrvProcess(object):
             stderr = stderr.name
 
         self._impl = runner.Popen(argv, stdin, stdout, stderr, setpgrp, cwd,
-                                  shell, use_pgrpguard)
+                                  shell, use_pgrpguard, env_update)
 
     @staticmethod
     def _send_signal_safe_inspect_result(f):

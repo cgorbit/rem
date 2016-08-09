@@ -262,6 +262,7 @@ class JobRunner(object):
                 stdin=stdin,
                 stderr=stderr,
                 cwd=ops.get_working_directory(),
+                env_update=[('REM_PACKET_ID', job.pck_id)],
             )
 
         except pgrpguard.Error as e:

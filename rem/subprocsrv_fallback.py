@@ -58,6 +58,11 @@ class _Popen(object):
             if stdin_content is not None \
             else file_or_none(task.stdin, 'r')
 
+        env = None
+        if task.env_update:
+            env = os.environ.copy()
+            env.update(task.env_update)
+
         with stdin_mgr as stdin:
             with file_or_none(task.stdout, 'w') as stdout:
                 with file_or_none(task.stderr, 'w') as stderr:
@@ -70,6 +75,7 @@ class _Popen(object):
                         cwd=task.cwd,
                         shell=task.shell,
                         close_fds=True, # as in _Server
+                        env=env,
                     )
                     #logging.error(repr(refl))
 
