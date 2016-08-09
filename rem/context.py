@@ -1,6 +1,5 @@
 import os
 from ConfigParser import ConfigParser, NoOptionError
-import rem_logging
 from rem.common import parse_network_address
 import rem.sandbox
 
@@ -135,8 +134,8 @@ class Context(object):
         self.network_topology = None if self.disable_remote_tags \
             else config.safe_get("server", "network_topology")
 
-        self.network_name = None if self.disable_remote_tags \
-            else config.safe_get("server", "network_hostname")
+        # 1. ConnectionManager, 2. email subjects
+        self.network_name = config.safe_get("server", "network_hostname", None)
 
         if not self.disable_remote_tags and not (
             self.system_port and self.remote_tags_db_file
