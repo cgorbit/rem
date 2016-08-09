@@ -181,7 +181,7 @@ class Queue(object):
 
     def ListPackets(self, filter, name_regex=None, prefix=None,
                     min_mtime=None, max_mtime=None,
-                    min_ctime=None, max_ctime=None
+                    min_ctime=None, max_ctime=None,
                     labels=None):
         """возвращает список пакетов из очереди, подпадающих под действие фильтра
         возможные значения парметра filter:
