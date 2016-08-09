@@ -483,7 +483,7 @@ class _Server(object):
                 if task.env_update:
                     env = os.environ.copy()
                     env.update(task.env_update)
-                    os.execvpe(args[0], args, task.env_update)
+                    os.execvpe(args[0], args, env)
                 else:
                     os.execvp(args[0], args)
 

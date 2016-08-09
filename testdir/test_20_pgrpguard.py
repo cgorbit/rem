@@ -120,6 +120,11 @@ else:
 
     @with_spare_file_desriptors
     def testExitStatuses(self):
+        start_time = str(time.time())
+
+        env = os.environ.copy()
+        env.update([('START_TIME', start_time)])
+
         def run(cmd):
             p = GuardedProcessCWDWrapper(
                 cmd,
@@ -127,6 +132,7 @@ else:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=env,
             )
             out, err = p.communicate('INPUT')
             return p.returncode, out, err
@@ -139,6 +145,11 @@ else:
         self.assertEqual(
             run(['sh', '-c', 'echo -n Out; echo -n Err >&2; exit 5']),
             (5, 'Out', 'Err')
+        )
+
+        self.assertEqual(
+            run(['sh', '-c', 'echo -n $START_TIME']),
+            (0, start_time, '')
         )
 
         self.assertEqual(

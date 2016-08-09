@@ -35,29 +35,31 @@ class T19(unittest.TestCase):
         self._test_common(runner)
 
     def _do_test_common(self, runner, use_pgrpguard=False, use_stdin_content=False):
-        msg = str(time.time())
+        start_time = str(time.time())
+        stdin_msg = start_time + '\n'
 
         with NamedTemporaryFile('w') as stdin:
             with NamedTemporaryFile('r') as stderr:
                 with NamedTemporaryFile('r') as stdout:
-                    stdin.write(msg)
+                    stdin.write(stdin_msg)
                     stdin.flush()
 
                     p = runner.Popen(
-                        'cat; pwd >&2; exit 3',
+                        'cat; echo $START_TIME; pwd >&2; exit 3',
                         cwd='/proc',
                         shell=True,
                         setpgrp=False,
                         stdin=stdin.name if not use_stdin_content else None,
-                        stdin_content=msg if use_stdin_content else None,
+                        stdin_content=stdin_msg if use_stdin_content else None,
                         stdout=stdout.name,
                         stderr=stderr.name,
-                        use_pgrpguard=use_pgrpguard
+                        use_pgrpguard=use_pgrpguard,
+                        env_update=[('START_TIME', start_time)],
                     )
 
                     self.assertEqual(p.wait(), 3)
 
-                    self.assertEqual(stdout.read(), msg)
+                    self.assertEqual(stdout.read(), stdin_msg + start_time + '\n')
                     self.assertEqual(stderr.read(), '/proc\n')
 
     def _test_common(self, runner, use_pgrpguard=False):

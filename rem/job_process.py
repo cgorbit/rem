@@ -45,6 +45,14 @@ def _get_process_state(pid):
                 return line.rstrip('\n').split('\t')[1][0]
 
 
+def _extrapolate_env_update(kwargs):
+    env_update = kwargs.pop('env_update', None)
+    if env_update:
+        env = os.environ.copy()
+        env.update(env_update)
+        kwargs['env'] = env
+
+
 class DefaultProcess(_ProcessProxyBase):
 
     # If process terminated by itself, we will not send SIGKILL to group
@@ -53,6 +61,7 @@ class DefaultProcess(_ProcessProxyBase):
     def __init__(self, *args, **kwargs):
         _ProcessProxyBase.__init__(self)
         kwargs['preexec_fn'] = os.setpgrp
+        _extrapolate_env_update(kwargs)
         self._impl = subprocess.Popen(*args, **kwargs)
 
     def _send_term_to_process(self):
@@ -85,6 +94,7 @@ class PgrpguardProcess(_ProcessProxyBase):
 
     def __init__(self, *args, **kwargs):
         _ProcessProxyBase.__init__(self)
+        _extrapolate_env_update(kwargs)
         self._impl = pgrpguard.ProcessGroupGuard(*args, **kwargs)
 
     def _send_term_to_process(self):

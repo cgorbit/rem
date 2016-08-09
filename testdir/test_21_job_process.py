@@ -38,7 +38,8 @@ class T21(unittest.TestCase):
         pgrpguard_binary = 'pgrpguard' if use_pgrpguard else None
         start_process = rem.job.create_job_runner(runner, pgrpguard_binary)
 
-        msg = str(time.time())
+        start_time = str(time.time())
+        msg = start_time + '\n'
 
         with NamedTemporaryFile('w') as parent_stdin:
             with NamedTemporaryFile('r') as parent_stderr:
@@ -50,11 +51,12 @@ class T21(unittest.TestCase):
                         with open(parent_stdout.name, 'w') as stdout:
                             with open(parent_stderr.name, 'w') as stderr:
                                 p = start_process(
-                                    ['sh', '-c', 'cat; pwd >&2; sleep 3; exit 3'],
+                                    ['sh', '-c', 'cat; echo $START_TIME; pwd >&2; sleep 3; exit 3'],
                                     cwd='/proc',
                                     stdin=stdin,
                                     stdout=stdout,
                                     stderr=stderr,
+                                    env_update=[('START_TIME', start_time)],
                                 )
 
                     time.sleep(1)
@@ -71,6 +73,6 @@ class T21(unittest.TestCase):
 
                     self.assertEqual(p.was_signal_sent(), do_terminate)
 
-                    self.assertEqual(parent_stdout.read(), msg)
+                    self.assertEqual(parent_stdout.read(), msg * 2)
                     self.assertEqual(parent_stderr.read(), '/proc\n')
 

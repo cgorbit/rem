@@ -187,19 +187,12 @@ class ProcessGroupGuard(object):
 
         self._result = None
 
-        env = kwargs.pop('env', None)
-        env_update = kwargs.pop('env_update', None)
-        if env_update:
-            env = os.environ.copy()
-            env.update(env_update)
-
         try:
             self._proc = _Popen(
                 report_pipe[1],
                 [self._wrapper_filename, str(report_pipe[1])] + argv,
                 *args,
-                **kwargs,
-                env=env,
+                **kwargs
             )
 
         except Exception:
