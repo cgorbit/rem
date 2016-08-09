@@ -8,11 +8,18 @@ import sys
 import tempfile
 import unittest
 import json
-from ConfigParser import ConfigParser
+from ConfigParser import ConfigParser, NoOptionError
 
 sys.path.insert(0, os.path.join(os.path.abspath(os.path.dirname(__file__)), "client"))
 import remclient
 import testdir
+
+
+def safe_get_int(conf, section, name, default=None):
+    try:
+        return conf.getint(section, name)
+    except NoOptionError:
+        return default
 
 
 class ClientInfo(object):
@@ -28,11 +35,17 @@ class ClientInfo(object):
                 shutil.rmtree(tmp_dir)
         self.binDir = cp.get('store', 'binary_dir')
         self.url = "http://%s:%d" % (hostname, cp.getint("server", "port"))
-        self.admin_url = "http://%s:%d" % (hostname, cp.getint("server", "system_port"))
         self.readonly_url = "http://%s:%d" % (hostname, cp.getint("server", "readonly_port"))
         self.connector = remclient.Connector(self.url, verbose=True, packet_name_policy=remclient.IGNORE_DUPLICATE_NAMES_POLICY)
-        self.admin_connector = remclient.AdminConnector(self.admin_url, verbose=True)
         self.readonly_connector = remclient.Connector(self.readonly_url, verbose=True, packet_name_policy=remclient.IGNORE_DUPLICATE_NAMES_POLICY)
+
+        system_port = safe_get_int(cp, "server", "system_port")
+        if system_port:
+            self.admin_url = "http://%s:%d" % (hostname, system_port)
+            self.admin_connector = remclient.AdminConnector(self.admin_url, verbose=True)
+        else:
+            self.admin_url = None
+            self.admin_connector = None
 
     def LoadConfiguration(self, config_path, tmpdir):
         if config_path.startswith("svn+ssh://"):
