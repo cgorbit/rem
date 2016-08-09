@@ -189,15 +189,11 @@ def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPL
 
 
 @traced_rpc_method("info")
-def pck_moveto_queue(pck_id, src_queue, dst_queue):
+def pck_moveto_queue(pck_id, _, dst_queue):
     pck = _scheduler.GetPacket(pck_id)
-    if pck is not None:
-        pck.rpc_move_to_queue(
-            _scheduler.rpc_get_queue(src_queue),
-            _scheduler.rpc_get_queue(dst_queue)
-        )
-        return
-    raise MakeNonExistedPacketException(pck_id)
+    if pck is None:
+        raise MakeNonExistedPacketException(pck_id)
+    pck.rpc_move_to_queue(_scheduler.rpc_get_queue(dst_queue))
 
 
 @traced_rpc_method("info")

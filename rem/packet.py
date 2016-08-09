@@ -1003,12 +1003,12 @@ class PacketBase(Unpickable(
         self._graph_executor = self._create_job_graph_executor()
         self._graph_executor.init() # Circular references
 
-    def _move_to_queue(self, src_queue, dst_queue, from_rpc=False):
+    def _move_to_queue(self, dst_queue, from_rpc=False):
         with self.lock:
             self._check_can_move_beetwen_queues()
 
-            if src_queue:
-                src_queue._detach_packet(self)
+            if self.queue:
+                self.queue._detach_packet(self)
 
             if dst_queue:
                 # after _create_job_graph_executor() because of .has_pending_jobs()
@@ -1016,7 +1016,7 @@ class PacketBase(Unpickable(
             else:
                 self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
-    def rpc_move_to_queue(self, src_queue, dst_queue):
+    def rpc_move_to_queue(self, dst_queue):
         with self.lock:
             if not self.queue:
                 raise RpcUserError(RuntimeError("Packet not yet attached to queue to call move"))
@@ -1027,10 +1027,10 @@ class PacketBase(Unpickable(
             if not self._graph_executor.is_null():
                 raise RpcUserError(RuntimeError("Can't move packets with running jobs"))
 
-            if src_queue == dst_queue:
+            if self.queue == dst_queue:
                 return
 
-            self._move_to_queue(src_queue, dst_queue, from_rpc=True)
+            self._move_to_queue(dst_queue, from_rpc=True)
 
     def _attach_to_queue(self, queue):
         with self.lock:
@@ -1040,7 +1040,7 @@ class PacketBase(Unpickable(
             if self.destroying:
                 raise RpcUserError(RuntimeError("Packet is destroying"))
 
-            self._move_to_queue(None, queue)
+            self._move_to_queue(queue)
             self._share_files_as_resource_if_need()
 
             self._update_state()

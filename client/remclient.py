@@ -421,6 +421,7 @@ class JobPacketInfo(object):
         return False
 
     def MoveToQueue(self, src_queue, dst_queue):
+        """параметр src_queue игнорируется"""
         return self.proxy.pck_moveto_queue(self.pck_id, src_queue, dst_queue)
 
     def Delete(self):
