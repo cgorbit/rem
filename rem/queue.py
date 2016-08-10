@@ -236,6 +236,16 @@ class QueueBase(Unpickable(
     def Status(self):
         status = {name: len(queue) for name, queue in self.by_user_state.items()}
 
+        legacy_naming = {
+            'waiting': 'waited',
+            'error': 'errored',
+            'workable': 'working',
+            'successfull': 'worked',
+        }
+
+        for new, old in legacy_naming.items():
+            status[old] = status[new]
+
         status.update({
             "alive": self.is_alive(),
             "working-limit": self.working_limit,
