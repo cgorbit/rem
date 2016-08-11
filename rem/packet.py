@@ -12,7 +12,7 @@ import re
 #import cPickle as pickle
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
-from common import BinaryFile, PickableRLock, Unpickable, safeStringEncode, as_rpc_user_error, RpcUserError
+from common import BinaryFile, PickableRLock, Unpickable, RpcUserError
 from job import Job, JobRunner
 import osspec
 import messages
@@ -447,7 +447,7 @@ class PacketBase(Unpickable(
             if self.directory and os.path.isdir(self.directory):
                 try:
                     shutil.rmtree(self.directory, onerror=None)
-                except Exception, e:
+                except Exception:
                     logging.exception("Packet %s release place error", self.id)
 
             self.directory = None
@@ -487,7 +487,7 @@ class PacketBase(Unpickable(
             if self.directory:
                 try:
                     files = os.listdir(self.directory)
-                except Exception, e:
+                except Exception:
                     logging.exception("directory %s listing error", self.directory)
         return files
 
@@ -654,7 +654,7 @@ class PacketBase(Unpickable(
 
         try:
             self._try_recover_after_backup_loading(ctx)
-        except Exception as e:
+        except Exception:
             logging.exception("Failed to recover packet %s" % descr)
             self._mark_as_failed_on_recovery()
 
@@ -1435,3 +1435,4 @@ class SandboxPacket(PacketBase):
 
 
 from rem.packet_legacy import JobPacket
+JobPacket
