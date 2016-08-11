@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
-import os
 import time
 import threading
 
-from common import Unpickable, safeStringEncode, RpcUserError
+from common import Unpickable, safeStringEncode
 import delayed_executor
 from rem_logging import logger as logging
 import osspec

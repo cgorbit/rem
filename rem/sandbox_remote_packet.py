@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-import os
-import sys
 import time
 import base64
 import cPickle as pickle
@@ -8,12 +6,10 @@ from rem.xmlrpc import AsyncXMLRPCServer2, ServerProxy as XMLRPCServerProxy, \
                        is_xmlrpc_exception, traced_rpc_method
 import errno
 import socket
-import xmlrpclib
 import json
 
 import requests
 import rem.delayed_executor as delayed_executor
-from rem.profile import ProfiledThread
 import sandbox_packet
 import rem.sandbox as sandbox
 from rem.sandbox_tasks import TaskStateGroups, SandboxTaskStateAwaiter

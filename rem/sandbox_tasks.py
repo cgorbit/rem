@@ -100,10 +100,10 @@ class SandboxTaskStateAwaiter(object):
         try:
             statuses = self._sandbox.list_task_statuses(running_task_ids)
 
-        except (sandbox.NetworkError, sandbox.ServerInternalError) as e:
+        except (sandbox.NetworkError, sandbox.ServerInternalError):
             pass
 
-        except Exception as e:
+        except Exception:
             logging.exception("Can't fetch task statuses from Sandbox")
 
         else:

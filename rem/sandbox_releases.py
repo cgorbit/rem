@@ -81,7 +81,7 @@ class SandboxReleasesResolver(object):
         try:
             self._do_do_resolve(rel)
         # TODO Fail on permanent errors
-        except Exception as e:
+        except Exception:
             #logging.warning('Failed to list_latest_releases for %s: %s' % (rel.request, e))
             logging.exception('Failed to list_latest_releases for %s' % (rel.request,))
             delayed_executor.schedule(lambda : self._resolve(rel), timeout=self._RETRY_INTERVAL)
