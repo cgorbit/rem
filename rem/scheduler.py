@@ -611,11 +611,13 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 len(packets_after_2 - packets_before),
             ))
 
+            wrong_state_count = 0
             for q in sdict['qRef'].values():
                 for sub_name, packets in q.by_user_state.items():
                     for pck in packets:
                         if pck._repr_state.lower() != sub_name:
-                            print pck
+                            wrong_state_count += 1
+            logging.debug('++ after_conversion_wrong_sub_state %d' % wrong_state_count)
 
             return sdict, registrator, packets_before, packets_after, packets_after_2
 
