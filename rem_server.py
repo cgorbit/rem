@@ -6,16 +6,13 @@ import sys
 import re
 import select
 import signal
-import socket
 import time
 import threading
 from SimpleXMLRPCServer import SimpleXMLRPCRequestHandler
 import xmlrpclib
 import datetime
 import multiprocessing
-import signal
 import argparse
-import tempfile
 import shutil
 import subprocess
 
@@ -27,7 +24,7 @@ from rem.workers import ThreadJobWorker, TimeTicker, XMLRPCWorker
 from rem.xmlrpc import AsyncXMLRPCServer
 from rem.profile import ProfiledThread
 from rem.callbacks import ETagEvent
-from rem.common import as_rpc_user_error, RpcUserError, NamedTemporaryDir, traced_rpc_method, CheckEmailAddress
+from rem.common import RpcUserError, NamedTemporaryDir, traced_rpc_method, CheckEmailAddress
 import rem.common
 import rem.fork_locking
 from rem.rem_logging import logger as logging
@@ -39,7 +36,7 @@ import rem.subprocsrv_fallback
 import rem.job
 import rem.delayed_executor as delayed_executor
 import rem.resource_sharing
-from rem.queue import LocalQueue, SandboxQueue
+from rem.queue import SandboxQueue
 from rem.action_queue import ActionQueue
 from rem.sandbox_releases import SandboxReleasesResolver
 
@@ -975,12 +972,12 @@ def create_process_runners(ctx):
     if ctx.subprocsrv_runner_count:
         runner = subprocsrv.create_runner(
             pool_size=ctx.subprocsrv_runner_count,
-            pgrpguard_binary=ctx.pgrpguard_binary
+            pgrpguard_binary=pgrpguard_binary
         )
 
     ctx._subprocsrv_runner = runner
 
-    ctx.run_job = rem.job.create_job_runner(runner, ctx.pgrpguard_binary)
+    ctx.run_job = rem.job.create_job_runner(runner, pgrpguard_binary)
 
     def create_aux_runner():
         ordinal_runner = rem.subprocsrv_fallback.Runner()
