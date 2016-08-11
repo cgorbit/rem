@@ -31,6 +31,15 @@ class ByUserState(Unpickable(
     def __setitem__(self, key, val):
         self.__dict__[key] = val
 
+    # for debug
+    def _list_all(self):
+        return list(self.pending) \
+             + list(self.workable) \
+             + list(self.successfull) \
+             + list(self.error) \
+             + list(self.suspended) \
+             + list(self.waiting)
+
 
 class QueueBase(Unpickable(
                        packets=set,
@@ -268,11 +277,6 @@ class QueueBase(Unpickable(
         by_user_state = self.by_user_state
         d = by_user_state.__dict__
 
-        d['waiting'] = d.pop('waited')
-        d['error'] = d.pop('errored')
-        d['workable'] = d.pop('working')
-        d['successfull'] = d.pop('worked')
-
         self.packets = set(
             itertools.chain(
                 by_user_state.pending,
@@ -284,13 +288,13 @@ class QueueBase(Unpickable(
             )
         )
 
-
 class LocalQueue(QueueBase):
     _PACKET_CLASS = LocalPacket
 
     def __repr__(self):
-        return '<LocalQueue %s; work=%d; pend=%d; lim=%s at 0x%x>' % (
+        return '<LocalQueue %s; total=%d; work=%d; pend=%d; lim=%s at 0x%x>' % (
             self.name,
+            len(self.packets),
             len(self.working_jobs),
             len(self.packets_with_pending_jobs),
             self.working_limit,
@@ -378,8 +382,9 @@ class SandboxQueue(QueueBase):
     _PACKET_CLASS = SandboxPacket
 
     def __repr__(self):
-        return '<SandboxQueue %s; work=%d; pend=%d; lim=%s at 0x%x>' % (
+        return '<SandboxQueue %s; total=%d; work=%d; pend=%d; lim=%s at 0x%x>' % (
             self.name,
+            len(self.packets),
             len(self.working_packets),
             len(self.pending_packets),
             self.working_limit,

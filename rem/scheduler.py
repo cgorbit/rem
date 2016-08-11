@@ -1,5 +1,4 @@
 from __future__ import with_statement
-import shutil
 import time
 import os
 import sys
@@ -11,14 +10,13 @@ import common
 from Queue import Empty, Queue as ThreadSafeQueue
 import cStringIO
 import StringIO
-import itertools
 import threading
 
 import fork_locking
 from job import FuncJob, SerializableFunction
 from common import Unpickable, PickableLock, PickableRLock, FakeObjectRegistrator, ObjectRegistrator, nullobject, copy_ctor_or_none
 from connmanager import ConnectionManager
-from packet import LocalPacket, PacketBase, PacketState, PacketCustomLogic
+from packet import PacketState, PacketCustomLogic
 import packet
 import packet_legacy
 from queue import LocalQueue, SandboxQueue, QueueBase
@@ -534,7 +532,8 @@ class Scheduler(Unpickable(lock=PickableRLock,
         return nullobject, ()
 
     @classmethod
-    def Deserialize(cls, stream, additional_objects_registrator=FakeObjectRegistrator()):
+    def Deserialize(cls, stream, additional_objects_registrator=FakeObjectRegistrator(),
+                    check=False):
         import packet
         import cPickle as pickle
 
@@ -585,14 +584,47 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         registrator.finalize()
 
+        def produce_packets_state(list_packets):
+            def norm_state(state):
+                return 'WORKABLE/PENDING' if state == 'WORKABLE' or state == 'PENDING' \
+                    else state
+
+            return set(
+                (q.name, pck.id, pck.name, norm_state(getattr(pck, '_repr_state', pck.state)))
+                    for q in sdict['qRef'].values()
+                        for pck in list_packets(q)
+            )
+
+        if check:
+            packets_before = produce_packets_state(lambda q: q.list_all_packets())
+
         cls._convert_backup(format_version, sdict, registrator)
+
+        if check:
+            packets_after = produce_packets_state(lambda q: q.list_all_packets())
+            packets_after_2 = produce_packets_state(lambda q: q.by_user_state._list_all())
+
+            logging.debug('++ after_conversion_diff_len = %d/%d %d/%d' % (
+                len(packets_before - packets_after),
+                len(packets_after  - packets_before),
+                len(packets_before - packets_after_2),
+                len(packets_after_2 - packets_before),
+            ))
+
+            for q in sdict['qRef'].values():
+                for sub_name, packets in q.by_user_state.items():
+                    for pck in packets:
+                        if pck._repr_state.lower() != sub_name:
+                            print pck
+
+            return sdict, registrator, packets_before, packets_after, packets_after_2
 
         return sdict, registrator
 
     @classmethod
-    def DeserializeFile(cls, filename, registrator=FakeObjectRegistrator()):
+    def DeserializeFile(cls, filename, registrator=FakeObjectRegistrator(), check=False):
         with open(filename, 'r') as stream:
-            return cls.Deserialize(stream, registrator)
+            return cls.Deserialize(stream, registrator, check)
 
     def LoadBackup(self, filename, restorer=None, restore_tags_only=False):
         with self.lock:
@@ -603,7 +635,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 restorer(sdict, registrator)
 
             qRef = sdict.pop("qRef")
-            prevWatcher = sdict.pop("schedWatcher", None) # from old backups
+            #prevWatcher = sdict.pop("schedWatcher", None) # from old backups
 
             self.__setstate__(sdict)
 
@@ -639,17 +671,18 @@ class Scheduler(Unpickable(lock=PickableRLock,
     @classmethod
     @common.logged()
     def _convert_backup_to_v2(cls, sdict, registrator):
-        for q in registrator.queues:
-            q.convert_to_v2()
-
-        for pck in registrator.packets:
-            pck.convert_to_v2()
+        # XXX Actually only v1->v3 conversion is valid (sorry)
+        pass
 
     @classmethod
     @common.logged()
     def _convert_backup_to_v3(cls, sdict, registrator):
         for q in registrator.queues:
+            q.convert_to_v2()
             q.convert_to_v3()
+
+        for pck in registrator.packets:
+            pck.convert_to_v2()
 
         for pck in registrator.packets:
             pck.user_labels = None

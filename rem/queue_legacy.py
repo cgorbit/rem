@@ -3,6 +3,7 @@ from rem.scheduler import Scheduler
 from rem.common import PackSet, TimedSet, PickableRLock, emptyset, Unpickable
 from rem.callbacks import CallbackHolder, ICallbackAcceptor
 
+
 class Queue(Unpickable(pending=PackSet.create,
                        working=emptyset,
                        worked=TimedSet.create,
@@ -40,8 +41,15 @@ class Queue(Unpickable(pending=PackSet.create,
         by_user_state = self.by_user_state = ByUserState()
 
         # XXX This is wrong, but all packets will be relocated later
-        for sub in ['pending', 'working', 'worked', 'errored', 'suspended', 'waited']:
-            by_user_state.__dict__[sub] = dikt.pop(sub)
+        for repl in ['pending',
+                    ('working', 'workable'),
+                    ('worked', 'successfull'),
+                    ('errored', 'error'),
+                    'suspended',
+                    ('waited', 'waiting')
+                ]:
+            src, dst = repl if isinstance(repl, tuple) else (repl, repl)
+            by_user_state.__dict__[dst] = dikt.pop(src)
 
         self.is_suspended = dikt.pop('isSuspended')
         self.working_limit = dikt.pop('workingLimit')
@@ -56,3 +64,9 @@ class Queue(Unpickable(pending=PackSet.create,
         dikt.pop('nonpersistent_callbacks', None)
 
         self.__class__ = LocalQueue
+
+    # for before convert checks
+    def list_all_packets(self):
+        import itertools
+        view_by_order = "pending", "waited", "errored", "suspended", "worked", "noninitialized"
+        return itertools.chain(*(getattr(self, sub) for sub in view_by_order))
