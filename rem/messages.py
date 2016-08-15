@@ -28,22 +28,34 @@ class IMessageHelper(object):
     def make(self):
         return (self.subject(), self.message())
 
+    def subject(self):
+        return "[REM@{server_name}] {level} {pck_id} {pck_name}: {subject}".format(
+            pck_name=self.pck.name,
+            pck_id=self.pck.id,
+            server_name=self.ctx.network_name,
+            subject=self._get_subject(),
+            level=self.ERROR_LEVEL,
+        )
+
+
 class PacketExecutionError(IMessageHelper):
+    ERROR_LEVEL = 'ERROR'
+
     def __init__(self, ctx, pck):
         self.pck = pck
         self.ctx = ctx
 
-    def subject(self):
-# FIXME Use pck.state
-        reason = "packet recovering error" if self.pck.is_broken \
+    def _get_subject(self):
+        return "packet recovering error" if self.pck.is_broken \
             else "packet execution error"
-        return "[REM@%(sname)s] Task '%(pname)s': %(reason)s" % {"pname": self.pck.name, "reason": reason,
-                                                                 "sname": self.ctx.network_name}
 
     def message(self):
         mbuf = cStringIO.StringIO()
 
-        print >> mbuf, "Packet '%(pname)s' has been aborted because of some error states" % {"pname": self.pck.name}
+        print >> mbuf, "Packet {pck_id}/{pck_name} has been aborted because of some error states".format(
+            pck_id=self.pck.id,
+            pck_name=self.pck.name,
+        )
         p_state = self.pck.Status()
         jobs = p_state.get("jobs", [])
         for job in jobs:
@@ -57,17 +69,22 @@ class PacketExecutionError(IMessageHelper):
 
 
 class EmergencyError(IMessageHelper):
+    ERROR_LEVEL = 'ERROR'
+
     def __init__(self, ctx, pck):
         self.pck = pck
         self.ctx = ctx
 
-    def subject(self):
-        return "[REM@%(sname)s] Task '%(pname)s'(%(pid)s) has been marked to delete by EMERGENCY situation" \
-               % {"pname": self.pck.name, "pid": self.pck.id, "sname": self.ctx.network_name}
+    def _get_subject(self):
+        return "has been marked to delete by EMERGENCY situation"
 
     def message(self):
         mbuf = cStringIO.StringIO()
-        print >> mbuf, "Packet '%(pname)s' has been marked to delete by EMERGENCY situation" % {"pname": self.pck.name}
+        print >> mbuf, "Packet {pck_id}/{pck_name} has been marked to delete by EMERGENCY situation".format(
+            pck_id=self.pck.id,
+            pck_name=self.pck.name,
+        )
+        p_state = self.pck.Status()
         print >> mbuf, "Extended packet status:"
         print >> mbuf, "packet id:", self.pck.id
         p_state = self.pck.Status()
@@ -84,18 +101,22 @@ class EmergencyError(IMessageHelper):
 
 
 class TooLongWorkingWarning(IMessageHelper):
+    ERROR_LEVEL = 'WARN'
+
     def __init__(self, ctx, pck, job):
         self.pck = pck
         self.job = job
         self.ctx = ctx
 
-    def subject(self):
-        return "[REM@%(sname)s] Task '%(pname)s'(%(pid)s) now working too long, job id: %(jobid)s " \
-               % {"pname": self.pck.name, "pid": self.pck.id, 'sname': self.ctx.network_name, 'jobid': self.job.id}
+    def _get_subject(self):
+        return "now working too long, job id: %s" % self.job.id
 
     def message(self):
         mbuf = cStringIO.StringIO()
-        print >> mbuf, "Packet '%(pname)s' has job working too long" % {"pname": self.pck.name}
+        print >> mbuf, "Packet {pck_id}/{pck_name} has job working too long".format(
+            pck_id=self.pck.id,
+            pck_name=self.pck.name,
+        )
         print >> mbuf, "packet id:", self.pck.id
         print >> mbuf, "job id:", self.job.id
         print >> mbuf, "job wait limit:", self.job.notify_timeout
@@ -115,6 +136,7 @@ class TooLongWorkingWarning(IMessageHelper):
 
 
 class ResetNotification(IMessageHelper):
+    ERROR_LEVEL = 'INFO'
 
     def __init__(self, ctx, pck, tag_name, comment, will_reset):
         self.pck = pck
@@ -123,11 +145,9 @@ class ResetNotification(IMessageHelper):
         self.tag_name = tag_name
         self.will_reset = will_reset
 
-    def subject(self):
-        return "[REM@{host}] packet '{pck_name}' {inter} reset by {tag_name}".format(
+    def _get_subject(self):
+        return "{inter} reset by {tag_name}".format(
             inter='will be' if self.will_reset else 'will not be',
-            host=self.ctx.network_name,
-            pck_name=self.pck.name,
             tag_name=self.tag_name
         )
 
@@ -136,9 +156,9 @@ class ResetNotification(IMessageHelper):
         print >>mbuf, "Tag '%s' was reset." % self.tag_name
         print >>mbuf, "Reset reason:", utf8ifunicode(self.reason)
         print >>mbuf
-        print >>mbuf, "You packet {name} ({id}) {action}".format(
-            id=self.pck.id,
-            name=self.pck.name,
+        print >>mbuf, "You packet {pck_id}/{pck_name} {action}".format(
+            pck_id=self.pck.id,
+            pck_name=self.pck.name,
             action='will be reset' if self.will_reset \
                 else "will not be reset, because it's not resetable"
         )
