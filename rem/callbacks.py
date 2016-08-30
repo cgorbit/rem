@@ -78,7 +78,7 @@ class CallbackHolder(UnpickableTuple(callbacks=weakref.WeakKeyDictionary,
     def __getstate__(self):
         sdict = self.__dict__.copy() \
             if hasattr(self, '__dict__') \
-            else {key: getattr(self, key) for key in self.__slots__}
+            else {key: getattr(self, key, None) for key in self.__slots__} # FIXME XXX _min_release_time
 
         if 'callbacks' not in sdict:
             raise RuntimeError(str(self))
