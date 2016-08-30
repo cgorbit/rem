@@ -1,6 +1,6 @@
 import weakref
 import itertools
-from common import Unpickable
+from common import Unpickable, UnpickableTuple
 from rem_logging import logger as logging
 
 class ETagEvent(object):
@@ -15,6 +15,9 @@ TagEventName = {
 }
 
 class ICallbackAcceptor(object):
+    __slots__ = []
+    _slots = []
+
     def AcceptCallback(self, reference, event):
         methName = "On" + event.title().replace("_", "")
         fn = getattr(self, methName, None)
@@ -24,8 +27,10 @@ class ICallbackAcceptor(object):
             logging.warning("can't invoke %s method for object %s", methName, self)
 
 
-class CallbackHolder(Unpickable(callbacks=weakref.WeakKeyDictionary,
-                                nonpersistent_callbacks=weakref.WeakKeyDictionary)):
+class CallbackHolder(UnpickableTuple(callbacks=weakref.WeakKeyDictionary,
+                                     nonpersistent_callbacks=weakref.WeakKeyDictionary)):
+    __slots__ = []
+
     def AddCallbackListener(self, obj):
         if not isinstance(obj, ICallbackAcceptor):
             raise RuntimeError("callback %r\tcan't use object %r as acceptor" % (self, obj))
@@ -71,16 +76,26 @@ class CallbackHolder(Unpickable(callbacks=weakref.WeakKeyDictionary,
         return len(self.callbacks)
 
     def __getstate__(self):
-        sdict = self.__dict__.copy()
+        sdict = self.__dict__.copy() \
+            if hasattr(self, '__dict__') \
+            else {key: getattr(self, key) for key in self.__slots__}
+
+        if 'callbacks' not in sdict:
+            raise RuntimeError(str(self))
+
         sdict['callbacks'] = dict(sdict['callbacks'].items())
         del sdict["nonpersistent_callbacks"]
         return sdict
 
 
 class TagBase(CallbackHolder):
+    _slots = CallbackHolder._slots + ['name', 'done', 'version', '_request_modify', '_min_release_time']
+    __slots__ = []
+
     def __init__(self, modify):
         CallbackHolder.__init__(self)
         self.done = False
+        self.version = None
         self._request_modify = modify
 
     def __repr__(self):
@@ -154,6 +169,8 @@ class TagBase(CallbackHolder):
 
 
 class LocalTag(TagBase):
+    __slots__ = TagBase._slots
+
     def __init__(self, name, modify):
         TagBase.__init__(self, modify)
         self.name = name
@@ -168,6 +185,8 @@ Tag = LocalTag # old backups
 
 
 class RemoteTag(TagBase):
+    __slots__ = TagBase._slots + ['remotehost']
+
     def __init__(self, name, modify):
         TagBase.__init__(self, modify)
         self.remotehost, self.name = name.split(":")
@@ -195,6 +214,8 @@ class RemoteTag(TagBase):
 
 
 class CloudTag(TagBase):
+    __slots__ = TagBase._slots
+
     def __init__(self, name, modify):
         TagBase.__init__(self, modify)
         self.name = name

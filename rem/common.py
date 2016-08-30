@@ -123,6 +123,8 @@ def Unpickable(**kws):
 
     class ObjUnpickler(object):
         def __setstate__(self, sdict):
+            logging.debug('++ __setstate__ for %s' % type(self))
+
             for attr, builder in scheme.iteritems():
                 try:
                     if attr in sdict:
@@ -146,6 +148,72 @@ def Unpickable(**kws):
 
     scheme = dict((attr, ObjBuilder(desc)) for attr, desc in kws.iteritems())
     return ObjUnpickler
+
+def UnpickableTuple(**kws):
+    class ObjBuilder(object):
+        def __init__(self, desc):
+            if callable(desc):
+                self.fn = desc
+                self.defargs = ()
+            elif isinstance(desc, (tuple, list)):
+                self.fn = desc[0]
+                self.defargs = desc[1] if len(desc) == 2 and isinstance(desc[1], tuple) else desc[1:]
+            else:
+                raise RuntimeError("incorrect unpickle plan: %r" % desc)
+
+        def __call__(self, *args):
+            if args:
+                return self.fn(*args)
+            return self.fn(*self.defargs)
+
+    slots = sorted(kws.keys())
+
+    class ObjUnpickler(object):
+        _slots = slots
+        __slots__ = []
+
+        def __setstate__(self, sdict):
+            for attr, builder in scheme.items():
+                try:
+                    if attr in sdict:
+                        sdict[attr] = builder(sdict[attr])
+                    else:
+                        sdict[attr] = builder()
+                except:
+                    logging.exception("unpickable\tcan't deserialize attribute %s with builder %r", attr, builder)
+                    raise
+
+            def __dict__update(sdict):
+                #for key, value in sdict.items():
+                    #try:
+                        #setattr(self, key, value)
+                    #except AttributeError:
+                        #pass
+                for key in self.__slots__:
+                    if key != '__weakref__':
+                        setattr(self, key, sdict.get(key))
+
+            setter = getattr(super(ObjUnpickler, self), "__setstate__", __dict__update)
+            setter(sdict)
+
+            ObjectRegistrator_.register(self, sdict)
+
+        def __getstate__(self):
+            return {key: getattr(self, key) for key in self.__slots__}
+
+        def __init__(self, obj=None):
+            if obj is not None:
+                for key in self.__slots__: # FIXME
+                    setattr(self, key, getattr(obj, key))
+            else:
+                for attr, builder in scheme.items():
+                    setattr(self, attr, builder())
+
+            getattr(super(ObjUnpickler, self), "__init__")()
+
+    scheme = dict((attr, ObjBuilder(desc)) for attr, desc in kws.iteritems())
+    return ObjUnpickler
+
 
 
 def Pickable(fields_to_copy):
@@ -203,6 +271,8 @@ class nullobject(object):
 
 
 class PickableLock(object):
+    __slots__ = ['_object']
+
     def __init__(self, rhs=None):
         self._object = fork_locking.Lock()
 
@@ -223,6 +293,8 @@ class PickableLock(object):
 
 
 class PickableRLock(object):
+    __slots__ = ['_object']
+
     def __init__(self, rhs=None):
         self._object = fork_locking.RLock()
 
@@ -245,7 +317,8 @@ class PickableRLock(object):
 """Legacy structs for correct deserialization from old backups"""
 
 
-class PickableLocker(object): pass
+class PickableLocker(object):
+    pass
 
 
 NullObject = nullobject
@@ -383,7 +456,8 @@ def GeneralizedSet(priorAttr):
     return _packset
 
 
-class PackSet(GeneralizedSet("priority")): pass
+class PackSet(GeneralizedSet("priority")):
+    pass
 
 
 class SerializableFunction(object):
@@ -429,10 +503,13 @@ class SerializableFunction(object):
 
         return self.callable
 
-class BinaryFile(Unpickable(
-    links=dict,
-    lock=PickableRLock)):
+class BinaryFile(UnpickableTuple(
+                    links=dict,
+                    lock=PickableRLock,
+                 )):
     BUF_SIZE = 256 * 1024
+    __slots__ = ['links', 'lock',
+                 'path', 'checksum', 'accessTime']
 
     @classmethod
     def createFile(cls, directory, data):

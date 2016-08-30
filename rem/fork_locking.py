@@ -8,7 +8,7 @@ import errno
 from collections import namedtuple
 import traceback
 
-__all__ = ["Lock", "RLock", "Condition", "LockWrapper", "RunningChildInfo", "TerminatedChildInfo", "run_in_child"]
+__all__ = ["Lock", "RLock", "Condition", "LockWrapper", "RLockWrapper" "RunningChildInfo", "TerminatedChildInfo", "run_in_child"]
 
 if 'DUMMY_FORK_LOCKING' not in os.environ:
     try:
@@ -54,40 +54,18 @@ def acquire_fork():
 def release_fork():
     _fork_locking.release_fork()
 
-class LockWrapper(object):
+class LockWrapperBase(object):
+    __slots__ = ['_backend', '_name']
+
     def __init__(self, backend, name=None):
-        if hasattr(backend, '_acquire_restore'):
-            self._acquire_restore = self.__acquire_restore
-
-        if hasattr(backend, '_release_save'):
-            self._release_save = self.__release_save
-
-        if hasattr(backend, '_is_owned'):
-            self._is_owned = backend._is_owned
-
-        self.__name = name or '__noname__'
-        self.__backend = backend
-
-    def __acquire_restore(self, count_owner):
-        acquire_restore_lock(self.__backend, count_owner)
-
-    def __release_save(self):
-        return release_save_lock(self.__backend)
+        self._backend = backend
+        self._name = name or '__noname__'
 
     def acquire(self, blocking=True, label=None):
-        acquire_lock(self.__backend, blocking)
+        acquire_lock(self._backend, blocking)
 
     def release(self):
-        release_lock(self.__backend)
-
-    # Needed because non-blocking acquire is not implemented in LockWrapper
-    # copy-pasted from threading.py
-    def _is_owned(self):
-        if self.__backend.acquire(0):
-            self.__backend.release()
-            return False
-        else:
-            return True
+        release_lock(self._backend)
 
     def __enter__(self):
         self.acquire()
@@ -96,11 +74,33 @@ class LockWrapper(object):
     def __exit__(self, *args):
         self.release()
 
+class RLockWrapper(LockWrapperBase):
+    __slots__ = []
+
+    def _acquire_restore(self, count_owner):
+        acquire_restore_lock(self._backend, count_owner)
+
+    def _release_save(self):
+        return release_save_lock(self._backend)
+
+    def _is_owned(self):
+        return self._backend._is_owned()
+
+class LockWrapper(LockWrapperBase):
+    __slots__ = []
+
+    def _is_owned(self):
+        if self._backend.acquire(0):
+            self._backend.release()
+            return False
+        else:
+            return True
+
 def Lock(name=None):
     return LockWrapper(threading.Lock(), name)
 
 def RLock(name=None):
-    return LockWrapper(threading.RLock(), name)
+    return RLockWrapper(threading.RLock(), name)
 
 def Condition(lock, verbose=None):
     return threading.Condition(lock, verbose)

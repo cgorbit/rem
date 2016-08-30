@@ -446,7 +446,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         if not os.path.isdir(self.backupDirectory):
             os.makedirs(self.backupDirectory)
 
-        self.forgetOldItems()
+        #self.forgetOldItems()
         gc.collect()
 
         start_time = time.time()

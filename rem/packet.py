@@ -12,7 +12,7 @@ import re
 #import cPickle as pickle
 
 from callbacks import CallbackHolder, ICallbackAcceptor, TagBase, tagset
-from common import BinaryFile, PickableRLock, Unpickable, RpcUserError
+from common import BinaryFile, PickableRLock, UnpickableTuple, RpcUserError
 from job import Job, JobRunner
 import osspec
 import messages
@@ -117,7 +117,7 @@ def _value_or_None(*args):
     return args[0] if args else None
 
 
-class PacketBase(Unpickable(
+PacketBase_UnpickableTuple = UnpickableTuple(
                            lock=PickableRLock,
 
                            jobs=dict,
@@ -151,9 +151,28 @@ class PacketBase(Unpickable(
 
                            req_sandbox_host=_value_or_None,
                            user_labels=_value_or_None,
-                          ),
+                          )
+
+class PacketBase(PacketBase_UnpickableTuple,
                 CallbackHolder,
                 ICallbackAcceptor):
+
+    _slots = ['__weakref__'] \
+        + PacketBase_UnpickableTuple._slots \
+        + CallbackHolder._slots \
+        + [
+            'done_tag',
+            'files_sharing',
+            'id',
+            'name',
+            'queue',
+            'finish_status',
+            '_saved_jobs_status',
+            '_graph_executor',
+            'tags_awaited',
+        ]
+
+    __slots__ = []
 
     # The legacy
     IMPL_TO_REPR_STATE_MAPPING = {
@@ -1111,6 +1130,8 @@ class NonDestroyingStateError(RuntimeError):
 class LocalPacket(PacketBase):
     MAX_ERR_LEN = 2 ** 20
 
+    __slots__ = PacketBase._slots
+
     def _create_job_graph_executor(self):
         return job_graph.JobGraphExecutor(
             _LocalPacketJobGraphOps(self), # TODO Cyclic reference
@@ -1184,6 +1205,8 @@ class LocalPacket(PacketBase):
 
 class SandboxPacket(PacketBase):
     MAX_ERR_LEN = 1024
+
+    __slots__ = PacketBase._slots
 
     def _do_graph_suspend(self, kill_jobs):
         g = self._graph_executor

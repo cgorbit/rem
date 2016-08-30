@@ -13,6 +13,7 @@ class AlreadySet(RuntimeError):
 class AlreadyCancelled(RuntimeError):
     pass
 
+# TODO Calc future count
 
 class _FutureState(object):
     def __init__(self):

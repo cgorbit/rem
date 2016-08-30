@@ -13,7 +13,7 @@ import shutil
 
 from common import Unpickable, TimedMap, PickableLock, cleanup_directory, BinaryFile, split_in_groups
 import common as rem_common
-from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, CallbackHolder, ICallbackAcceptor, ETagEvent
+from callbacks import TagBase, LocalTag, CloudTag, RemoteTag, ETagEvent
 from journal import TagLogger
 from Queue import Queue
 import fork_locking

@@ -5,7 +5,7 @@ import time
 import datetime
 import sys
 
-from common import SerializableFunction, Unpickable, safeint
+from common import SerializableFunction, UnpickableTuple, safeint
 import osspec
 import constants
 import job_process
@@ -74,9 +74,13 @@ def create_job_runner(runner, pgrpguard_binary):
         else ordinal_backend
 
 
-class IResult(Unpickable(type=str,
+class IResult(UnpickableTuple(type=str,
                          code=safeint,
                          message=str)):
+
+    _slots = ['type', 'code', 'message']
+    __slots__ = []
+
     def __init__(self, type, code, message):
         self.type = type
         self.code = code
@@ -96,6 +100,8 @@ class IResult(Unpickable(type=str,
 
 
 class CommandLineResult(IResult):
+    __slots__ = IResult._slots
+
     time_format = "%Y/%m/%d %H:%M:%S"
 
     def __init__(self, code, start_time, finish_time, err):
@@ -109,12 +115,16 @@ class CommandLineResult(IResult):
 
 
 class JobStartErrorResult(CommandLineResult):
+    __slots__ = IResult._slots
+
     def __init__(self, jobId, exception_message):
         ts = datetime.datetime.fromtimestamp(time.time())
         IResult.__init__(self, "Job start error", 1, "Job %s start error at %s, error message: %s" % (jobId, ts.strftime(self.time_format), exception_message))
 
 
 class TriesExceededResult(IResult):
+    __slots__ = IResult._slots
+
     def __init__(self, maxcount):
         IResult.__init__(self, "The number of attempts exceeded", maxcount, None)
 
@@ -123,6 +133,8 @@ class TriesExceededResult(IResult):
 
 
 class TimeOutExceededResult(IResult):
+    __slots__ = IResult._slots
+
     time_format = CommandLineResult.time_format
 
     def __init__(self, jobId):
@@ -134,14 +146,41 @@ class PackedExecuteResult(object): # for old backups
     pass
 
 
-class Job(Unpickable(results=list,
+def _raise(*args):
+    raise RuntimeError()
+
+Job_UnpickableTuple = UnpickableTuple(
+                     results=list,
                      tries=int,
                      pipe_fail=bool,
                      description=str,
                      max_working_time=(int, constants.KILL_JOB_DEFAULT_TIMEOUT),
                      notify_timeout=(int, constants.NOTIFICATION_TIMEOUT),
                      cached_working_time=int,
-                     output_to_status=bool)):
+                     output_to_status=bool,
+
+                     #id=_raise,
+                     #pck_id=_raise,
+                     #max_try_count=_raise,
+                     #shell=_raise,
+                     #parents=_raise,
+                     #inputs=_raise,
+                     #max_err_len=_raise,
+                     #retry_delay=_raise,
+                    )
+
+class Job(Job_UnpickableTuple):
+    __slots__ = Job_UnpickableTuple._slots + [
+                    'id',
+                    'pck_id',
+                    'max_try_count',
+                    'shell',
+                    'parents',
+                    'inputs',
+                    'max_err_len',
+                    'retry_delay',
+                ]
+
     ERR_PENALTY_FACTOR = 6
 
     def __init__(self, pck_id, shell, parents, pipe_parents, max_try_count, max_err_len=None,
@@ -168,7 +207,7 @@ class Job(Unpickable(results=list,
         return "%s.%s" % (self.pck_id, self.id)
 
     def __getstate__(self):
-        return self.__dict__.copy()
+        return {key: getattr(self, key) for key in self.__slots__}
 
     def __make_run_args(self):
         return [osspec.get_shell_location()] \
@@ -407,6 +446,8 @@ class JobRunner(object):
 
 
 class FuncJob(object):
+    __slots__ = ['runner']
+
     def __init__(self, runner):
         assert isinstance(runner, SerializableFunction), "incorrent arguments for FuncJob initializing"
         self.runner = runner
