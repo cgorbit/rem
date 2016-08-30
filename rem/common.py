@@ -199,12 +199,13 @@ def UnpickableTuple(**kws):
             ObjectRegistrator_.register(self, sdict)
 
         def __getstate__(self):
-            return {key: getattr(self, key) for key in self.__slots__}
+            return {key: getattr(self, key, None) for key in self.__slots__
+                } # FIXME XXX None _min_release_time
 
         def __init__(self, obj=None):
             if obj is not None:
-                for key in self.__slots__: # FIXME
-                    setattr(self, key, getattr(obj, key))
+                for key in self.__slots__:
+                    setattr(self, key, getattr(obj, key, None)) # FIXME XXX None
             else:
                 for attr, builder in scheme.items():
                     setattr(self, attr, builder())

@@ -170,6 +170,11 @@ class PacketBase(PacketBase_UnpickableTuple,
             '_saved_jobs_status',
             '_graph_executor',
             'tags_awaited',
+            'files_modified',
+            'resources_modified',
+            'shared_files_resource_id',
+            'kill_all_jobs_on_error',
+            'priority',
         ]
 
     __slots__ = []
