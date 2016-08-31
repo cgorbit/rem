@@ -2,6 +2,7 @@ OWNER(trofimenkov)
 
 RECURSE(
     lib
+    client
 )
 
 IF (LINUX)

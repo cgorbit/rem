@@ -87,7 +87,7 @@ production-quality (PHASE_2)
               # TODO отличаться temporary ошибку в sync_resource от permanent
               # 1. NoSuchResource, 2. others
 
-????2. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
+----2. stripped.tar instead of symbols.tar.gz (или даже без tar, просто файлы)
 
     3. PARALLEL resources sync?
         FIXME Почему меня тащили по skynet?

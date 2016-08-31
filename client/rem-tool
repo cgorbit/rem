@@ -400,10 +400,10 @@ def parse_args():
     parser.add_option("-F", "--filter", dest="filter", default="all", help="set targets filter (for listing packets in queue")
     parser.add_option("-N", "--name", dest="name", help="name regexp for filtering list of tags or packets")
     parser.add_option("-P", "--prefix", dest="prefix", help="name prefix for filtering list of tags or packets")
-    parser.add_option("--min-mtime", type="int")
-    parser.add_option("--max-mtime", type="int")
-    parser.add_option("--min-ctime", type="int")
-    parser.add_option("--max-ctime", type="int")
+    parser.add_option("--min-mtime")
+    parser.add_option("--max-mtime")
+    parser.add_option("--min-ctime")
+    parser.add_option("--max-ctime")
     parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
     parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
     parser.add_option("--all-deps", dest="show_all_dep_tags", action="store_const", const=True, help="Show all tags not only tags to wait")
@@ -423,6 +423,26 @@ def parse_args():
     action = args[0]
     if not action in _DISP_COMMANDS:
         parser.error('unknown action "{}", use one of: {}'.format(action, ', '.join(sorted(_DISP_COMMANDS.keys()))))
+
+    time_deltas_multipliers = {
+        's': 1,
+        'm': 60,
+        'h': 3600,
+        'd': 86400,
+    }
+
+    now = int(time.time())
+    for opt_name in ['min_ctime', 'max_ctime', 'min_mtime', 'max_mtime']:
+        val = getattr(opt, opt_name, None)
+        if val is not None:
+            if val[-1] in ['s', 'm', 'h', 'd']:
+                type = val[-1]
+                count = float(val[:-1])
+                delta = time_deltas_multipliers[type] * count
+                val = now + int(delta)
+            else:
+                val = int(val)
+            setattr(opt, opt_name, val)
 
     init_color_mode(opt.color_mode)
 

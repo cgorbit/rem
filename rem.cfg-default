@@ -10,7 +10,7 @@ recent_tags_file = %(project_dir)s/backups/recent_tags.db
 # файл для сохранения информации о "ненужных" тэгах (berkeley-db BTREE формат)
 tags_db_file = %(project_dir)s/backups/tags.db
 # файл для сохранения информации о "удаленых(remote) зависимостях" (berkeley-db BTREE формат)
-remote_tags_db_file = %(project_dir)s/backups/tags-remote.db
+#remote_tags_db_file = %(project_dir)s/backups/tags-remote.db
 # директория с бэкапами
 backup_dir = %(project_dir)s/backups
 # период между очередными бэкапами (в секундах)
@@ -20,9 +20,9 @@ backup_count = 10
 # максимальное время работы дочернего процесса, пишущего бэкап (в секундах)
 backup_child_max_working_time = 900
 # откладывать бэкап в отдельном процессе (консистентнее)
-backup_in_child = no
+backup_in_child = yes
 # время (в секундах) после которого взятие лока на fork(2) переходит в "агрессивный режим"
-#backup_fork_lock_friendly_timeout = 10
+backup_fork_lock_friendly_timeout = 10
 # минимальное время жизни данных журнала после бэкапа (в секундах)
 journal_lifetime = 3600
 # директория для бинарных файлов, необходимых для пакетов задач
@@ -32,10 +32,9 @@ binary_lifetime = 86400
 # время хранения информации о пакетах
 error_packet_lifetime = 604800 ; 7 дней
 success_packet_lifetime = 259200 ; 3 дня
-
-#cloud_tags_server = localhost:17773
-#cloud_tags_masks = svn+ssh://arcadia.yandex.ru/arc/trunk/...
-#cloud_tags_masks_reload_interval = 300
+# облачные теги
+#cloud_tags_server = ...
+#all_tags_in_cloud = yes
 
 [log]
 # директория с логами
@@ -59,17 +58,24 @@ readonly_xmlrpc_poolsize = 10
 setup_script = %(project_dir)s/setup_env.sh
 # set-user-ID обёртка для гарантированного убийства запускаемых групп процессов (от супер-пользователя)
 #pgrpguard_binary = pgrpguard
+# запускать джобы через отдельный маленький fork-демон (сильно экономит CPU, когда образ REM-сервера занимает много памяти)
+subprocsrv_runner_count = 3
 
 [server]
 #порт, слушаемый сервером (для общения с клиентами, посылающими задачи)
 port = 8104
 #порт, слушаемый сервером для неизменяющих запросов
 readonly_port = 8103
+
+disable_remote_tags = yes
 #порт для общения между REM-демонами
-system_port = 8105
+#system_port = 8105
 #путь до файла с топологией REM-демонов и собственное имя сервера в этой топологии
-network_topology = svn+ssh://${svnpath}/network_topology.cfg
+#network_topology = svn+ssh://${svnpath}/network_topology.cfg
 #имя хоста в этой топологии - нужно ОБЯЗАТЕЛЬНО ЗАМЕНИТЬ ${hostname} НА РЕАЛЬНОЕ ИМЯ
+#максимальный интервал между попытками отправки извещений другим REM-ам
+#max_remotetags_resend_delay = 300 ; 5 минут
+
 network_hostname = ${hostname}
 #посылать ли письма по завершению работы пакетов
 send_emails = yes
@@ -79,8 +85,6 @@ send_emails = yes
 send_emergency_emails = no
 #собирать профилировщиком статистику по использованию памяти (использовать только в отладочных целяx)
 use_memory_profiler = no
-#максимальный интервал между попытками отправки извещений другим REM-ам
-max_remotetags_resend_delay = 300 ; 5 минут
 #разрешать ли форсированный (через XMLRPC) бэкап
 allow_backup_rpc_method = no
 # количество тредов, рассылающих письма
