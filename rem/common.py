@@ -149,6 +149,14 @@ def Unpickable(**kws):
     scheme = dict((attr, ObjBuilder(desc)) for attr, desc in kws.iteritems())
     return ObjUnpickler
 
+
+def getstate_of_slots(obj):
+    return {
+        key: getattr(obj, key, None) for key in obj.__slots__
+                                        if key != '__weakref__'
+    } # FIXME XXX None _min_release_time
+
+
 def UnpickableTuple(**kws):
     class ObjBuilder(object):
         def __init__(self, desc):
@@ -199,8 +207,7 @@ def UnpickableTuple(**kws):
             ObjectRegistrator_.register(self, sdict)
 
         def __getstate__(self):
-            return {key: getattr(self, key, None) for key in self.__slots__
-                } # FIXME XXX None _min_release_time
+            return getstate_of_slots(self)
 
         def __init__(self, obj=None):
             if obj is not None:

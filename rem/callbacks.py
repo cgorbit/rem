@@ -1,6 +1,6 @@
 import weakref
 import itertools
-from common import Unpickable, UnpickableTuple
+from common import Unpickable, UnpickableTuple, getstate_of_slots
 from rem_logging import logger as logging
 
 class ETagEvent(object):
@@ -78,7 +78,7 @@ class CallbackHolder(UnpickableTuple(callbacks=weakref.WeakKeyDictionary,
     def __getstate__(self):
         sdict = self.__dict__.copy() \
             if hasattr(self, '__dict__') \
-            else {key: getattr(self, key, None) for key in self.__slots__} # FIXME XXX _min_release_time
+            else getstate_of_slots(self)
 
         if 'callbacks' not in sdict:
             raise RuntimeError(str(self))
