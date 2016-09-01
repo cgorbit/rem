@@ -3,7 +3,7 @@ from __future__ import with_statement
 import itertools
 import time
 
-from common import emptydict, TimedSet, PackSet, PickableRLock, Unpickable
+from common import emptydict, TimedSet, PackSet, PickableRLock, Unpickable, value_or_None
 from packet import LocalPacket, SandboxPacket, PacketState, \
                    NotWorkingStateError, NonDestroyingStateError, NonTooOldMarkableStateError
 from rem_logging import logger as logging
@@ -53,7 +53,7 @@ class QueueBase(Unpickable(
                        errored_lifetime=(int, 0),
                        errored_default_lifetime=int,
                        suspended_lifetime=(int, 0),
-                       suspended_default_lifetime=int,
+                       suspended_default_lifetime=value_or_None,
 
                        by_user_state=ByUserState,
 

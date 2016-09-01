@@ -189,6 +189,9 @@ def safeint(oth=None):
         return int()
     return int(oth)
 
+def value_or_None(*args):
+    return args[0] if args else None
+
 
 class nullobject(object):
     __instance = None
