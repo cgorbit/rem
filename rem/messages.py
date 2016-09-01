@@ -167,6 +167,28 @@ class ResetNotification(IMessageHelper):
         return mbuf.getvalue()
 
 
+class PacketBecomesTooOld(IMessageHelper):
+    ERROR_LEVEL = 'ERROR'
+
+    def __init__(self, ctx, pck):
+        self.pck = pck
+        self.ctx = ctx
+
+    def _get_subject(self):
+        return "Packet too old"
+
+    def message(self):
+        mbuf = cStringIO.StringIO()
+        print >>mbuf, "You packet {pck_id}/{pck_name} exists too long in {pck_state} state, so moving to ERROR".format(
+            pck_id=self.pck.id,
+            pck_name=self.pck.name,
+            pck_state=self.pck._repr_state,
+        )
+        print >>mbuf
+        self._outputExtendedPacketStatus(mbuf, self.pck.id, self.pck.Status())
+        return mbuf.getvalue()
+
+
 def FormatPacketErrorStateMessage(ctx, pck):
     return PacketExecutionError(ctx, pck).make()
 
@@ -178,3 +200,6 @@ def FormatPacketResetNotificationMessage(*args, **kwargs):
 
 def FormatLongExecutionWarning(ctx, pck, job):
     return TooLongWorkingWarning(ctx, pck, job).make()
+
+def FormatPacketBecomesTooOld(ctx, self):
+    return PacketBecomesTooOld(ctx, self).make()

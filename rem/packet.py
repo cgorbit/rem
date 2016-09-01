@@ -148,6 +148,7 @@ class PacketBase(Unpickable(
                            do_not_run=bool,
                            destroying=bool,
                            is_broken=bool,
+                           is_too_old=bool,
 
                            req_sandbox_host=_value_or_None,
                            user_labels=_value_or_None,
@@ -160,6 +161,7 @@ class PacketBase(Unpickable(
         ImplState.UNINITIALIZED:    ReprState.CREATED,
         ImplState.ERROR:            ReprState.ERROR,
         ImplState.BROKEN:           ReprState.ERROR,
+        ImplState.TOO_OLD:          ReprState.ERROR,
         ImplState.PENDING:          ReprState.PENDING,
         ImplState.SUCCESSFULL:      ReprState.SUCCESSFULL,
 
@@ -243,6 +245,9 @@ class PacketBase(Unpickable(
 
         elif not self.queue:
             return ImplState.UNINITIALIZED
+
+        elif self.is_too_old:
+            return ImplState.TOO_OLD
 
         elif self.wait_dep_tags and not self.tags_awaited:
             return ImplState.TAGS_WAIT # may be GraphState.WORKING
@@ -330,7 +335,6 @@ class PacketBase(Unpickable(
         return sdict
 
     def _create_place_if_need(self):
-        #logging.info("packet init: %r %s", self, self._repr_state) # FIXME
         if self.directory is None:
             self._create_place(self._get_scheduler_ctx())
 
@@ -354,6 +358,10 @@ class PacketBase(Unpickable(
 
             if not self.wait_dep_tags:
                 self.tags_awaited = True
+
+                if self.is_too_old:
+                    return
+
                 self._share_files_as_resource_if_need()
                 self._update_state()
 
@@ -570,15 +578,21 @@ class PacketBase(Unpickable(
             except NonDestroyingStateError:
                 raise RpcUserError(RuntimeError("Can't remove packet in %s state" % self._repr_state))
 
-    #@staticmethod
-    #def _produce_compressed_job_status(graph_executor):
-        #status = graph_executor.produce_detailed_status()
-        #for job in status:
-            #job['results'] = [
-                #r.data for r in job['results']
-            #]
+    def mark_as_too_old(self):
+        with self.lock:
+            if self.state not in ImplState.LimitedLifetimeSuspendedStates:
+                raise NonTooOldMarkableStateError("mark_as_too_old called for %s" % self)
 
-        #return zlib.compress(pickle.dumps(status))
+            if self.is_too_old:
+                logging.error("mark_as_too_old called for already old %s" % self)
+                return
+
+            self._send_becomes_too_old_notification() # before _update_state
+
+            self.is_too_old = True
+            self.do_not_run = False # FIXME Clear or not? (change _check_add_files otherwise)
+
+            self._update_state()
 
     def _on_graph_executor_state_change(self):
         state = self._graph_executor.state
@@ -688,6 +702,12 @@ class PacketBase(Unpickable(
         def make(ctx):
             with self.lock:
                 return messages.FormatLongExecutionWarning(ctx, self, job)
+
+        self._send_email(make)
+
+    def _send_becomes_too_old_notification(self):
+        def make(ctx):
+            return messages.FormatPacketBecomesTooOld(ctx, self)
 
         self._send_email(make)
 
@@ -815,7 +835,7 @@ class PacketBase(Unpickable(
                       waiting_time=waiting_time,
                       queue=self.queue.name if self.queue else None,
                       labels=self.user_labels,
-                      )
+                     )
 
         extra_flags = set()
 
@@ -824,6 +844,9 @@ class PacketBase(Unpickable(
 
         if self.do_not_run:
             extra_flags.add("manually-suspended")
+
+        if self.is_too_old:
+            extra_flags.add("too-old")
 
         if extra_flags:
             status["extra_flags"] = ";".join(extra_flags)
@@ -866,6 +889,8 @@ class PacketBase(Unpickable(
                 ImplState.HISTORIED
             ]:
                 raise RpcUserError(RuntimeError("Can't suspend in %s state" % self._repr_state))
+
+            self.is_too_old = False
 
             self.finish_status = None # for ImplState.ERROR
             self._saved_jobs_status = None
@@ -932,6 +957,8 @@ class PacketBase(Unpickable(
         with self.lock:
             if self._will_never_be_executed():
                 return
+
+            self.is_too_old = False
 
             self._update_done_tags(lambda tag, _: tag.Unset())
 
@@ -1105,6 +1132,9 @@ class NotWorkingStateError(RuntimeError):
     pass
 
 class NonDestroyingStateError(RuntimeError):
+    pass
+
+class NonTooOldMarkableStateError(RuntimeError):
     pass
 
 

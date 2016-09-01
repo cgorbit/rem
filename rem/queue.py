@@ -3,8 +3,9 @@ from __future__ import with_statement
 import itertools
 import time
 
-from common import emptyset, emptydict, TimedSet, PackSet, PickableRLock, Unpickable
-from packet import LocalPacket, SandboxPacket, PacketCustomLogic, PacketState, NotWorkingStateError, NonDestroyingStateError
+from common import emptydict, TimedSet, PackSet, PickableRLock, Unpickable
+from packet import LocalPacket, SandboxPacket, PacketState, \
+                   NotWorkingStateError, NonDestroyingStateError, NonTooOldMarkableStateError
 from rem_logging import logger as logging
 
 
@@ -43,6 +44,7 @@ class ByUserState(Unpickable(
 
 class QueueBase(Unpickable(
                        packets=set,
+                       suspended_packets=TimedSet.create,
                        is_suspended=bool,
                        lock=PickableRLock,
                        working_limit=(int, 1),
@@ -50,6 +52,8 @@ class QueueBase(Unpickable(
                        successfull_default_lifetime=int,
                        errored_lifetime=(int, 0),
                        errored_default_lifetime=int,
+                       suspended_lifetime=(int, 0),
+                       suspended_default_lifetime=int,
 
                        by_user_state=ByUserState,
 
@@ -89,19 +93,52 @@ class QueueBase(Unpickable(
     def SetErroredLifeTime(self, lifetime):
         self.errored_lifetime = lifetime
 
+    def SetSuspendedLifeTime(self, lifetime):
+        self.suspended_lifetime = lifetime
+
     def _on_packet_state_change(self, pck):
         self.relocate_packet(pck)
 
     def UpdateContext(self, context):
         self.successfull_default_lifetime = context.successfull_packet_lifetime
         self.errored_default_lifetime = context.errored_packet_lifetime
+        self.suspended_default_lifetime = context.suspended_packet_lifetime
         self.scheduler = context.Scheduler
 
     def forgetOldItems(self):
-        self._forget_queue_old_items(self.by_user_state.successfull, self.successfull_lifetime or self.successfull_default_lifetime)
-        self._forget_queue_old_items(self.by_user_state.error, self.errored_lifetime or self.errored_default_lifetime)
+        self._forget_queue_old_items(
+            self.by_user_state.successfull,
+            self.successfull_lifetime or self.successfull_default_lifetime,
+            self._destroy_old_packet
+        )
 
-    def _forget_queue_old_items(self, queue, ttl):
+        self._forget_queue_old_items(
+            self.by_user_state.error,
+            self.errored_lifetime or self.errored_default_lifetime,
+            self._destroy_old_packet
+        )
+
+        suspended_lifetime = self.suspended_lifetime or self.suspended_default_lifetime
+        if suspended_lifetime:
+            self._forget_queue_old_items(
+                self.suspended_packets,
+                suspended_lifetime,
+                self._mark_packet_as_too_old
+            )
+
+    def _destroy_old_packet(self, pck):
+        try:
+            pck.destroy()
+        except NonDestroyingStateError: # race
+            pass
+
+    def _mark_packet_as_too_old(self, pck):
+        try:
+            pck.mark_as_too_old()
+        except NonTooOldMarkableStateError: # race
+            pass
+
+    def _forget_queue_old_items(self, queue, ttl, modify):
         threshold = time.time() - ttl
 
         while True:
@@ -115,12 +152,7 @@ class QueueBase(Unpickable(
                     return
 
             # XXX Don't use lock here to prevent deadlock
-            try:
-                pck.destroy()
-
-            # May throw: race with RPC calls, that may change packet state
-            except NonDestroyingStateError:
-                pass
+            modify(pck)
 
     def relocate_packet(self, pck):
         dest_queue_name = None if pck.state == PacketState.HISTORIED \
@@ -133,8 +165,15 @@ class QueueBase(Unpickable(
             if not(dest_queue and pck in dest_queue):
                 logging.debug("queue %s\tmoving packet %s typed as %s", self.name, pck.name, pck._repr_state)
                 self._update_by_user_state(pck, dest_queue)
+
             if pck.state == PacketState.HISTORIED:
                 self.packets.discard(pck)
+
+            if pck.state in PacketState.LimitedLifetimeSuspendedStates:
+                self.suspended_packets.add(pck)
+            else:
+                self.suspended_packets.discard(pck)
+
             self._do_relocate_packet(pck)
 
     def _find_packet_user_state_queue(self, pck):
@@ -275,7 +314,6 @@ class QueueBase(Unpickable(
 
     def convert_to_v3(self):
         by_user_state = self.by_user_state
-        d = by_user_state.__dict__
 
         self.packets = set(
             itertools.chain(
@@ -444,3 +482,4 @@ class SandboxQueue(QueueBase):
 
 
 from rem.queue_legacy import Queue
+Queue

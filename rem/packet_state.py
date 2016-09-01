@@ -13,6 +13,7 @@ class PacketState(object):
     SUCCESSFULL   = 'IS_SUCCESSFULL'
     ERROR         = 'IS_ERROR'
     BROKEN        = 'IS_BROKEN'
+    TOO_OLD       = 'IS_TOO_OLD'
     DESTROYING    = 'IS_DESTROYING'
     HISTORIED     = 'IS_HISTORIED'
 
@@ -22,3 +23,8 @@ class PacketState(object):
         PREV_EXECUTOR_STOP_WAIT,
         DESTROYING,
     ])
+
+    LimitedLifetimeSuspendedStates = [
+        TAGS_WAIT,
+        PAUSED
+    ]

@@ -477,6 +477,12 @@ def queue_set_error_lifetime(queue_name, lifetime):
     q.SetErroredLifeTime(lifetime)
 
 
+@traced_rpc_method()
+def queue_set_suspended_lifetime(queue_name, lifetime):
+    q = _scheduler.rpc_get_queue(queue_name, create=False)
+    q.SetSuspendedLifeTime(lifetime)
+
+
 @traced_rpc_method("warning")
 def set_backupable_state(bckpFlag, chldFlag=None):
     if bckpFlag is not None:
@@ -499,6 +505,11 @@ def get_backupable_state():
 @traced_rpc_method("warning")
 def do_backup():
     return _scheduler.RollBackup(force=True, child_max_working_time=None)
+
+
+@traced_rpc_method("warning")
+def forget_old_items():
+    return _scheduler.forgetOldItems()
 
 
 @traced_rpc_method("warning")
@@ -599,6 +610,7 @@ class ApiServer(object):
             queue_resume,
             queue_set_error_lifetime,
             queue_set_success_lifetime,
+            queue_set_suspended_lifetime,
             queue_status,
             queue_suspend,
             sched_list_queues_with_jobs,
@@ -614,8 +626,11 @@ class ApiServer(object):
         ]
 
         if self.allow_debug_rpc_methods:
-            funcs.append(do_backup)
-            funcs.append(pck_list_worker_host_user_processes)
+            funcs.extend([
+                do_backup,
+                pck_list_worker_host_user_processes,
+                forget_old_items,
+            ])
 
         for func in funcs:
             self.register_function(func)
