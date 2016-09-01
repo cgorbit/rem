@@ -505,16 +505,6 @@ class JobPacketInfo(object):
                     dirname = descr[0]
                     for basename in descr[1]:
                         yield basename, os.path.join(dirname, basename)
-
-#(name, location)
-#(str, str)
-
-#(dirname(location), [base1, base2, ...])
-#(str, [str, str, str, ...])
-
-                elif callable(descr):
-                    for item in descr():
-                        yield item
                 else:
                     yield os.path.basename(descr), descr
 

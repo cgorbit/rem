@@ -201,13 +201,6 @@ class Client(object):
         resp = self._make_call('GET', url)
         return {t['id']: t['status'] for t in resp['items']}
 
-    def list_tasks(self, type, limit, statuses=None):
-        url = '/task?type=%s&limit=%d&order=-time' % (type, limit)
-        if statuses:
-            url += '&status=%s' % ','.join(statuses)
-        resp = self._make_call('GET', url)
-        return resp
-
     def get_latest_resource(self, type, owner=None, released=False):
         if released:
             r = self._get_latest_released_resource(type, owner)
