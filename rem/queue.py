@@ -298,7 +298,8 @@ class QueueBase(Unpickable(
             "alive": self.is_alive(),
             "working-limit": self.working_limit,
             "success-lifetime": self.successfull_lifetime or self.successfull_default_lifetime,
-            "error-lifetime": self.errored_lifetime or self.errored_default_lifetime
+            "error-lifetime": self.errored_lifetime or self.errored_default_lifetime,
+            "suspended-lifetime": self.suspended_lifetime or self.suspended_default_lifetime,
         })
 
         return status
