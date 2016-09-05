@@ -230,13 +230,13 @@ class Queue(object):
         setter(self.name, seconds)
 
     def SetSuccessLifeTime(self, lifetime):
-        self._set_lifetime(self.proxy.queue_set_success_lifetime, seconds)
+        self._set_lifetime(self.proxy.queue_set_success_lifetime, lifetime)
 
     def SetErroredLifeTime(self, lifetime):
-        self._set_lifetime(self.proxy.queue_set_error_lifetime, seconds)
+        self._set_lifetime(self.proxy.queue_set_error_lifetime, lifetime)
 
     def SetSuspendedLifeTime(self, lifetime):
-        self._set_lifetime(self.proxy.queue_set_suspended_lifetime, seconds)
+        self._set_lifetime(self.proxy.queue_set_suspended_lifetime, lifetime)
 
 
 class JobPacket(object):
