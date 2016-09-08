@@ -957,7 +957,8 @@ def run_server(ctx):
         name = "[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else "")
     else:
         name = 'remd'
-    osspec.set_process_title(name)
+    osspec.set_process_cmdline(name)
+    osspec.set_thread_name(name)
 
     def logged(f, *args):
         logging.debug("rem-server\tbefore_%s" % f.__name__)

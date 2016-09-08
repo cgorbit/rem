@@ -15,7 +15,8 @@ INFINITY = float('inf')
 
 def cwd_to_path():
     dir, name = os.path.split(sys.argv[0])
-    os.chdir(dir)
+    if dir != '':
+        os.chdir(dir)
 
 
 def parse_args():
@@ -113,9 +114,10 @@ class Service(object):
                 return False
             with open(cmdfile) as psReader:
                 psLine = psReader.read()
-            if any(psLine.startswith(checkname) for checkname in self.checkExecNames):
-                return pid
-            return False
+            return pid
+            #if any(psLine.startswith(checkname) for checkname in self.checkExecNames):
+                #return pid
+            #return False
         except:
             logging.exception("error while reading process status")
 
@@ -207,7 +209,7 @@ class Service(object):
 class REMService(Service):
     def __init__(self):
         self.Configure()
-        interpreter = "python"
+        interpreter = sys.executable
         runArgs = [interpreter, "rem-server.py", "start"]
         if self.setupScript:
             runArgs = ["/bin/sh", "-c", " ".join([self.setupScript, "&&", "exec"] + runArgs)]
@@ -219,7 +221,7 @@ class REMService(Service):
         super(REMService, self).__init__(
             runargs=runArgs, pidfile="var/rem.pid", logfile="var/rem.errlog", 
             name="remd%s" % (("(\"" + self.serverName + "\")") if self.serverName else ""),
-            checkname="python",
+            checkname=interpreter,
             customnames=custom_names,
         )
 
