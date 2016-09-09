@@ -92,6 +92,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False):
 
     history_mtime = datetime.datetime.fromtimestamp(int(pck.history[-1][1])) if pck.history else None
 
+    notify_emails = getattr(pck, 'notify_emails', None)
     info_fields = dict(
         pck_id=color_if_need(pck.pck_id, EColor.Black, EFormat.Bold),
         pck_name=color_if_need(pck.name, EColor.Black, EFormat.Bold),
@@ -104,7 +105,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False):
         done_tag=pck.result_tag,
         history_mtime_old=(history_mtime.strftime('%Y/%m/%d-%H:%M:%S') if history_mtime else None),
         history_mtime=(history_mtime.isoformat() if history_mtime else None),
-        notify_emails=getattr(pck, 'notify_emails', None),
+        notify_emails=notify_emails,
         notify_emails_short=[email[:-15] if email.endswith('@yandex-team.ru') else email for email in (notify_emails or [])],
         is_sandbox=(color_if_need(is_sandbox, EColor.Red, EFormat.Italic) if is_sandbox else is_sandbox),
         last_sandbox_task_id=last_sandbox_task_id,
