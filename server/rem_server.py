@@ -41,6 +41,13 @@ from rem.action_queue import ActionQueue
 from rem.sandbox_releases import SandboxReleasesResolver
 
 
+try:
+    import requests.packages.urllib3
+    requests.packages.urllib3.disable_warnings()
+except:
+    pass
+
+
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
         super(DuplicatePackageNameException, self).__init__(*args, **kwargs)
