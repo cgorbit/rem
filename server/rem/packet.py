@@ -997,11 +997,11 @@ class PacketBase(Unpickable(
     # } else {
     #   AbortTransaction();
     # }
-    def _reset_done_tags(self):
+    def _reset_done_tags(self, comment):
         set_tags = self._set_tags
         for tag in self._get_all_done_tags():
             if tag.GetFullname() in set_tags:
-                tag.Reset()
+                tag.Reset(comment)
             else:
                 tag.Unset() # legacy behaviour
         set_tags.clear()
@@ -1029,7 +1029,7 @@ class PacketBase(Unpickable(
             if self.notify_on_reset:
                 notify(True)
 
-            self._reset_done_tags()
+            self._reset_done_tags(comment)
             self._reset()
 
             self._update_state()
