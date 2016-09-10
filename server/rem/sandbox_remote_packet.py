@@ -1273,9 +1273,7 @@ class SandboxPacketOpsForJobGraphExecutorProxy(object):
         self.pck._on_graph_executor_state_change()
 
     def job_done_successfully(self, job_id):
-        tag = self.pck.job_done_tag.get(job_id)
-        if tag:
-            tag.Set()
+        self.pck._on_job_done_successfully(job_id)
 
     def on_sandbox_task_id(self, id):
         self.pck.last_sandbox_task_id = id
