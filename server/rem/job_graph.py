@@ -423,45 +423,41 @@ class JobGraphExecutor(Unpickable(
 
         self._clean_state = True # FIXME
 
+    def _produce_job_status(self, job):
+        job_id = job.id
+
+        state = "done" if job_id in self.succeed_jobs \
+            else "working" if job_id in self.active_jobs_cache \
+            else "pending" if job_id in self.jobs_to_run \
+            else "errored" if job_id in self.failed_jobs \
+            else "suspended"
+            #else "waiting" if job_id in self.jobs_to_retry \
+
+        wait_jobs = []
+        if self.active_jobs_cache: # FIXME Why this check?
+            wait_jobs = map(str, self.child_to_parents.get(job_id, []))
+
+        parents = map(str, job.parents or [])
+        pipe_parents = map(str, job.inputs or [])
+
+        output_filename = None
+
+        results = [safeStringEncode(str(res)) for res in job.results]
+
+        return dict(
+            id=str(job.id),
+            shell=job.shell,
+            desc=job.description,
+            state=state,
+            results=results,
+            parents=parents,
+            pipe_parents=pipe_parents,
+            output_filename=output_filename,
+            wait_jobs=wait_jobs,
+        )
+
     def produce_detailed_status(self):
-        ret = []
-
-        for jid, job in self.jobs.iteritems():
-            result = job.last_result()
-            results = []
-            if result:
-                results = [safeStringEncode(str(res)) for res in job.results]
-
-            state = "done" if jid in self.succeed_jobs \
-                else "working" if jid in self.active_jobs_cache \
-                else "pending" if jid in self.jobs_to_run \
-                else "errored" if jid in self.failed_jobs \
-                else "suspended"
-                #else "waiting" if jid in self.jobs_to_retry \
-
-            wait_jobs = []
-            if self.active_jobs_cache:
-                wait_jobs = map(str, self.child_to_parents.get(jid, []))
-
-            parents = map(str, job.parents or [])
-            pipe_parents = map(str, job.inputs or [])
-
-            output_filename = None
-
-            ret.append(
-                dict(id=str(job.id),
-                        shell=job.shell,
-                        desc=job.description,
-                        state=state,
-                        results=results,
-                        parents=parents,
-                        pipe_parents=pipe_parents,
-                        output_filename=output_filename,
-                        wait_jobs=wait_jobs,
-                    )
-            )
-
-        return ret
+        return [self._produce_job_status(job) for job in self.jobs.values()]
 
     def _reset_tries(self):
         self.jobs_to_run.update(self.failed_jobs)
