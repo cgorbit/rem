@@ -69,7 +69,8 @@ def produce_dep_tags_str(pck, show_all):
         ]) \
         + ']'
 
-def print_pck_info(pck, extended=False, show_all_tags=False):
+def print_pck_info(pck, extended=False, show_all_tags=False, depth=0, max_depth=0,
+                   print_history=False):
     workTime = pck.GetWorkingTime()
     color_by_state = {
         'SUCCESSFULL': EColor.Green,
@@ -92,6 +93,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False):
 
     history_mtime = datetime.datetime.fromtimestamp(int(pck.history[-1][1])) if pck.history else None
 
+    notify_emails = getattr(pck, 'notify_emails', None)
     info_fields = dict(
         pck_id=color_if_need(pck.pck_id, EColor.Black, EFormat.Bold),
         pck_name=color_if_need(pck.name, EColor.Black, EFormat.Bold),
@@ -104,7 +106,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False):
         done_tag=pck.result_tag,
         history_mtime_old=(history_mtime.strftime('%Y/%m/%d-%H:%M:%S') if history_mtime else None),
         history_mtime=(history_mtime.isoformat() if history_mtime else None),
-        notify_emails=getattr(pck, 'notify_emails', None),
+        notify_emails=notify_emails,
         notify_emails_short=[email[:-15] if email.endswith('@yandex-team.ru') else email for email in (notify_emails or [])],
         is_sandbox=(color_if_need(is_sandbox, EColor.Red, EFormat.Italic) if is_sandbox else is_sandbox),
         last_sandbox_task_id=last_sandbox_task_id,
@@ -124,6 +126,9 @@ def print_pck_info(pck, extended=False, show_all_tags=False):
             ";result_tag={done_tag};last_update='{history_mtime_old}'" \
             ";notify_emails={notify_emails};is_sandbox={is_sandbox}" \
             ";last_sandbox_task={last_sandbox_task_id},labels={user_labels}"
+
+    if depth:
+        format = ('    ' * depth) + format
 
     print format.format(**info_fields)
 
@@ -193,12 +198,31 @@ def print_pck_info(pck, extended=False, show_all_tags=False):
                 print "%s (waiting for jobs: %s)" % (job.state, ', '.join(str(j.id) for j in job.wait_jobs))
             print "\n".join(i.data.replace("\n", "\n\t") for i in job.results)
 
+    elif print_history:
+        for status, tstamp in pck.history:
+            print "\t[%s] %s" % (time.ctime(tstamp), status)
+
+    # XXX jobs' set_tag's not accounted
+    if depth < max_depth and pck.result_tag:
+        rem = pck.conn
+        for pck_id in rem.Tag(pck.result_tag).ListDependentPackets():
+            print_pck_info(
+                rem.PacketInfo(pck_id),
+                extended=extended,
+                show_all_tags=show_all_tags,
+                depth=depth + 1,
+                max_depth=max_depth,
+            )
+
 
 class CommandExecutionError(Exception): pass
 
 
 class ListCommander(ICommander):
     def __call__(self):
+        opts = self.options
+        rem = self.conn
+
         if self.options.queue:
             q = self.conn.Queue(self.options.queue)
             pckList = q.ListPackets(self.options.filter,
@@ -212,12 +236,24 @@ class ListCommander(ICommander):
             pckList = remclient.JobPacketInfo.multiupdate(pckList)
             for pck in sorted(pckList, key=lambda p : p.name):
                 print_pck_info(pck, show_all_tags=self.options.show_all_dep_tags)
+
         elif self.options.list_tags:
             for tag, value in sorted(self.conn.ListObjects("tags", self.options.name, self.options.prefix)):
                 print ("+" if value else "-"), tag
+
         elif self.options.list_all_tags:
             for tag, value in sorted(self.conn.ListObjects("tags", self.options.name, self.options.prefix, False)):
                 print ("+" if value else "-"), tag
+
+        elif opts.tag:
+            for pck_id in rem.Tag(opts.tag).ListDependentPackets():
+                print_pck_info(
+                    rem.PacketInfo(pck_id),
+                    extended=False,
+                    show_all_tags=opts.show_all_dep_tags,
+                    max_depth=opts.recurse_depth,
+                )
+
         else:
             for q, q_stat in self.conn.ListObjects("queues", self.options.name, self.options.prefix):
                 print "queue '%s':\t\t%r" % (q, q_stat)
@@ -296,14 +332,25 @@ Going to delete queue "{}" from "{}" in {} seconds:
 
 class StatusCommander(ICommander):
     def __call__(self):
-        if self.options.queue:
-            q = self.conn.Queue(self.options.queue)
-            print "queue '%s':\t%r" % (self.options.queue, q.Status())
-        if self.options.packet:
-            pck = self.conn.PacketInfo(self.options.packet)
-            print_pck_info(pck, extended=True, show_all_tags=self.options.show_all_dep_tags)
-        if self.options.tag:
-            tag = self.conn.Tag(self.options.tag)
+        opts = self.options
+        rem = self.conn
+
+        if opts.queue:
+            q = rem.Queue(opts.queue)
+            print "queue '%s':\t%r" % (opts.queue, q.Status())
+
+        if opts.packet:
+            pck = rem.PacketInfo(opts.packet)
+
+            print_pck_info(
+                pck,
+                extended=not opts.recurse_depth,
+                show_all_tags=opts.show_all_dep_tags,
+                max_depth=opts.recurse_depth,
+            )
+
+        if opts.tag:
+            tag = rem.Tag(opts.tag)
             print "tag %s value: %s" % (tag.name, tag.Check())
 
 
@@ -411,6 +458,7 @@ def parse_args():
     parser.add_option("--port", help="")
     parser.add_option("--color", dest='color_mode', default=os.environ.get('REM_TOOL_COLOR_MODE', 'auto'), help="color mode: auto (by default), never, always. Also REM_TOOL_COLOR_MODE environment variable")
     parser.add_option("--new", action='store_true', dest='new_output_format', default=os.environ.get('REM_TOOL_NEW_OUTPUT_FORMAT', 'no').lower() in ['yes', '1'], help="New experimental output format (also REM_TOOL_NEW_OUTPUT_FORMAT environment variable)")
+    parser.add_option("--recurse", dest="recurse_depth", type="int", default=0)
 
     opt, args = parser.parse_args()
 
