@@ -859,6 +859,11 @@ class PacketBase(Unpickable(
         else:
             jobs = self._produce_clean_jobs_status()
 
+        for job in jobs:
+            tag = self.job_done_tag.get(int(job['id'])) # id is str already
+            if tag:
+                job['result_tag'] = tag.name
+
         status["jobs"] = jobs
 
         return status
