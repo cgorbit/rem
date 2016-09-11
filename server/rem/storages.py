@@ -66,7 +66,7 @@ class GlobalPacketStorage(object):
 
 class ShortStorage(Unpickable(packets=(TimedMap.create, {}),
                               lock=PickableLock)):
-    PCK_LIFETIME = 1800
+    PCK_LIFETIME = 86400
 
     def __getstate__(self):
         sdict = self.__dict__.copy()
