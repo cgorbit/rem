@@ -329,7 +329,7 @@ class JobGraphExecutor(Unpickable(
         job = runner.job
         assert job.id in self.jobs
 
-        logging.debug("job %s\tdone [%s]", job.shell, job.last_result())
+        logging.debug("%s done\t%s\t%s", job, job.shell, job.last_result())
 
         self.active_jobs_cache.discard(job.id)
         self._ops.del_working(job)

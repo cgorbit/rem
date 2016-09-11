@@ -1119,7 +1119,7 @@ class _LocalPacketJobGraphOps(object):
         return self.pck._graph_executor.create_job_file_handles(job)
 
     def notify_long_execution(self, job):
-        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, job.id)
+        logging.warning("%s execution takes too long time", job)
         self.pck.send_job_long_execution_notification(job)
 
     def start_process(self, *args, **kwargs):
