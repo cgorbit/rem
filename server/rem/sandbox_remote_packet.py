@@ -458,8 +458,8 @@ prev_task: {prev_task}
                     pck._set_state(RemotePacketState.STARTED, '_on_rpc_update_graph')
                     pck._drop_sched_if_need()
                     assert not pck._peer_addr
-                else:
-                    assert not pck._sched
+                #else:
+                    #assert not pck._sched # stop may be scheduled for example
 
                 if not pck._peer_addr:
                     pck._peer_addr = peer_addr
