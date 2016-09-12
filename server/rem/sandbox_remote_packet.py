@@ -286,7 +286,7 @@ prev_task: {prev_task}
             reschedule_if_need()
             return
         except Exception as e:
-            logging.exception('')
+            logging.exception('Failed to create sandbox task for %s' % pck.id)
             handle_unknown_error(e)
             return
 
@@ -304,7 +304,7 @@ prev_task: {prev_task}
             #self._start_delete_task(task.id)
             return
         except Exception as e:
-            logging.exception('')
+            logging.exception('Failed to update (after start) task %s for %s' % (task.id, pck.id))
             handle_unknown_error(e)
             #self._start_delete_task(task.id)
             return
@@ -340,6 +340,8 @@ prev_task: {prev_task}
         # - task terminated wo GRAPH_UPDATE's
 
         except Exception as e:
+            logging.exception('Failed to start task %s' % pck)
+
             with pck._lock:
                 if pck._state != RemotePacketState.STARTING:
                     return
@@ -349,9 +351,8 @@ prev_task: {prev_task}
                 # Here we don't know if task is really started
                 is_error_permanent = \
                     not isinstance(e, (sandbox.NetworkError, sandbox.ServerInternalError))
-                    # TODO
-                pck.set_error(str(e), is_error_permanent)
 
+                pck.set_error(str(e), is_error_permanent)
                 pck._set_state(RemotePacketState.CHECKING_START_ERROR)
 
             return
@@ -462,7 +463,7 @@ prev_task: {prev_task}
 
                 if not pck._peer_addr:
                     pck._peer_addr = peer_addr
-                    logging.debug('SET pck._peer_addr = %s' % (peer_addr,))
+                    logging.debug('SET pck._peer_addr = %s for %s' % (peer_addr, pck))
 
                     if pck._target_stop_mode:
                         if is_final:
@@ -488,7 +489,7 @@ prev_task: {prev_task}
         try:
             ans = self._sandbox.list_task_resources(pck._sandbox_task_id)
         except:
-            logging.exception('Failed to fetch task %d resources' % pck._sandbox_task_id)
+            logging.exception('Failed to fetch task resources for %s' % pck)
 
             with pck._lock:
                 if pck._target_stop_mode != StopMode.CANCEL:
@@ -512,7 +513,7 @@ prev_task: {prev_task}
         with pck._lock:
             resource = res_by_type.get('REM_JOBPACKET_EXECUTION_SNAPSHOT')
             if not resource:
-                logging.error("No REM_JOBPACKET_EXECUTION_SNAPSHOT resource in %s" % pck._sandbox_task_id)
+                logging.error("No REM_JOBPACKET_EXECUTION_SNAPSHOT resource in %s" % pck)
                 err = "No REM_JOBPACKET_EXECUTION_SNAPSHOT resource"
                 pck.set_error(err, False)
                 self._mark_as_finished(pck, err)
@@ -534,7 +535,7 @@ prev_task: {prev_task}
 
     def _fetch_final_update(self, pck):
         def log_fail(error):
-            logging.error('Failed to fetch %s: %s' % (pck._final_update_url, error))
+            logging.error('Failed to fetch %s for %s: %s' % (pck._final_update_url, pck, error))
 
         def reschedule_if_need():
             with pck._lock:
@@ -630,13 +631,12 @@ prev_task: {prev_task}
                     if pck._is_error_permanent:
                         self._mark_as_finished(pck, 'is_error_permanent=True, DRAFT')
                     else:
-                        pck.reset_error()
                         pck._set_state(RemotePacketState.STARTING)
                         self._start_start_sandbox_task(pck)
 
                 elif state in [RemotePacketState.STARTED, RemotePacketState.TASK_FIN_WAIT]:
                     # FIXME Race here between graph updates and _on_task_status_change
-                    logging.warning('_on_task_status_change(%s, %s)' % (status_group, state))
+                    logging.warning('%s._on_task_status_change(%s, %s)' % (pck, status_group, state))
                     #raise AssertionError()
 
             elif status_group == TaskStateGroups.ACTIVE:
@@ -744,8 +744,7 @@ prev_task: {prev_task}
 
         proxy = self._create_packet_rpc_proxy(pck)
 
-        logging.debug('_do_stop_packet(pck=%s, task=%s, stop_mode=%s' % (
-            pck.id, task_id, stop_mode))
+        logging.debug('_do_stop_packet(%s, stop_mode=%s' % (pck, stop_mode))
 
         try:
             if stop_mode == StopMode.CANCEL:
@@ -755,7 +754,7 @@ prev_task: {prev_task}
                 proxy.stop(task_id, kill_jobs)
 
         except Exception as e:
-            logging.warning("Failed to send stop to packet: %s" % e)
+            logging.warning("Failed to send stop to packet %s: %s" % (pck, e))
 
             if is_xmlrpc_exception(e, WrongTaskIdError) \
                     or isinstance(e, socket.error) and e.errno == errno.ECONNREFUSED:
@@ -782,7 +781,7 @@ prev_task: {prev_task}
                     pck._sent_stop_mode = stop_mode
 
     def _start_packet_stop(self, pck):
-        logging.debug('_start_packet_stop(%s, %s)' % (pck.id, pck._target_stop_mode))
+        logging.debug('_start_packet_stop(%s, %s)' % (pck, pck._target_stop_mode))
         self._rpc_invoker.invoke(lambda : self._do_stop_packet(pck))
 
     # FIXME Throw on any event in TERMINATED state
@@ -870,6 +869,10 @@ class SandboxRemotePacket(Unpickable(
 
         remote_packets_dispatcher.register_packet(self)
 
+    def __str__(self):
+        return '<SandboxRemotePacket(%s, task=%s, %s)>' % (
+            self.id, self._sandbox_task_id, RemotePacketState._NAMES[self._state])
+
     def set_error(self, err, is_permanent=False):
         self._error = err
         self._is_error_permanent = is_permanent
@@ -885,6 +888,10 @@ class SandboxRemotePacket(Unpickable(
         return sdict
 
     def _set_state(self, state, reason=None):
+        if self._state == RemotePacketState.CHECKING_START_ERROR \
+                and state != RemotePacketState.FINISHED:
+            self.reset_error()
+
         self._state = state
         logging.debug('%s new state %s, reason: %s' % (self.id, RemotePacketState._NAMES[state], reason))
 
@@ -925,8 +932,7 @@ class SandboxRemotePacket(Unpickable(
         if is_final:
             self._final_state = update['state']
 
-            logging.debug('SandboxRemotePacket._final_state = %s' \
-                % GraphState.str(self._final_state))
+            logging.debug('%s._final_state = %s' % (self, GraphState.str(self._final_state)))
 
         self._ops._on_sandbox_packet_update(update, new_succeed_jobs, is_final)
 
@@ -1086,8 +1092,7 @@ class SandboxJobGraphExecutorProxy(Unpickable(
                     if retry_idx < len(self.RETRY_INTERVALS) \
                     else self.RETRY_INTERVALS[-1]
 
-                logging.debug("Packet %s in task %s failed. Will retry after %s seconds" % (
-                    self.pck_id, r._sandbox_task_id, delay))
+                logging.debug("%s failed. Will retry after %s seconds" % (r, delay))
 
                 self.time_wait_deadline = time.time() + delay
 
