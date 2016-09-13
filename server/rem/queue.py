@@ -449,8 +449,8 @@ class CombinedQueue(Unpickable(
         else:
             sandbox_limit = int(sandbox_limit)
 
-        if local_limit < 1 or sandbox_limit < 1:
-            raise ValueError()
+        if local_limit < 0 or sandbox_limit < 0:
+            raise ValueError("Negative working limit")
 
         self.local_ops.set_working_limit(local_limit)
         self.sandbox_ops.set_working_limit(sandbox_limit)
