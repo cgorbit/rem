@@ -36,10 +36,8 @@ def parse_arguments():
 
     p.add_argument('--io-dir', dest='io_dir', required=True)
     p.add_argument('--work-dir', dest='work_dir', required=True)
-    #p.add_argument('--custom-resources', dest='custom_resources')
     p.add_argument('--task-id', dest='task_id', type=int, required=True)
     p.add_argument('--rem-server-addr', dest='rem_server_addr', required=True)
-    #p.add_argument('--result-status-file', dest='result_status_file', default='/dev/stdout')
     p.add_argument('--result-snapshot-file', dest='result_snapshot_file')
     p.add_argument('--last-update-message-file', dest='last_update_message_file')
     p.add_argument('--last-update-user-summary-file', dest='last_update_user_summary_file')
@@ -345,7 +343,11 @@ if __name__ == '__main__':
 
 # TODO _create_rpc_server may throw errno.EADDRINUSE
     rpc_server = _create_rpc_server(pck, opts)
-    rpc_server_addr = (os.uname()[1], rpc_server.server_address[1]) # TODO Better hostname
+
+    rpc_server_addr = (
+        os.environ.get('SANDBOX_HOSTNAME', os.uname()[1]),
+        rpc_server.server_address[1]
+    )
 
     reset_tries = json.loads(opts.resume_params).get('reset_tries', False) \
         if opts.resume_params else False
