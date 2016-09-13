@@ -191,7 +191,7 @@ class T08(TestCase):
 
         # sandbox resource will be created for the 1st packet run
         # and original files remove will not affect 2nd run
-        if self._is_sandbox_only_setup():
+        if self._is_sandbox_only_setup() or self._is_random_sandboxness_setup():
             return
 
         tag = "tag-start-%.0f" % time.time()

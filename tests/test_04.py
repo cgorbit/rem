@@ -71,8 +71,8 @@ class T04(TestCase):
         pckInfo.Delete()
 
     def testManyPackets(self):
-        if self._is_sandbox_only_setup():
-            return
+        packet_count = 50 if self._is_sandbox_only_setup() else (
+            100 if self._is_random_sandboxness_setup() else 1000)
 
         tm = time.time()
         tgPrfx = "chain-%.0f" % tm
@@ -80,13 +80,15 @@ class T04(TestCase):
         waitings = [strtTag]
         pckList = []
         logging.info("start long chain adding")
-        for idx in xrange(1000):
+
+        for idx in xrange(packet_count):
             pckname = "sleeptest-%.0f-%s" % (tm, idx)
             pck = self.connector.Packet(pckname, time.time(), wait_tags=waitings, set_tag="%s-%d" % (tgPrfx, idx))
             pck.AddJob("echo .")
             self.connector.Queue(TestingQueue.Get()).AddPacket(pck)
             waitings = ["%s-%d" % (tgPrfx, idx)]
             pckList.append(pck)
+
         self.connector.Tag(strtTag).Set()
         pckInfo = self.connector.PacketInfo(pckList[-1].id)
         self.assertEqual(WaitForExecution(pckInfo, poll_interval=10.0), "SUCCESSFULL")
