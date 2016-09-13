@@ -3,18 +3,11 @@ import cProfile
 import os
 import time
 
-import rem.osspec
+from rem.osspec import set_thread_name, gettid as _gettid
 from rem_logging import logger as logging
 
 
 PROFILING_DIR = None
-try:
-    import prctl
-    def set_thread_name(name):
-        prctl.set_name(name)
-except ImportError:
-    def set_thread_name(name):
-        pass
 
 
 def __init():
@@ -29,8 +22,8 @@ def __init():
 __init()
 
 
-def _gettid():
-    return rem.osspec.gettid() or 0
+def gettid():
+    return _gettid() or 0
 
 
 class NamedThread(threading.Thread):
@@ -43,7 +36,7 @@ class NamedThread(threading.Thread):
 
     def _set_thread_name(self):
         set_thread_name('rem-' + self.name)
-        logging.debug('NamedThread name for %d is %s' % (_gettid(), self.name))
+        logging.debug('NamedThread name for %d is %s' % (gettid(), self.name))
 
     def run(self):
         self._set_thread_name()
@@ -54,7 +47,7 @@ class NamedThread(threading.Thread):
             f = getattr(self, '_run', threading.Thread.run.__get__(self))
             f()
         except:
-            logging.exception('NamedThread %s [%d] failed' % (self.name, _gettid()))
+            logging.exception('NamedThread %s [%d] failed' % (self.name, gettid()))
             raise
 
 
@@ -64,7 +57,7 @@ class ProfiledThread(NamedThread):
         try:
             return profiler.runcall(func)
         finally:
-            profiler.dump_stats('%s/thread-%s-%d.profile' % (PROFILING_DIR, self.name, _gettid()))
+            profiler.dump_stats('%s/thread-%s-%d.profile' % (PROFILING_DIR, self.name, gettid()))
 
     def _do_run(self):
         func = super(ProfiledThread, self)._do_run
