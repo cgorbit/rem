@@ -327,15 +327,19 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.LastHeap = None
 
     def rpc_delete_queue(self, qname):
-        if qname in self.qRef:
-            with self.lock:
-                q = self.qRef.get(qname, None)
-                if q:
-                    if not q.Empty(): # race
-                        raise RpcUserError(AttributeError("can't delete non-empty queue"))
-                    self.qRef.pop(qname)
-                    return True
-        return False
+        with self.lock:
+            q = self.qRef.get(qname, None)
+            if not q:
+                return False
+
+            if not q.Empty(): # race
+                raise RpcUserError(AttributeError("can't delete non-empty queue"))
+
+            self.qRef.pop(qname)
+
+            # here someone can add packet to deleted queue in rem_server.py
+
+            return True
 
     def _create_queue(self, name):
         cls = SandboxQueue if self.context.all_packets_in_sandbox or name.startswith('sbx:') \
