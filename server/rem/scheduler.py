@@ -281,7 +281,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         "qRef", "tagRef", "binStorage", "tempStorage", "connManager",
         "_remote_packets_dispatcher",
     ]
-    BackupFormatVersion = 4
+    BackupFormatVersion = 5
 
     def __init__(self, context):
         getattr(super(Scheduler, self), "__init__")()
@@ -695,6 +695,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
     def _convert_backup_to_v4(cls, sdict, registrator):
         for pck in registrator.packets:
             pck.convert_to_v4()
+
+    @classmethod
+    @common.logged()
+    def _convert_backup_to_v5(cls, sdict, registrator):
+        for q in registrator.queues:
+            q.convert_to_v5()
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):

@@ -112,11 +112,15 @@ class QueueBase(Unpickable(
 
 
 class LocalQueue(QueueBase):
-    pass
+    def convert_to_v5(self):
+        raise NotImplementedError()
 
 
 class SandboxQueue(QueueBase):
     def convert_to_v3(self):
         super(SandboxQueue, self).convert_to_v3()
         self.pending_packets = PackSet.create(list(self.by_user_state.pending))
+
+    def convert_to_v5(self):
+        raise NotImplementedError()
 
