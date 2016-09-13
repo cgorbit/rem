@@ -11,18 +11,9 @@ from rem_logging import logger as logging
 import cloud_client
 import cloud_connection
 from callbacks import LocalTag, CloudTag, ETagEvent
-
+from .osspec import set_thread_name
 
 STOP_INDICATOR = '__STOP__'
-
-
-try:
-    import prctl
-    def set_thread_name(name):
-        prctl.set_name(name)
-except ImportError:
-    def set_thread_name(name):
-        pass
 
 
 def _read_db(db_filename, bucket_size, output_queue, read_count):
