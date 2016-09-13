@@ -281,7 +281,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         "qRef", "tagRef", "binStorage", "tempStorage", "connManager",
         "_remote_packets_dispatcher",
     ]
-    BackupFormatVersion = 3
+    BackupFormatVersion = 4
 
     def __init__(self, context):
         getattr(super(Scheduler, self), "__init__")()
@@ -336,9 +336,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 raise RpcUserError(AttributeError("can't delete non-empty queue"))
 
             self.qRef.pop(qname)
-
             # here someone can add packet to deleted queue in rem_server.py
-
             return True
 
     def _create_queue(self, name):
@@ -689,6 +687,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
 
         for pck in registrator.packets:
             pck.user_labels = None
+
+    @classmethod
+    @common.logged()
+    def _convert_backup_to_v4(cls, sdict, registrator):
+        for pck in registrator.packets:
+            pck.convert_to_v4()
 
     @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):

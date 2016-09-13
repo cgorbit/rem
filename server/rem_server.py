@@ -42,6 +42,13 @@ from rem.action_queue import ActionQueue
 from rem.sandbox_releases import SandboxReleasesResolver
 
 
+try:
+    import requests.packages.urllib3
+    requests.packages.urllib3.disable_warnings()
+except:
+    pass
+
+
 class DuplicatePackageNameException(Exception):
     def __init__(self, pck_name, serv_name, *args, **kwargs):
         super(DuplicatePackageNameException, self).__init__(*args, **kwargs)
@@ -959,7 +966,8 @@ def run_server(ctx):
         name = "[remd]%s" % ((" at " + ctx.network_name) if ctx.network_name else "")
     else:
         name = 'remd'
-    osspec.set_process_title(name)
+    osspec.set_process_cmdline(name)
+    osspec.set_thread_name(name)
 
     def logged(f, *args):
         logging.debug("rem-server\tbefore_%s" % f.__name__)

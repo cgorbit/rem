@@ -58,17 +58,26 @@ def get_shell_location(_cache=[]):
     return _cache[0]
 
 
-def set_process_title(proc_title):
+try:
+    from library.python.thread import set_thread_name
+except ImportError:
+    try:
+        from prctl import set_name as set_thread_name
+    except ImportError:
+        def set_thread_name(name):
+            pass
+
+def set_process_cmdline(proc_title):
     """Sets custom title to current process
         Requires installed python-prctl module - http://pythonhosted.org/python-prctl/
     """
     try:
         import prctl
-        prctl.set_name(proc_title)
         prctl.set_proctitle(proc_title)
         return True
     except (ImportError, AttributeError):
         return False
+
 
 def repr_term_status(status):
     return 'exit(%d)' % os.WEXITSTATUS(status) if os.WIFEXITED(status) \

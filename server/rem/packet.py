@@ -127,6 +127,7 @@ class PacketBase(Unpickable(
 
                            job_done_tag=dict,
                            #done_tag=object,
+                           _set_tags=set, # ugly approximation
 
                            bin_links=dict,
                            sbx_files=dict,
@@ -530,11 +531,20 @@ class PacketBase(Unpickable(
 
             elif state == ImplState.SUCCESSFULL:
                 if self.done_tag:
-                    self.done_tag.Set()
+                    self._set_done_tag(self.done_tag)
 
             if state in [ImplState.SUCCESSFULL, ImplState.HISTORIED, ImplState.BROKEN]:
                 assert self._graph_executor.is_null() # FIXME
                 self._release_place()
+
+    def _on_job_done_successfully(self, job_id):
+        tag = self.job_done_tag.get(job_id)
+        if tag:
+            self._set_done_tag(tag)
+
+    def _set_done_tag(self, tag):
+        tag.Set()
+        self._set_tags.add(tag.GetFullname())
 
     def _update_repr_state(self):
         new = self._calc_repr_state()
@@ -859,6 +869,11 @@ class PacketBase(Unpickable(
         else:
             jobs = self._produce_clean_jobs_status()
 
+        for job in jobs:
+            tag = self.job_done_tag.get(int(job['id'])) # id is str already
+            if tag:
+                job['result_tag'] = tag.name
+
         status["jobs"] = jobs
 
         return status
@@ -927,20 +942,17 @@ class PacketBase(Unpickable(
 
             self._update_state()
 
-    def _update_done_tags(self, op):
-        for tag, is_done in self._get_all_done_tags():
-            op(tag, is_done)
-
     def _get_scheduler_ctx(self):
         return PacketCustomLogic.SchedCtx
         #return self._get_scheduler().context
 
     def _get_all_done_tags(self):
-        if self.done_tag:
-            yield self.done_tag, self.state == ImplState.SUCCESSFULL
+        ret = self.job_done_tag.values()
 
-        for job_id, tag in self.job_done_tag.iteritems():
-            yield tag, job_id in self.succeed_jobs
+        if self.done_tag:
+            ret.append(self.done_tag)
+
+        return ret
 
     def OnReset(self, (ref, comment)):
         if isinstance(ref, TagBase):
@@ -960,7 +972,8 @@ class PacketBase(Unpickable(
 
             self.is_too_old = False
 
-            self._update_done_tags(lambda tag, _: tag.Unset())
+            for tag in self._get_all_done_tags():
+                tag.Unset()
 
             if not self.queue:
                 return # noop
@@ -971,6 +984,27 @@ class PacketBase(Unpickable(
             self._share_files_as_resource_if_need()
 
             self._update_state()
+
+    # TODO "is_done and tag.Reset(comment)" is not kosher!
+    # We need reset-if-need logic in cloud_tags_server proxy
+    # and "last_set_version" in /map table (not in journal):
+    #
+    # StartTransaction();
+    # tag = ReadTag("/map");
+    # if (tag.LastSetVersion > tag.LastResetVersion) {
+    #   WriteTagReset("/map", "/journal");
+    #   CommitTransaction();
+    # } else {
+    #   AbortTransaction();
+    # }
+    def _reset_done_tags(self, comment):
+        set_tags = self._set_tags
+        for tag in self._get_all_done_tags():
+            if tag.GetFullname() in set_tags:
+                tag.Reset(comment)
+            else:
+                tag.Unset() # legacy behaviour
+        set_tags.clear()
 
     def _on_tag_reset(self, ref, comment):
         with self.lock:
@@ -995,28 +1029,10 @@ class PacketBase(Unpickable(
             if self.notify_on_reset:
                 notify(True)
 
-            # Reset or Unset emulates legacy behaviour
-            self._update_done_tags(
-                lambda tag, is_done: tag.Reset(comment) if is_done else tag.Unset())
-
+            self._reset_done_tags(comment)
             self._reset()
 
             self._update_state()
-
-            # TODO "is_done and tag.Reset(comment)" is not kosher!
-            # We need reset-if-need logic in cloud_tags_server proxy
-            # and "last_set_version" in /map table (not in journal):
-            #
-            # StartTransaction();
-            # tag = ReadTag("/map");
-            # if (tag.LastSetVersion > tag.LastResetVersion) {
-            #   WriteTagReset("/map", "/journal");
-            #   CommitTransaction();
-            # } else {
-            #   DropTransaction();
-            # }
-            #
-            # FIXME This logic also may be added to local tags
 
     def _set_real_graph_executor_if_need(self):
         if isinstance(self._graph_executor, DummyGraphExecutor):
@@ -1077,6 +1093,12 @@ class PacketBase(Unpickable(
         # FIXME Use something else but deepcopy
         return JobGraph(copy.deepcopy(self.jobs), self.kill_all_jobs_on_error)
 
+    def convert_to_v4(self):
+        tags = self.job_done_tag.values() # just set always (lead to more resets in future)
+        if self.done_tag and self.state == PacketState.SUCCESSFULL: # legacy
+            tags.append(self.done_tag)
+        self._set_tags.update(tags)
+
 
 class _LocalPacketJobGraphOps(object):
     def __init__(self, pck):
@@ -1100,9 +1122,7 @@ class _LocalPacketJobGraphOps(object):
         self.pck.queue._on_job_get(self, job)
 
     def job_done_successfully(self, job_id):
-        tag = self.pck.job_done_tag.get(job_id)
-        if tag:
-            tag.Set()
+        self.pck._on_job_done_successfully(job_id)
 
     def create_job_runner(self, job):
         return JobRunner(self, job)
@@ -1114,7 +1134,7 @@ class _LocalPacketJobGraphOps(object):
         return self.pck._graph_executor.create_job_file_handles(job)
 
     def notify_long_execution(self, job):
-        logging.warning("Packet's '%s' job '%s' execution takes too long time", self.pck.name, job.id)
+        logging.warning("%s execution takes too long time", job)
         self.pck.send_job_long_execution_notification(job)
 
     def start_process(self, *args, **kwargs):

@@ -162,10 +162,10 @@ class Job(Unpickable(results=list,
         self.output_to_status = output_to_status
 
     def __repr__(self):
-        return "<Job(id: %s; packet: %s)>" % (self.id, self.pck_id)
+        return "<Job(id: %s; pck: %s)>" % (self.id, self.pck_id)
 
-    def full_id(self):
-        return "%s.%s" % (self.pck_id, self.id)
+    def __str__(self):
+        return "%s-job-%s" % (self.pck_id, self.id)
 
     def __getstate__(self):
         return self.__dict__.copy()
@@ -277,6 +277,7 @@ class JobRunner(object):
             logging.exception("Failed to start %s: %s" % (job, e))
             return False
 
+        logging.debug("%s started with pid=%s" % (job, process.pid))
         self._process = process
 
         if self._cancelled:
@@ -322,8 +323,7 @@ class JobRunner(object):
         with stdin:
             with stdout:
                 with stderr:
-                    logging.debug("out: %s, in: %s", stdout, stdin)
-                    logging.debug("job %s\tstarted", job.shell)
+                    logging.debug("%s starting\t%s" % (job, job.shell))
 
                     if not self._run_process(argv, stdin, stdout, stderr):
                         return
@@ -356,7 +356,7 @@ class JobRunner(object):
             )
 
         if self.returncode_robust != 0 and job.tries >= job.max_try_count:
-            logging.info("Job's %s result: TriesExceededResult", job.id)
+            logging.info("%s result: TriesExceededResult", job)
             append_result(TriesExceededResult(job.tries))
 
         if job.output_to_status and job.results and self._stdout_summary:
@@ -372,7 +372,7 @@ class JobRunner(object):
                 self._run()
             except Exception:
                 # FIXME Do something more than logging?
-                logging.exception("Run job %s exception", job.id)
+                logging.exception("Run job %s exception", job)
 
             if not(self._environment_error or self._cancelled):
                 job.tries += 1
