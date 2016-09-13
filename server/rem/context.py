@@ -112,6 +112,7 @@ class Context(object):
 
         self.allow_files_auto_sharing = config.safe_getboolean("run", "allow_files_auto_sharing", False)
         self.all_packets_in_sandbox = config.safe_getboolean("run", "all_packets_in_sandbox", False)
+        self.random_packet_sandboxness = config.safe_getboolean("run", "random_packet_sandboxness", False)
 
         self.cloud_tags_server = config.safe_get("store", "cloud_tags_server", None)
         self.cloud_tags_masks = config.safe_get("store", "cloud_tags_masks", None)
