@@ -15,6 +15,7 @@ import multiprocessing
 import argparse
 import shutil
 import subprocess
+from random import random
 
 from rem import constants, osspec
 
@@ -134,8 +135,9 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
         for email in notify_emails:
             rpc_assert(CheckEmailAddress(email), "incorrect e-mail: " + email)
 
-    if _context.all_packets_in_sandbox:
-        is_sandbox = True
+    is_sandbox = is_sandbox \
+        or _context.all_packets_in_sandbox \
+        or _context.random_packet_sandboxness and random() < 0.5
 
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck_cls = SandboxPacket if is_sandbox else LocalPacket
