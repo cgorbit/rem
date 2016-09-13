@@ -431,7 +431,7 @@ prev_task: {prev_task}
         #))
 
         if not pck:
-            raise WrongTaskIdError()
+            raise WrongTaskIdError('No packet for sbx:%s' % task_id)
 
         with pck._lock:
             # FIXME
@@ -563,7 +563,7 @@ prev_task: {prev_task}
                 return
 
             elif http_status_group == 3:
-                raise NotImplementedError()
+                raise NotImplementedError("Redirects handling not implemented")
 
             else:
                 log_fail('http status code == %d' % resp.status_code)

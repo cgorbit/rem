@@ -123,4 +123,3 @@ class SandboxQueue(QueueBase):
 
     def convert_to_v5(self):
         raise NotImplementedError()
-
