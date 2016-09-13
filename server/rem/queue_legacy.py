@@ -1,6 +1,6 @@
-from rem.queue import LocalQueue, ByUserState
+from rem.queue import ByUserState
 from rem.scheduler import Scheduler
-from rem.common import PackSet, TimedSet, PickableRLock, emptyset, Unpickable
+from rem.common import PackSet, TimedSet, PickableRLock, emptyset, emptydict, Unpickable, value_or_None
 from rem.callbacks import CallbackHolder, ICallbackAcceptor
 
 
@@ -70,3 +70,53 @@ class Queue(Unpickable(pending=PackSet.create,
         import itertools
         view_by_order = "pending", "waited", "errored", "suspended", "worked", "noninitialized"
         return itertools.chain(*(getattr(self, sub) for sub in view_by_order))
+
+
+class QueueBase(Unpickable(
+                       packets=set,
+                       suspended_packets=TimedSet.create,
+                       is_suspended=bool,
+                       lock=PickableRLock,
+                       working_limit=(int, 1),
+                       successfull_lifetime=(int, 0),
+                       successfull_default_lifetime=int,
+                       errored_lifetime=(int, 0),
+                       errored_default_lifetime=int,
+                       suspended_lifetime=(int, 0),
+                       suspended_default_lifetime=value_or_None,
+
+                       by_user_state=ByUserState,
+
+                       # LocalQueue
+                       working_jobs=emptydict,
+                       packets_with_pending_jobs=PackSet.create,
+
+                       # SandboxQueue
+                       working_packets=set, # FIXME
+                       pending_packets=PackSet.create,
+                )):
+
+    def convert_to_v3(self):
+        by_user_state = self.by_user_state
+
+        self.packets = set(
+            itertools.chain(
+                by_user_state.pending,
+                by_user_state.workable,
+                by_user_state.successfull,
+                by_user_state.error,
+                by_user_state.suspended,
+                by_user_state.waiting,
+            )
+        )
+
+
+class LocalQueue(QueueBase):
+    pass
+
+
+class SandboxQueue(QueueBase):
+    def convert_to_v3(self):
+        super(SandboxQueue, self).convert_to_v3()
+        self.pending_packets = PackSet.create(list(self.by_user_state.pending))
+
