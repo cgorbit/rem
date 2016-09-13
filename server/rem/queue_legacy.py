@@ -133,6 +133,9 @@ class LocalQueue(QueueBase):
     def convert_to_v5(self):
         _convert_to_combined(self)
 
+    def list_all_packets(self):
+        return self.packets
+
 
 class SandboxQueue(QueueBase):
     def convert_to_v3(self):
@@ -141,3 +144,6 @@ class SandboxQueue(QueueBase):
 
     def convert_to_v5(self):
         _convert_to_combined(self)
+
+    def list_all_packets(self):
+        return self.packets
