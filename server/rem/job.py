@@ -277,6 +277,7 @@ class JobRunner(object):
             logging.exception("Failed to start %s: %s" % (job, e))
             return False
 
+        logging.debug("%s started with pid=%s" % (job, process.pid))
         self._process = process
 
         if self._cancelled:
@@ -322,7 +323,7 @@ class JobRunner(object):
         with stdin:
             with stdout:
                 with stderr:
-                    logging.debug("%s started\t%s" % (job, job.shell))
+                    logging.debug("%s starting\t%s" % (job, job.shell))
 
                     if not self._run_process(argv, stdin, stdout, stderr):
                         return

@@ -63,6 +63,7 @@ class DefaultProcess(_ProcessProxyBase):
         kwargs['preexec_fn'] = os.setpgrp
         _extrapolate_env_update(kwargs)
         self._impl = subprocess.Popen(*args, **kwargs)
+        self.pid = self._impl.pid # for debug
 
     def _send_term_to_process(self):
         self._signal_was_sent = True
@@ -96,6 +97,7 @@ class PgrpguardProcess(_ProcessProxyBase):
         _ProcessProxyBase.__init__(self)
         _extrapolate_env_update(kwargs)
         self._impl = pgrpguard.ProcessGroupGuard(*args, **kwargs)
+        self.pid = self._impl.pid # for debug
 
     def _send_term_to_process(self):
         self._signal_was_sent = True
@@ -137,6 +139,8 @@ class SubprocsrvProcess(object):
 
         self._impl = runner.Popen(argv, stdin, stdout, stderr, setpgrp, cwd,
                                   shell, use_pgrpguard, env_update)
+
+        self.pid = self._impl.pid # for debug
 
     @staticmethod
     def _send_signal_safe_inspect_result(f):
