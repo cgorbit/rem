@@ -15,6 +15,7 @@ import errno
 import json
 
 import rem.common
+from rem.common import parse_network_address
 import rem.sandbox_packet
 import rem.delayed_executor
 from rem.profile import ProfiledThread
@@ -268,6 +269,33 @@ def _absolutize_fs_options(opts):
             setattr(opts, name, os.path.abspath(value))
 
 
+def guess_my_host(peer_addr, timeout):
+    try:
+        s = socket.create_connection(peer_addr, timeout=timeout)
+    except socket.error as e:
+        logging.debug('Can\'t connect to %s: %s' % (peer_addr, e))
+        return
+
+    return s.getsockname()[0]
+
+
+def try_guess_my_host(peer_addr, timeout):
+    try:
+        return guess_my_host(peer_addr, timeout)
+    except:
+        logging.exception('Failed to guess_my_host')
+
+
+def try_log_descriptors():
+    try:
+        import subprocess
+        files = subprocess.check_output(['lsof', '-p', str(os.getpid())])
+    except:
+        logging.exception('Failed to dump lsof')
+    else:
+        logging.debug('lsof\n' + files)
+
+
 if __name__ == '__main__':
     opts = parse_arguments()
 
@@ -344,8 +372,14 @@ if __name__ == '__main__':
 # TODO _create_rpc_server may throw errno.EADDRINUSE
     rpc_server = _create_rpc_server(pck, opts)
 
+    try_log_descriptors()
+    logging.debug('rpc_server.server_address = %s' % (rpc_server.server_address,))
+
+    my_host = try_guess_my_host(parse_network_address(opts.rem_server_addr), timeout=3.0)
+    logging.debug('guessed host = %s' % my_host)
+
     rpc_server_addr = (
-        os.environ.get('SANDBOX_HOSTNAME', os.uname()[1]),
+        my_host or os.uname()[1],
         rpc_server.server_address[1]
     )
 

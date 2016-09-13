@@ -154,7 +154,7 @@ class SandboxTaskStateAwaiter(object):
             TaskStatus.DELETED:      False,
 
             # FIXME
-            #TaskStatus.STOPPED:      False,
+            TaskStatus.STOPPED:      False,
 
             # Can't have resources
             TaskStatus.FAILURE:      False, # "impossible"
