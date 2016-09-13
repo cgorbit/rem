@@ -432,7 +432,9 @@ class CombinedQueue(Unpickable(
 
         status.update({
             "alive": self.is_alive(),
-            "working-limit": self.working_limit,
+            "working-limit": self.local_ops.limit, # FIXME
+            "local-working-limit": self.local_ops.limit,
+            "sandbox-working-limit": self.sandbox_ops.limit,
             "success-lifetime": self.successfull_lifetime or self.successfull_default_lifetime,
             "error-lifetime": self.errored_lifetime or self.errored_default_lifetime,
             "suspended-lifetime": self.suspended_lifetime or self.suspended_default_lifetime,
