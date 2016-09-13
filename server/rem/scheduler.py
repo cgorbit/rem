@@ -336,9 +336,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 raise RpcUserError(AttributeError("can't delete non-empty queue"))
 
             self.qRef.pop(qname)
-
             # here someone can add packet to deleted queue in rem_server.py
-
             return True
 
     def _create_queue(self, name):
