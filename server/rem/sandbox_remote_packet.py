@@ -740,7 +740,21 @@ prev_task: {prev_task}
         task_id = pck._sandbox_task_id
         stop_mode = pck._target_stop_mode
 
-        assert pck._peer_addr is not None
+        def reschedule_if_need():
+            if pck._state != RemotePacketState.STARTED:
+                return
+
+            assert not pck._sched
+
+            self._schedule(
+                pck,
+                self._start_packet_stop,
+                timeout=self._RPC_RESEND_INTERVAL)
+
+        with pck._lock:
+            if not pck._peer_addr:
+                reschedule_if_need()
+                return
 
         proxy = self._create_packet_rpc_proxy(pck)
 
@@ -761,15 +775,7 @@ prev_task: {prev_task}
                 return # FIXME Is enough? # STOP/SUSPEND->EXECUTING
 
             with pck._lock:
-                if pck._state != RemotePacketState.STARTED:
-                    return
-
-                assert not pck._sched
-
-                self._schedule(
-                    pck,
-                    self._start_packet_stop,
-                    timeout=self._RPC_RESEND_INTERVAL)
+                reschedule_if_need()
 
         else:
             with pck._lock:
