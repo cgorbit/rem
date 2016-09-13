@@ -42,28 +42,144 @@ class ByUserState(Unpickable(
              + list(self.waiting)
 
 
-class QueueBase(Unpickable(
+class LocalOps(Unpickable(
+                    working_jobs=emptydict,
+                    packets_with_pending_jobs=PackSet.create,
+                    working_limit=(int, 1),
+                )):
+
+    def __init__(self, parent):
+        super(LocalOps, self).__init__()
+        self.parent = parent
+
+# TODO Better
+    def copy(self):
+        ret = type(self)(self.parent)
+        ret.working_jobs = self.working_jobs.copy()
+        ret.packets_with_pending_jobs = self.packets_with_pending_jobs.copy()
+        ret.working_limit = self.working_limit
+        return ret
+
+    def set_working_limit(self, val):
+        self.working_limit = val
+        self.notify_has_pending_if_need()
+
+    def notify_has_pending_if_need(self):
+        if self.has_startable_jobs():
+            self._notify_has_pending()
+
+    def _notify_has_pending(self):
+        sched = self.parent.scheduler
+        if sched:
+            sched._on_job_pending(self.parent)
+
+    def on_job_get(self, pck, job):
+        self.working_jobs[job] = pck
+
+    def on_job_done(self, pck, job):
+        self.working_jobs.pop(job, None)
+
+    def on_packet_attach(self, pck):
+        for job in pck._get_working_jobs():
+            self.working_jobs[job] = pck
+
+        if pck.has_pending_jobs():
+            self.packets_with_pending_jobs.add(pck)
+
+    def on_packet_detach(self, pck):
+        for job in pck._get_working_jobs():
+            self.working_jobs.pop(job, None)
+
+        self.packets_with_pending_jobs.discard(pck)
+
+    def update_pending_jobs_state(self, pck):
+        if pck.has_pending_jobs():
+            if pck not in self.packets_with_pending_jobs:
+                self.packets_with_pending_jobs.add(pck)
+                self.notify_has_pending_if_need()
+        else:
+            if pck in self.packets_with_pending_jobs:
+                self.packets_with_pending_jobs.remove(pck)
+
+    def has_startable_jobs(self):
+        return bool(self.packets_with_pending_jobs) \
+            and len(self.working_jobs) < self.working_limit
+
+    def get_packet_to_run(self):
+        return self.packets_with_pending_jobs.peak()[0]
+
+    def do_relocate_packet(self, pck):
+        pass
+
+
+class SandboxOps(Unpickable(
+                    working_packets=set,
+                    pending_packets=PackSet.create,
+                    working_limit=(int, 1),
+                )):
+
+    def __init__(self, parent):
+        super(SandboxOps, self).__init__()
+        self.parent = parent
+
+# TODO Better
+    def copy(self):
+        ret = type(self)(self.parent)
+        ret.working_packets = self.working_packets.copy()
+        ret.pending_packets = self.pending_packets.copy()
+        ret.working_limit = self.working_limit
+        return ret
+
+    def set_working_limit(self, val):
+        self.working_limit = val
+        self.notify_has_pending_if_need()
+
+    def notify_has_pending_if_need(self):
+        sched = self.parent.scheduler
+        if self.pending_packets and sched:
+            sched._on_packet_pending(self.parent) # XXX not under lock!
+
+    def on_packet_attach(self, pck):
+        pass
+
+    def on_packet_detach(self, pck):
+        self.working_packets.discard(pck)
+
+    def update_pending_jobs_state(self, pck):
+        pass
+
+    def get_packet_to_run(self):
+        return self.pending_packets.peak()[0]
+
+    def has_startable_packets(self):
+        return self.pending_packets \
+            and len(self.working_packets) < self.working_limit
+
+    def do_relocate_packet(self, pck):
+        if pck.state == PacketState.PENDING:
+            self.pending_packets.add(pck)
+        else:
+            self.pending_packets.discard(pck)
+
+        if pck.state in PacketState.StatesWithNotEmptyExecutor:
+            self.working_packets.add(pck)
+        else:
+            self.working_packets.discard(pck)
+
+
+class CombinedQueue(Unpickable(
                        packets=set,
                        suspended_packets=TimedSet.create,
                        is_suspended=bool,
                        lock=PickableRLock,
-                       working_limit=(int, 1),
+                       #working_limit=(int, 1),
                        successfull_lifetime=(int, 0),
                        successfull_default_lifetime=int,
                        errored_lifetime=(int, 0),
                        errored_default_lifetime=int,
                        suspended_lifetime=(int, 0),
                        suspended_default_lifetime=value_or_None,
-
                        by_user_state=ByUserState,
-
-                       # LocalQueue
-                       working_jobs=emptydict,
-                       packets_with_pending_jobs=PackSet.create,
-
-                       # SandboxQueue
-                       working_packets=set, # FIXME
-                       pending_packets=PackSet.create,
                     )
                 ):
 
@@ -75,17 +191,39 @@ class QueueBase(Unpickable(
     }
 
     def __init__(self, name):
-        super(QueueBase, self).__init__()
+        super(CombinedQueue, self).__init__()
         self.name = name
+        self.local_ops = LocalOps(self)
+        self.sandbox_ops = SandboxOps(self)
+
+    def __repr__(self):
+        return '<Queue %s; total=%d; loc<work=%d; pend=%d; lim=%d> sbx<work=%d; pend=%d; lim=%d> at 0x%x>' % (
+            self.name,
+            len(self.packets),
+
+            len(self.local_ops.working_jobs),
+            len(self.local_ops.packets_with_pending_jobs),
+            self.local_ops.working_limit,
+
+            len(self.sandbox_ops.working_jobs),
+            len(self.sandbox_ops.packets_with_pending_jobs),
+            self.sandbox_ops.working_limit,
+
+            id(self)
+        )
 
     def __getstate__(self):
-        sdict = getattr(super(QueueBase, self), "__getstate__", lambda: self.__dict__)()
-        # FIXME copy without lock
         with self.lock:
+            sdict = getattr(super(CombinedQueue, self), "__getstate__", lambda: self.__dict__)()
+
             by_user_state = sdict['by_user_state']
             for qname, q in by_user_state.items():
                 by_user_state[qname] = q.copy()
-        return sdict
+
+            sdict['local_ops'] = sdict['local_ops'].copy()
+            sdict['sandbox_ops'] = sdict['sandbox_ops'].copy()
+
+            return sdict
 
     def SetSuccessLifeTime(self, lifetime):
         self.successfull_lifetime = lifetime
@@ -176,6 +314,8 @@ class QueueBase(Unpickable(
 
             self._do_relocate_packet(pck)
 
+        self.notify_has_pending_if_need(pck)
+
     def _find_packet_user_state_queue(self, pck):
         ret = None
         for qname, queue in self.by_user_state.items():
@@ -204,10 +344,6 @@ class QueueBase(Unpickable(
     def _attach_packet(self, pck):
         with self.lock:
             assert pck.queue is None
-
-            if not isinstance(pck, self._PACKET_CLASS):
-                raise RuntimeError("Packet %s is not %s, can't attach to %s" \
-                    % (pck, self._PACKET_CLASS.__name__, self.name))
 
             pck.queue = self
             self.packets.add(pck)
@@ -276,7 +412,7 @@ class QueueBase(Unpickable(
 
     def Resume(self):
         self.is_suspended = False
-        self._on_resume()
+        self.notify_has_pending_if_need()
 
     def Suspend(self):
         self.is_suspended = True
@@ -304,95 +440,57 @@ class QueueBase(Unpickable(
 
         return status
 
-    def ChangeWorkingLimit(self, lmtValue):
-        self.working_limit = int(lmtValue)
-        self._on_change_working_limit()
+    def ChangeWorkingLimit(self, local_limit, sandbox_limit=None):
+        local_limit = int(local_limit)
+        if sandbox_limit is None:
+            sandbox_limit = local_limit
+        else:
+            sandbox_limit = int(sandbox_limit)
 
+        if local_limit < 1 or sandbox_limit < 1:
+            raise ValueError()
+
+        self.local_ops.set_working_limit(local_limit)
+        self.sandbox_ops.set_working_limit(sandbox_limit)
 
     def Empty(self):
-        #return not any(self.by_user_state[subq_name] for subq_name in self.VIEW_BY_ORDER)
         return not self.packets
 
-    def convert_to_v3(self):
-        by_user_state = self.by_user_state
+    def _get_pck_ops(self, pck):
+        return self.local_ops if isinstance(pck, LocalPacket) else self.sandbox_ops
 
-        self.packets = set(
-            itertools.chain(
-                by_user_state.pending,
-                by_user_state.workable,
-                by_user_state.successfull,
-                by_user_state.error,
-                by_user_state.suspended,
-                by_user_state.waiting,
-            )
-        )
-
-class LocalQueue(QueueBase):
-    _PACKET_CLASS = LocalPacket
-
-    def __repr__(self):
-        return '<LocalQueue %s; total=%d; work=%d; pend=%d; lim=%s at 0x%x>' % (
-            self.name,
-            len(self.packets),
-            len(self.working_jobs),
-            len(self.packets_with_pending_jobs),
-            self.working_limit,
-            id(self)
-        )
-
-    def _notify_has_pending_if_need(self):
-        if self.has_startable_jobs() and self.scheduler:
-            self.scheduler._on_job_pending(self)
-
-    def _on_change_working_limit(self):
-        self._notify_has_pending_if_need()
-
-    def _on_job_get(self, pck, job):
-        with self.lock:
-            self.working_jobs[job] = pck
-
-    def _on_resume(self):
-        if self.scheduler:
-            self.scheduler._on_job_pending(self)
-
-    def _on_job_done(self, pck, job):
-        with self.lock:
-            self.working_jobs.pop(job, None)
-        self._notify_has_pending_if_need()
-
-    def relocate_packet(self, pck):
-        QueueBase.relocate_packet(self, pck)
-        self._notify_has_pending_if_need()
+    # Common
+    def _do_relocate_packet(self, pck):
+        self._get_pck_ops(pck).do_relocate_packet(pck)
 
     def _on_packet_attach(self, pck):
-        for job in pck._get_working_jobs():
-            self.working_jobs[job] = pck
-
-        if pck.has_pending_jobs():
-            self.packets_with_pending_jobs.add(pck)
+        self._get_pck_ops(pck).on_packet_attach(pck)
 
     def _on_packet_detach(self, pck):
-        for job in pck._get_working_jobs():
-            self.working_jobs.pop(job, None)
+        self._get_pck_ops(pck).on_packet_detach(pck)
 
-        self.packets_with_pending_jobs.discard(pck)
+    #def relocate_packet(self, pck):
+        #raise NotImplementedError()
 
-    def has_startable_jobs(self):
+    def update_pending_jobs_state(self, pck):
         with self.lock:
-            return bool(self.packets_with_pending_jobs) \
-                and len(self.working_jobs) < self.working_limit \
-                and self.is_alive()
+            self._get_pck_ops(pck).update_pending_jobs_state(pck)
 
-    def _get_working_packets(self):
-        return set(self.working_jobs.values())
+    def notify_has_pending_if_need(self, pck=None):
+        if pck:
+            self._get_pck_ops(pck).notify_has_pending_if_need()
+        else:
+            self.local_ops.notify_has_pending_if_need()
+            self.sandbox_ops.notify_has_pending_if_need()
 
+    # Local
     def get_job_to_run(self):
         while True:
             with self.lock:
                 if not self.has_startable_jobs():
                     return None
 
-                pck, prior = self.packets_with_pending_jobs.peak()
+                pck = self.local_ops.get_packet_to_run()
 
             # .get_job_to_run not under lock to prevent deadlock
             try:
@@ -403,84 +501,32 @@ class LocalQueue(QueueBase):
 
             return job
 
-    def update_pending_jobs_state(self, pck):
+    def has_startable_jobs(self):
+        return self.is_alive() and self.local_ops.has_startable_jobs()
+
+    def _on_job_done(self, pck, job):
+        ops = self.local_ops
         with self.lock:
-            if pck.has_pending_jobs():
-                if pck not in self.packets_with_pending_jobs:
-                    self.packets_with_pending_jobs.add(pck)
-                    self._notify_has_pending_if_need()
-            else:
-                if pck in self.packets_with_pending_jobs:
-                    self.packets_with_pending_jobs.remove(pck)
+            ops.on_job_done(pck, job)
+        ops.notify_has_pending_if_need()
 
-    def _do_relocate_packet(self, pck):
-        pass
-
-
-class SandboxQueue(QueueBase):
-    _PACKET_CLASS = SandboxPacket
-
-    def __repr__(self):
-        return '<SandboxQueue %s; total=%d; work=%d; pend=%d; lim=%s at 0x%x>' % (
-            self.name,
-            len(self.packets),
-            len(self.working_packets),
-            len(self.pending_packets),
-            self.working_limit,
-            id(self)
-        )
-
-    def _notify_has_pending_if_need(self):
-        if self.pending_packets and self.scheduler:
-            self.scheduler._on_packet_pending(self) # XXX not under lock!
-
-    def _on_change_working_limit(self):
-        self._notify_has_pending_if_need()
-
-    def _on_resume(self):
-        self._notify_has_pending_if_need()
-
-    def relocate_packet(self, pck):
-        QueueBase.relocate_packet(self, pck)
-        self._notify_has_pending_if_need()
-
-    def _do_relocate_packet(self, pck):
-        if pck.state == PacketState.PENDING:
-            self.pending_packets.add(pck)
-        else:
-            self.pending_packets.discard(pck)
-
-        if pck.state in PacketState.StatesWithNotEmptyExecutor:
-            self.working_packets.add(pck)
-        else:
-            self.working_packets.discard(pck)
-
-    def has_startable_packets(self):
+    def _on_job_get(self, pck, job):
         with self.lock:
-            return self.pending_packets \
-                and len(self.working_packets) < self.working_limit \
-                and self.is_alive()
+            self.local_ops.on_job_get(pck, job)
 
+    # Sandbox
     def get_packet_to_run(self):
         with self.lock:
             if not self.has_startable_packets():
                 return None
+            return self.sandbox_ops.get_packet_to_run()
 
-            return self.pending_packets.peak()[0]
-
-    def _on_packet_attach(self, pck):
-        pass
-
-    def _on_packet_detach(self, pck):
-        self.working_packets.discard(pck)
-
-    def update_pending_jobs_state(self, pck):
-        pass
-
-    def convert_to_v3(self):
-        super(SandboxQueue, self).convert_to_v3()
-        self.pending_packets = PackSet.create(list(self.by_user_state.pending))
+    def has_startable_packets(self):
+        with self.lock:
+            return self.is_alive() and self.sandbox_ops.has_startable_packets()
 
 
-from rem.queue_legacy import Queue
+from rem.queue_legacy import Queue, LocalQueue, QueueBase, SandboxQueue
 Queue
+LocalQueue
+SandboxQueue

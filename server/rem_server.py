@@ -36,7 +36,7 @@ import rem.subprocsrv_fallback
 import rem.job
 import rem.delayed_executor as delayed_executor
 import rem.resource_sharing
-from rem.queue import SandboxQueue
+import rem.queue
 from rem.action_queue import ActionQueue
 from rem.sandbox_releases import SandboxReleasesResolver
 
@@ -180,8 +180,8 @@ def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPL
     if not pck:
         raise MakeNonExistedPacketException(pck_id)
 
-    if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
-        raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
+    #if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
+        #raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
 
     _scheduler.tempStorage.PickPacket(pck_id) # pop packet
 
