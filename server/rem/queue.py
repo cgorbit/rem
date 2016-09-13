@@ -205,8 +205,8 @@ class CombinedQueue(Unpickable(
             len(self.local_ops.packets_with_pending_jobs),
             self.local_ops.working_limit,
 
-            len(self.sandbox_ops.working_jobs),
-            len(self.sandbox_ops.packets_with_pending_jobs),
+            len(self.sandbox_ops.working_packets),
+            len(self.sandbox_ops.pending_packets),
             self.sandbox_ops.working_limit,
 
             id(self)

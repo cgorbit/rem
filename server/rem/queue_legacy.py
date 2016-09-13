@@ -1,3 +1,4 @@
+import rem.queue
 from rem.queue import ByUserState
 from rem.scheduler import Scheduler
 from rem.common import PackSet, TimedSet, PickableRLock, emptyset, emptydict, Unpickable, value_or_None
@@ -110,10 +111,27 @@ class QueueBase(Unpickable(
             )
         )
 
+def _convert_to_combined(self):
+    sdict = self.__dict__
+
+    working_limit = sdict.pop('working_limit')
+
+    local = self.local_ops = rem.queue.LocalOps(self)
+    local.working_limit = working_limit
+    local.working_jobs = sdict.pop('working_jobs')
+    local.packets_with_pending_jobs = sdict.pop('packets_with_pending_jobs')
+
+    sbx = self.sandbox_ops = rem.queue.SandboxOps(self)
+    sbx.working_limit = working_limit
+    sbx.working_packets = sdict.pop('working_packets')
+    sbx.pending_packets = sdict.pop('pending_packets')
+
+    self.__class__ = rem.queue.CombinedQueue
+
 
 class LocalQueue(QueueBase):
     def convert_to_v5(self):
-        raise NotImplementedError()
+        _convert_to_combined(self)
 
 
 class SandboxQueue(QueueBase):
@@ -122,4 +140,4 @@ class SandboxQueue(QueueBase):
         self.pending_packets = PackSet.create(list(self.by_user_state.pending))
 
     def convert_to_v5(self):
-        raise NotImplementedError()
+        _convert_to_combined(self)
