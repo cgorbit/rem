@@ -356,14 +356,27 @@ class StatusCommander(ICommander):
 
 class UpdateCommander(ICommander):
     def __call__(self):
+        opts = self.options
+
         if self.options.packet and self.options.files:
             pck_id = self.options.packet
             files = self.options.files
             pck = self.conn.PacketInfo(pck_id)
             pck.AddFiles(files)
+
         elif self.options.queue and self.options.working_limit:
             queue = self.conn.Queue(self.options.queue)
-            queue.ChangeWorkingLimit(self.options.working_limit)
+            limits = opts.working_limit.split(',')
+            if len(limits) == 1:
+                local_limit = int(limits[0])
+                args = [local_limit]
+            elif len(limits) == 2:
+                local_limit, sandbox_limit = map(int, limits)
+                args = [local_limit, sandbox_limit]
+            else:
+                raise RuntimeError("Malformed working_limit")
+            queue.ChangeWorkingLimit(*args)
+
         else:
             raise CommandExecutionError("not enough parameters for update command")
 
@@ -452,7 +465,7 @@ def parse_args():
     parser.add_option("--min-ctime")
     parser.add_option("--max-ctime")
     parser.add_option("-R", "--relloc-path", dest="from_to", default=":", help="relocation PATH for moved packet (':'-splitted pair of queues)", metavar="PATH")
-    parser.add_option("-W", "--working-limit", dest="working_limit", type="int", help="set working limit for queue")
+    parser.add_option("-W", "--working-limit", dest="working_limit", help="set working limit for queue (format: LOCAL_LIMIT[,SANDBOX_LIMIT])")
     parser.add_option("--all-deps", dest="show_all_dep_tags", action="store_const", const=True, help="Show all tags not only tags to wait")
     parser.add_option("-l", "--labels", dest="labels", action='append', help="")
     parser.add_option("--port", help="")
