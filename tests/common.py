@@ -223,3 +223,6 @@ class RemServerWrapper(object):
 class TestCase(unittest.TestCase):
     def _is_sandbox_only_setup(self):
         return bool(self.connector.proxy.get_config()['all_packets_in_sandbox'])
+
+    def _is_random_sandboxness_setup(self):
+        return bool(self.connector.proxy.get_config()['random_packet_sandboxness'])

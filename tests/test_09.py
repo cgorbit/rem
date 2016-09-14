@@ -23,7 +23,7 @@ class T09(TestCase):
             The second one creates packet depending on the same tag.
             The aim is to check the following error: two tag-object with the same name are created on server"""
 
-        if self._is_sandbox_only_setup():
+        if self._is_sandbox_only_setup() or self._is_random_sandboxness_setup():
             return
 
         class ClientThread(threading.Thread):

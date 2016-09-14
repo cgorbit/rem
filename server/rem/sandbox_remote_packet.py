@@ -19,6 +19,7 @@ from rem.common import PickableLock, Unpickable
 from rem.action_queue import ActionQueue
 
 remote_packets_dispatcher = None
+USE_DUMMY_JOBS = False
 
 
 # XXX This code is not ready for production
@@ -186,6 +187,7 @@ class RemotePacketsDispatcher(object):
                 'python_resource': self._sbx_python_resource_id,
                 'resume_params': json.dumps({
                     'reset_tries': pck._reset_tries_at_start,
+                    'use_dummy_jobs': USE_DUMMY_JOBS,
                 }),
             }
         )
@@ -431,7 +433,7 @@ prev_task: {prev_task}
         #))
 
         if not pck:
-            raise WrongTaskIdError()
+            raise WrongTaskIdError('No packet for sbx:%s' % task_id)
 
         with pck._lock:
             # FIXME
@@ -563,7 +565,7 @@ prev_task: {prev_task}
                 return
 
             elif http_status_group == 3:
-                raise NotImplementedError()
+                raise NotImplementedError("Redirects handling not implemented")
 
             else:
                 log_fail('http status code == %d' % resp.status_code)

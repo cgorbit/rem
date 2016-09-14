@@ -383,8 +383,16 @@ if __name__ == '__main__':
         rpc_server.server_address[1]
     )
 
-    reset_tries = json.loads(opts.resume_params).get('reset_tries', False) \
-        if opts.resume_params else False
+    reset_tries = False
+
+    if opts.resume_params:
+        resume_params = json.loads(opts.resume_params)
+
+        if resume_params.get('use_dummy_jobs', False):
+            import rem.job
+            rem.job.DUMMY_COMMAND_CREATOR = lambda job: ['true'] # TODO sleep
+
+        reset_tries = resume_params.get('reset_tries', False)
 
     pck.start(
         opts.work_dir,

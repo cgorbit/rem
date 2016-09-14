@@ -1,8 +1,8 @@
 from rem.packet import ReprState, LocalPacket, DUMMY_GRAPH_EXECUTOR, always
 from rem.common import Unpickable, PickableRLock
 from rem.callbacks import CallbackHolder, ICallbackAcceptor
-from rem.queue import LocalQueue
-from rem.queue_legacy import Queue as LegacyQueue
+import rem.queue
+from rem.queue_legacy import Queue as LegacyQueue, LocalQueue
 
 from rem_logging import logger as logging
 

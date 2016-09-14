@@ -19,7 +19,7 @@ from connmanager import ConnectionManager
 from packet import PacketState, PacketCustomLogic
 import packet
 import packet_legacy
-from queue import LocalQueue, SandboxQueue, QueueBase
+from queue import CombinedQueue
 import queue_legacy
 from storages import TagStorage, ShortStorage, BinaryStorage, GlobalPacketStorage
 from callbacks import ICallbackAcceptor, CallbackHolder, TagBase
@@ -281,7 +281,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         "qRef", "tagRef", "binStorage", "tempStorage", "connManager",
         "_remote_packets_dispatcher",
     ]
-    BackupFormatVersion = 4
+    BackupFormatVersion = 5
 
     def __init__(self, context):
         getattr(super(Scheduler, self), "__init__")()
@@ -327,21 +327,20 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.LastHeap = None
 
     def rpc_delete_queue(self, qname):
-        if qname in self.qRef:
-            with self.lock:
-                q = self.qRef.get(qname, None)
-                if q:
-                    if not q.Empty(): # race
-                        raise RpcUserError(AttributeError("can't delete non-empty queue"))
-                    self.qRef.pop(qname)
-                    return True
-        return False
+        with self.lock:
+            q = self.qRef.get(qname, None)
+            if not q:
+                return False
+
+            if not q.Empty(): # race
+                raise RpcUserError(AttributeError("can't delete non-empty queue"))
+
+            self.qRef.pop(qname)
+            # here someone can add packet to deleted queue in rem_server.py
+            return True
 
     def _create_queue(self, name):
-        cls = SandboxQueue if self.context.all_packets_in_sandbox or name.startswith('sbx:') \
-             else LocalQueue
-
-        q = cls(name)
+        q = CombinedQueue(name)
         self.qRef[name] = q
 
         q.UpdateContext(self.context)
@@ -406,7 +405,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         logging.warning("No tasks for execution after condition waking up")
 
     def Notify(self, ref):
-        if isinstance(ref, LocalQueue):
+        if isinstance(ref, CombinedQueue):
             self._add_queue_as_non_empty_if_need(ref)
 
         elif isinstance(ref, SchedWatcher):
@@ -548,7 +547,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                     self.packets.append(obj)
                 elif isinstance(obj, TagBase):
                     self.tags.append(obj)
-                elif isinstance(obj, (QueueBase, queue_legacy.Queue)):
+                elif isinstance(obj, (CombinedQueue, queue_legacy.Queue, queue_legacy.LocalQueue, queue_legacy.SandboxQueue)):
                     self.queues.append(obj)
 
             def finalize(self):
@@ -696,6 +695,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
             pck.convert_to_v4()
 
     @classmethod
+    @common.logged()
+    def _convert_backup_to_v5(cls, sdict, registrator):
+        for q in registrator.queues:
+            q.convert_to_v5()
+
+    @classmethod
     def _make_on_disk_tags_conversion_params(cls, ctx):
         import cPickle as pickle
 
@@ -816,7 +821,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 self.packetNamesTracker.Add(pck.name)
                 pck.AddCallbackListener(self.packetNamesTracker)
 
-        if isinstance(q, LocalQueue):
+        if isinstance(q, CombinedQueue):
             self._add_queue_as_non_empty_if_need(q)
 
     def AddPacketToQueue(self, pck, queue):
@@ -871,11 +876,11 @@ class Scheduler(Unpickable(lock=PickableRLock,
                 alloc_guard=self._sandbox_packets_runner._acquire
             )
 
-        # LocalQueue's notify in _vivify_queues actually,
-        # but SandboxQueue's can't notify until SandboxPacketsRunner is created
+        # Local Queue's notify in _vivify_queues actually,
+        # but Sandbox Queue's can't notify until SandboxPacketsRunner is created
         for q in self.qRef.itervalues():
             if q.is_alive():
-                q._notify_has_pending_if_need()
+                q.notify_has_pending_if_need()
 
     def set_python_resource_id(self, id):
         self._remote_packets_dispatcher._sbx_python_resource_id = id

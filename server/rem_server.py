@@ -15,6 +15,7 @@ import multiprocessing
 import argparse
 import shutil
 import subprocess
+from random import random
 
 from rem import constants, osspec
 
@@ -36,7 +37,7 @@ import rem.subprocsrv_fallback
 import rem.job
 import rem.delayed_executor as delayed_executor
 import rem.resource_sharing
-from rem.queue import SandboxQueue
+import rem.queue
 from rem.action_queue import ActionQueue
 from rem.sandbox_releases import SandboxReleasesResolver
 
@@ -134,8 +135,9 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
         for email in notify_emails:
             rpc_assert(CheckEmailAddress(email), "incorrect e-mail: " + email)
 
-    if _context.all_packets_in_sandbox:
-        is_sandbox = True
+    is_sandbox = is_sandbox \
+        or _context.all_packets_in_sandbox \
+        or _context.random_packet_sandboxness and random() < 0.5
 
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck_cls = SandboxPacket if is_sandbox else LocalPacket
@@ -180,8 +182,8 @@ def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPL
     if not pck:
         raise MakeNonExistedPacketException(pck_id)
 
-    if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
-        raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
+    #if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
+        #raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
 
     _scheduler.tempStorage.PickPacket(pck_id) # pop packet
 
