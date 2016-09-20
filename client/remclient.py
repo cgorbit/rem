@@ -206,9 +206,12 @@ class Queue(object):
         plist = self.proxy.queue_list(*args)
         return [JobPacketInfo(self.conn, pck_id) for pck_id in plist]
 
-    def ChangeWorkingLimit(self, lmtValue):
+    def ChangeWorkingLimit(self, local_limit, sandbox_limit=None):
         """изменяет runtime лимит - одновременно запущенных задач из очереди"""
-        self.proxy.queue_change_limit(self.name, int(lmtValue))
+        args = [self.name, int(local_limit)]
+        if sandbox_limit is not None:
+            args.append(int(sandbox_limit))
+        self.proxy.queue_change_limit(*args)
 
     def Delete(self):
         """удаляет на сервере очередь с данным именем (если таковая есть)

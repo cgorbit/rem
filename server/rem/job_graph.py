@@ -523,6 +523,7 @@ class JobGraphExecutor(Unpickable(
         self.active_jobs_cache.clear()
         #self.failed_jobs.clear() # FIXME Don't remember. Legacy behaviour?
         #self._init_job_deps_graph() # FIXME Why I comment this?
+        self._update_state()
 
     def vivify_jobs_waiting_stoppers(self):
         jobs_to_retry, self.jobs_to_retry = self.jobs_to_retry, {}

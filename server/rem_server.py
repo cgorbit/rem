@@ -338,8 +338,8 @@ def queue_list_updated(queue_name, min_mtime, filter=None):
 
 
 @traced_rpc_method("info")
-def queue_change_limit(queue_name, limit):
-    _scheduler.rpc_get_queue(queue_name).ChangeWorkingLimit(limit)
+def queue_change_limit(queue_name, local_limit, sandbox_limit=None):
+    _scheduler.rpc_get_queue(queue_name).ChangeWorkingLimit(local_limit, sandbox_limit)
 
 
 @traced_rpc_method("info")
