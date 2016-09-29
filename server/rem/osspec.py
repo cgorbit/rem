@@ -93,5 +93,5 @@ def set_oom_adj(adj):
 
 
 def get_oom_adj():
-    with open('/proc/self/oom_score_adj') as io:
+    with open('/proc/self/oom_adj') as io:
         return int(io.read().rstrip())
