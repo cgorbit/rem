@@ -323,6 +323,22 @@ class JobPacket(object):
         return self.conn.PacketInfo(self)
 
 
+def _merge_intervals(intervals):
+    intervals = sorted(intervals, key=lambda (start, _): start)
+    if not intervals:
+        return
+
+    accum = intervals[0]
+    for interval in intervals:
+        if accum[1] >= interval[0]:
+            accum = (accum[0], max(accum[1], interval[1]))
+        else:
+            yield accum
+            accum = interval
+
+    yield accum
+
+
 class JobPacketInfo(object):
     """прокси объект для манипулирования пакетом задач в REM
     Объекты этого класса не нужно создавать вручную, правильный способ их получать - метод Queue.ListPackets"""
@@ -543,15 +559,19 @@ class JobPacketInfo(object):
         data = binary.data
         return data
 
-    def GetWorkingTime(self):
-        def get_res_working_time(res):
-            fmtTime = "%Y/%m/%d %H:%M:%S"
-            reTimes = re.search("\"started:\s(.*);\sfinished:\s(.*);", res.data)
-            if not reTimes:
-                return 0
-            return time.mktime(time.strptime(reTimes.group(2), fmtTime)) - time.mktime(time.strptime(reTimes.group(1), fmtTime))
+    def GetWorkingTime(self, with_retries=True, merged=False):
+        if not merged:
+            get = JobInfo.GetTotalRunningDuration if with_retries else JobInfo.TryGetLastRunDuration
+            return sum(filter(None, [get(job) for job in self.jobs]))
 
-        return sum(get_res_working_time(res) for res in itertools.chain(*(job.results for job in self.jobs)))
+        intervals = []
+        for job in self.jobs:
+            if with_retries:
+                intervals.extend(job.TryGetRunTimes(result) for result in job.results)
+            else:
+                intervals.append(job.TryGetLastRunTimes())
+
+        return sum(finish - start for start, finish in _merge_intervals(filter(None, intervals)))
 
     def EnumerateJobs(self, descending_order=False):
         id2job = {}
@@ -592,6 +612,39 @@ class JobInfo(object):
         self.__dict__.update(kws)
         for res in getattr(self, 'results', ()):
             res.data = "\n".join([x for x in res.data.splitlines() if x.strip()])
+
+    @staticmethod
+    def TryGetRunTimes(res):
+        fmtTime = "%Y/%m/%d %H:%M:%S"
+        reTimes = re.search("\"started:\s(.*);\sfinished:\s(.*);", res.data)
+        if not reTimes:
+            return None
+        def parse_time(s):
+            return time.mktime(time.strptime(s, fmtTime))
+        return parse_time(reTimes.group(1)), parse_time(reTimes.group(2))
+
+    @classmethod
+    def TryGetRunDuration(cls, res):
+        ret = cls.TryGetRunTimes(res)
+        if not ret:
+            return
+        start, finish = ret
+        return finish - start
+
+    def TryGetLastRunDuration(self):
+        for res in reversed(self.results):
+            t = self.TryGetRunDuration(res)
+            if t is not None:
+                return t
+
+    def TryGetLastRunTimes(self):
+        for res in reversed(self.results):
+            times = self.TryGetRunTimes(res)
+            if times is not None:
+                return times
+
+    def GetTotalRunningDuration(self):
+        return sum(filter(None, [self.TryGetRunDuration(res) for res in self.results]))
 
 
 class Tag(object):
