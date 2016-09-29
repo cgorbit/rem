@@ -466,7 +466,7 @@ class JobPacketInfo(object):
             val = db.get(path, None)
             if val is not None:
                 (checksum, ts) = val.split('\t')
-                if last_modified <= int(ts) <= time.time():
+                if last_modified == int(ts):
                     return checksum
 
             last_modified = int(os.stat(path).st_mtime)
