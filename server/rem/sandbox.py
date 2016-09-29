@@ -86,11 +86,13 @@ class _ProxyObject(object):
 
 
 class Client(object):
-    def __init__(self, url, oauth_token=None, debug=False, timeout=None):
+    def __init__(self, url, oauth_token=None, debug=False, timeout=None, owner=None, priority=None):
         self.url = url
         self.oauth_token = oauth_token
         self.debug = debug
         self.timeout = timeout
+        self.default_owner = owner
+        self.default_priority = priority
 
     def _make_call(self, method, path, data=None, raw_result=False, succ_code=200):
         if self.debug:
@@ -130,8 +132,10 @@ class Client(object):
                          kill_timeout=None, description=None, host=None):
             params = {
             }
+            priority = priority or self.default_priority
             if priority is not None:
                 params['priority'] = {'class': priority[0], 'subclass': priority[1]}
+            owner = owner or self.default_owner
             if owner is not None:
                 params['owner'] = owner
             if notifications is not None:

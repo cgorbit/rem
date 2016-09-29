@@ -4,6 +4,7 @@ from tempfile import NamedTemporaryFile
 
 import subprocsrv
 from common import check_process_call, check_process_retcode, wait as _wait_process
+from osspec import set_oom_adj
 
 
 class ScopedVal(object):
@@ -63,6 +64,12 @@ class _Popen(object):
             env = os.environ.copy()
             env.update(task.env_update)
 
+        def preexec_fn():
+            if task.setpgrp:
+                os.setpgrp()
+            if task.oom_adj is not None:
+                set_oom_adj(task.oom_adj)
+
         with stdin_mgr as stdin:
             with file_or_none(task.stdout, 'w') as stdout:
                 with file_or_none(task.stderr, 'w') as stderr:
@@ -71,7 +78,7 @@ class _Popen(object):
                         stdin=stdin,
                         stdout=stdout,
                         stderr=stderr,
-                        preexec_fn=os.setpgrp if task.setpgrp else None,
+                        preexec_fn=preexec_fn,
                         cwd=task.cwd,
                         shell=task.shell,
                         close_fds=True, # as in _Server

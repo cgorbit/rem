@@ -82,3 +82,13 @@ def set_process_cmdline(proc_title):
 def repr_term_status(status):
     return 'exit(%d)' % os.WEXITSTATUS(status) if os.WIFEXITED(status) \
       else 'kill(%d)' % os.WTERMSIG(status)
+
+
+def set_oom_adj(adj):
+    with open('/proc/self/oom_adj', 'w') as out:
+        out.write(str(adj))
+
+
+def get_oom_adj():
+    with open('/proc/self/oom_score_adj') as io:
+        return int(io.read().rstrip())

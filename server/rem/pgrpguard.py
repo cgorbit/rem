@@ -8,6 +8,9 @@ import subprocess
 import errno
 import time
 
+from osspec import set_oom_adj
+
+
 _EXIT_STATUS_IN_FILE = 200
 _EXIT_NO_ARGV        = 201
 _EXIT_NOT_SUPER_USER = 202
@@ -176,6 +179,8 @@ class ProcessGroupGuard(object):
         if 'preexec_fn' in kwargs:
             raise ValueError('preexec_fn in arguments')
 
+        oom_adj = kwargs.pop('oom_adj', None)
+
         wrapper_binary = kwargs.pop('wrapper_binary', 'pgrpguard')
         self._wrapper_filename = wrapper_binary
 
@@ -183,7 +188,12 @@ class ProcessGroupGuard(object):
         _set_cloexec(report_pipe[0])
         _set_cloexec(report_pipe[1])
 
-        kwargs['preexec_fn'] = lambda : _preexec_fn(report_pipe[1])
+        def preexec_fn():
+            if oom_adj is not None:
+                set_oom_adj(oom_adj)
+            _preexec_fn(report_pipe[1])
+
+        kwargs['preexec_fn'] = preexec_fn
 
         self._result = None
 

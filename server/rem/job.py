@@ -53,14 +53,16 @@ class _RunnerWithFallbackFunctor(object):
             return self._fallback(*args, **kwargs)
 
 
-def create_job_runner(runner, pgrpguard_binary):
+def create_job_runner(runner, pgrpguard_binary=None, oom_adj=None):
     def subprocsrv_backend(*args, **kwargs):
         if pgrpguard_binary is not None:
             kwargs['use_pgrpguard'] = True
+        kwargs['oom_adj'] = oom_adj
         return job_process.SubprocsrvProcess(runner, *args, **kwargs)
 
     def ordinal_backend(*args, **kwargs):
         kwargs['close_fds'] = True
+        kwargs['oom_adj'] = oom_adj
 
         if pgrpguard_binary is None:
             return job_process.DefaultProcess(*args, **kwargs)
