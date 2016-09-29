@@ -37,11 +37,12 @@ class T21(unittest.TestCase):
 
     def _do_test_common(self, runner, use_pgrpguard, do_terminate):
         pgrpguard_binary = 'pgrpguard' if use_pgrpguard else None
-        start_process = rem.job.create_job_runner(runner, pgrpguard_binary)
 
         start_time = str(time.time())
         msg = start_time + '\n'
         child_oom_adj = get_oom_adj() + 3
+
+        start_process = rem.job.create_job_runner(runner, pgrpguard_binary, oom_adj=child_oom_adj)
 
         with NamedTemporaryFile('w') as parent_stdin:
             with NamedTemporaryFile('r') as parent_stderr:
