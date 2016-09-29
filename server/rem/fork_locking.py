@@ -2,11 +2,13 @@ import threading
 import os
 import time
 import sys
-from sys import stderr
 import signal
 import errno
 from collections import namedtuple
 import traceback
+
+from rem.osspec import set_oom_adj
+
 
 __all__ = ["Lock", "RLock", "Condition", "LockWrapper", "RunningChildInfo", "TerminatedChildInfo", "run_in_child"]
 
@@ -17,12 +19,6 @@ if 'DUMMY_FORK_LOCKING' not in os.environ:
         import _dummy_fork_locking as _fork_locking
 else:
     import _dummy_fork_locking as _fork_locking
-
-try:
-    gettid = _fork_locking.gettid
-except AttributeError:
-    def gettid():
-        return None
 
 try:
     set_fork_friendly_acquire_timeout = _fork_locking.set_fork_friendly_acquire_timeout
@@ -118,7 +114,7 @@ def _dup_dev_null(file, flags):
 
 RunningChildInfo = namedtuple('RunningChildInfo', ['pid', 'stderr', 'timings'])
 
-def start_in_child(func, child_max_working_time=None):
+def start_in_child(func, child_max_working_time=None, oom_adj=None):
     assert(child_max_working_time is None or int(child_max_working_time))
 
     _, acquire_time = _timed(acquire_fork)
@@ -148,11 +144,14 @@ def start_in_child(func, child_max_working_time=None):
             os.dup2(child_err_wr, sys.stderr.fileno())
             os.close(child_err_wr)
 
+            if oom_adj is not None:
+                set_oom_adj(oom_adj)
+
             if child_max_working_time is not None:
                 signal.alarm(child_max_working_time)
 
             func()
-        except Exception as e:
+        except Exception:
             try:
                 traceback.print_exc()
             except:
@@ -175,8 +174,8 @@ def start_in_child(func, child_max_working_time=None):
 
 TerminatedChildInfo = namedtuple('TerminatedChildInfo', ['term_status', 'errors', 'timings'])
 
-def run_in_child(func, child_max_working_time=None):
-    child = start_in_child(func, child_max_working_time)
+def run_in_child(func, child_max_working_time=None, oom_adj=None):
+    child = start_in_child(func, child_max_working_time, oom_adj=oom_adj)
 
     with child.stderr:
         errors = child.stderr.read()

@@ -990,7 +990,32 @@ def init_logging(ctx):
     rem_logging.reinit_logger(ctx)
 
 
-def create_process_runners(ctx, oom_adj):
+class RunnerWithDefaultSetup(object):
+    def __init__(self, backend, setup):
+        self.__backend = backend
+        self.__setup = setup
+
+    def start(self, *args, **kwargs):
+        self.__setup(args, kwargs)
+        return self.__backend.start(*args, **kwargs)
+
+    def Popen(self, *args, **kwargs):
+        self.__setup(args, kwargs)
+        return self.__backend.Popen(*args, **kwargs)
+
+    def check_call(self, *args, **kwargs):
+        self.__setup(args, kwargs)
+        return self.__backend.check_call(*args, **kwargs)
+
+    def call(self, *args, **kwargs):
+        self.__setup(args, kwargs)
+        return self.__backend.call(*args, **kwargs)
+
+    def stop(self):
+        self.__backend(self)
+
+
+def create_process_runners(ctx):
     pgrpguard_binary = ctx.pgrpguard_binary
 
     runner = None
@@ -1003,7 +1028,7 @@ def create_process_runners(ctx, oom_adj):
 
     ctx._subprocsrv_runner = runner
 
-    ctx.run_job = rem.job.create_job_runner(runner, pgrpguard_binary, oom_adj)
+    ctx.run_job = rem.job.create_job_runner(runner, pgrpguard_binary, ctx.child_processes_oom_adj)
 
     def create_aux_runner():
         ordinal_runner = rem.subprocsrv_fallback.Runner()
@@ -1013,6 +1038,10 @@ def create_process_runners(ctx, oom_adj):
             else ordinal_runner
 
     ctx.aux_runner = create_aux_runner()
+    if ctx.child_processes_oom_adj is not None:
+        def setup(args, kwargs):
+            kwargs['oom_adj'] = ctx.child_processes_oom_adj
+        ctx.aux_runner = RunnerWithDefaultSetup(ctx.aux_runner, setup)
 
 
 def _init_sandbox(ctx):
@@ -1084,9 +1113,9 @@ def _share_sandbox_executor(ctx):
         return res_id.get()
 
 
-def init(ctx, oom_adj):
+def init(ctx):
     init_logging(ctx)
-    create_process_runners(ctx, oom_adj)
+    create_process_runners(ctx)
     rem.common.set_proc_runner(ctx.aux_runner)
 
     delayed_executor.start()
@@ -1127,13 +1156,14 @@ def main():
     opts = parse_arguments()
 
     ctx = create_context(opts.config)
+    ctx.child_processes_oom_adj = opts.oom_adj
 
     if opts.mode == 'test':
         ctx.log_warn_level = 'debug'
         ctx.log_to_stderr = True
         ctx.register_objects_creation = True
 
-    init(ctx, opts.oom_adj)
+    init(ctx)
 
     if opts.mode == "start":
         run_server(ctx)

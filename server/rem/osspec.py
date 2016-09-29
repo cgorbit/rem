@@ -7,8 +7,11 @@ import stat
 import sys
 import time
 
-import fork_locking
-from fork_locking import gettid
+try:
+    from _fork_locking import gettid
+except ImportError:
+    def gettid():
+        return None
 
 
 def is_pid_alive(pid):

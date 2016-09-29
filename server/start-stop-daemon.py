@@ -15,8 +15,7 @@ INFINITY = float('inf')
 
 def cwd_to_path():
     dir, name = os.path.split(sys.argv[0])
-    if dir != '':
-        os.chdir(dir)
+    os.chdir(dir)
 
 
 def parse_args():
@@ -100,7 +99,7 @@ class Service(object):
         """Checks if daemon is started
                 args - process start arguments
                 pidfile - file with stored process pid
-           
+
            If daemon is running returns process ID
            If daemon is not started returns False
            If pidFile is not exist returns None"""
@@ -115,10 +114,9 @@ class Service(object):
                 return False
             with open(cmdfile) as psReader:
                 psLine = psReader.read()
-            return pid
-            #if any(psLine.startswith(checkname) for checkname in self.checkExecNames):
-                #return pid
-            #return False
+            if any(psLine.startswith(checkname) for checkname in self.checkExecNames):
+                return pid
+            return False
         except:
             logging.exception("error while reading process status")
 
@@ -210,7 +208,7 @@ class Service(object):
 class REMService(Service):
     def __init__(self, oom_adj=None):
         self.Configure()
-        interpreter = sys.executable
+        interpreter = "python"
         runArgs = [interpreter, "rem-server.py", "start"]
         if oom_adj is not None:
             runArgs.append('--oom-adj=%s' % oom_adj)
@@ -222,9 +220,9 @@ class REMService(Service):
         if self.serverProcessTitle:
             custom_names.append(self.serverProcessTitle)
         super(REMService, self).__init__(
-            runargs=runArgs, pidfile="var/rem.pid", logfile="var/rem.errlog", 
+            runargs=runArgs, pidfile="var/rem.pid", logfile="var/rem.errlog",
             name="remd%s" % (("(\"" + self.serverName + "\")") if self.serverName else ""),
-            checkname=interpreter,
+            checkname="python",
             customnames=custom_names,
         )
 

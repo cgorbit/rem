@@ -152,6 +152,7 @@ class Context(object):
         self.allow_debug_rpc_methods = config.safe_getboolean("server", "allow_debug_rpc_methods", False)
         self.allow_python_resource_id_update = config.safe_getboolean("server", "allow_python_resource_id_update", False)
         self.register_objects_creation = False
+        self.child_processes_oom_adj = None
 
     def send_email_async(self, rcpt, msg):
         self.Scheduler.send_email_async(rcpt, msg)
