@@ -9,6 +9,7 @@ import pgrpguard
 
 from common import check_process_call, check_process_retcode, wait as _wait
 from rem_logging import logger as logging
+from osspec import set_oom_adj
 
 
 class _ProcessProxyBase(object):
@@ -60,7 +61,12 @@ class DefaultProcess(_ProcessProxyBase):
 
     def __init__(self, *args, **kwargs):
         _ProcessProxyBase.__init__(self)
-        kwargs['preexec_fn'] = os.setpgrp
+        oom_adj = kwargs.pop('oom_adj', None)
+        def preexec_fn():
+            os.setpgrp()
+            if oom_adj is not None:
+                set_oom_adj(oom_adj)
+        kwargs['preexec_fn'] = preexec_fn
         _extrapolate_env_update(kwargs)
         self._impl = subprocess.Popen(*args, **kwargs)
         self.pid = self._impl.pid # for debug
@@ -126,7 +132,8 @@ class SubprocsrvProcess(object):
     BEFORE_KILL_DELAY = _ProcessProxyBase.BEFORE_KILL_DELAY
 
     def __init__(self, runner, argv, stdin=None, stdout=None, stderr=None,
-                 setpgrp=False, cwd=None, shell=False, use_pgrpguard=False, env_update=None):
+                 setpgrp=False, cwd=None, shell=False, use_pgrpguard=False,
+                 env_update=None, oom_adj=None):
 
         self._signal_was_sent = False
 
@@ -138,7 +145,7 @@ class SubprocsrvProcess(object):
             stderr = stderr.name
 
         self._impl = runner.Popen(argv, stdin, stdout, stderr, setpgrp, cwd,
-                                  shell, use_pgrpguard, env_update)
+                                  shell, use_pgrpguard, env_update, oom_adj)
 
         self.pid = self._impl.pid # for debug
 

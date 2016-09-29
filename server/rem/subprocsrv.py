@@ -20,6 +20,7 @@ from profile import ProfiledThread, set_thread_name
 import pgrpguard
 from rem_logging import logger as logging
 from common import check_process_call, check_process_retcode
+from osspec import set_oom_adj
 
 class ServiceUnavailable(RuntimeError):
     pass
@@ -48,7 +49,8 @@ class StopServiceResponseMessage(object):
 
 class NewTaskParamsMessage(object):
     def __init__(self, args, stdin=None, stdout=None, stderr=None, setpgrp=False,
-                 cwd=None, shell=False, use_pgrpguard=False, env_update=None):
+                 cwd=None, shell=False, use_pgrpguard=False, env_update=None,
+                 oom_adj=None):
         self.task_id = None
         self.args = args
         self.stdin = stdin # string or None
@@ -59,6 +61,7 @@ class NewTaskParamsMessage(object):
         self.shell = shell # filename or None
         self.use_pgrpguard = use_pgrpguard
         self.env_update = env_update
+        self.oom_adj = oom_adj
 
 
 class SendSignalRequestMessage(object):
@@ -454,6 +457,9 @@ class _Server(object):
 
                 if task.setpgrp:
                     os.setpgrp()
+
+                if task.oom_adj is not None:
+                    set_oom_adj(task.oom_adj)
 
                 if task.cwd:
                     os.chdir(task.cwd)

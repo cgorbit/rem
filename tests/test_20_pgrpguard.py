@@ -12,6 +12,7 @@ import unittest
 
 import rem.pgrpguard as pgrpguard
 from rem.pgrpguard import _EXIT_STATUS_IN_FILE, ProcessGroupGuard
+from rem.osspec import get_oom_adj
 
 
 def sudo_get_open_file_count(pid):
@@ -125,7 +126,7 @@ else:
         env = os.environ.copy()
         env.update([('START_TIME', start_time)])
 
-        def run(cmd):
+        def run(cmd, oom_adj=None):
             p = GuardedProcessCWDWrapper(
                 cmd,
                 close_fds=True,
@@ -133,6 +134,7 @@ else:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=env,
+                oom_adj=oom_adj,
             )
             out, err = p.communicate('INPUT')
             return p.returncode, out, err
@@ -140,6 +142,19 @@ else:
         self.assertEqual(
             run(['sh', '-c', 'exit 0']),
             (0, '', '')
+        )
+
+        my_oom_adj = get_oom_adj()
+
+        self.assertEqual(
+            run(['sh', '-c', 'cat /proc/self/oom_adj']),
+            (0, '%d\n' % my_oom_adj, '')
+        )
+
+        child_oom_adj = my_oom_adj + 3
+        self.assertEqual(
+            run(['sh', '-c', 'cat /proc/self/oom_adj'], oom_adj=child_oom_adj),
+            (0, '%d\n' % (child_oom_adj - 1), '')
         )
 
         self.assertEqual(
