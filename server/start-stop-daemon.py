@@ -30,6 +30,7 @@ def parse_args():
     parser.add_option("--check-start", dest="mode", action="store_const", const="check-start",
                       help="check service and start if needed (default)")
     parser.add_option("--status", dest="mode", action="store_const", const="status", help="print service work status")
+    parser.add_option("--oom-adj", type=int, help="Job's processes oom_adj to set")
     opt, args = parser.parse_args()
     if opt.mode is None:
         if len(args) >= 1 and args[0] in modes:
@@ -207,10 +208,12 @@ class Service(object):
 
 
 class REMService(Service):
-    def __init__(self):
+    def __init__(self, oom_adj=None):
         self.Configure()
         interpreter = sys.executable
         runArgs = [interpreter, "rem-server.py", "start"]
+        if oom_adj is not None:
+            runArgs.append('--oom-adj=%s' % oom_adj)
         if self.setupScript:
             runArgs = ["/bin/sh", "-c", " ".join([self.setupScript, "&&", "exec"] + runArgs)]
         if not os.path.isdir("var"):
@@ -299,8 +302,8 @@ def dispatch_work(service, opt, args):
 if __name__ == "__main__":
     try:
         cwd_to_path()
-        service = REMService()
         opt, args = parse_args()
+        service = REMService(opt.oom_adj)
         dispatch_work(service, opt, args)
     except EnvironmentError, e:
         LogPrinter().error()

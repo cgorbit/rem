@@ -948,6 +948,7 @@ def parse_arguments():
 
     p.add_argument('-c', '--config', dest='config', default='rem.cfg')
     p.add_argument('--yt-writer-count', dest='yt_writer_count', type=int, default=20)
+    p.add_argument('--oom-adj', type=int)
     p.add_argument('mode', nargs='?', default='start')
 
     return p.parse_args()
@@ -989,7 +990,7 @@ def init_logging(ctx):
     rem_logging.reinit_logger(ctx)
 
 
-def create_process_runners(ctx):
+def create_process_runners(ctx, oom_adj):
     pgrpguard_binary = ctx.pgrpguard_binary
 
     runner = None
@@ -1002,7 +1003,7 @@ def create_process_runners(ctx):
 
     ctx._subprocsrv_runner = runner
 
-    ctx.run_job = rem.job.create_job_runner(runner, pgrpguard_binary)
+    ctx.run_job = rem.job.create_job_runner(runner, pgrpguard_binary, oom_adj)
 
     def create_aux_runner():
         ordinal_runner = rem.subprocsrv_fallback.Runner()
@@ -1083,9 +1084,9 @@ def _share_sandbox_executor(ctx):
         return res_id.get()
 
 
-def init(ctx):
+def init(ctx, oom_adj):
     init_logging(ctx)
-    create_process_runners(ctx)
+    create_process_runners(ctx, oom_adj)
     rem.common.set_proc_runner(ctx.aux_runner)
 
     delayed_executor.start()
@@ -1132,7 +1133,7 @@ def main():
         ctx.log_to_stderr = True
         ctx.register_objects_creation = True
 
-    init(ctx)
+    init(ctx, opts.oom_adj)
 
     if opts.mode == "start":
         run_server(ctx)
