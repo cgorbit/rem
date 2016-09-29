@@ -1233,6 +1233,7 @@ class LocalPacket(PacketBase):
 
 
 class SandboxPacket(PacketBase):
+    # to decrease network usage (sandbox packets stores whole stderrs in resource)
     MAX_ERR_LEN = 1024
 
     def _do_graph_suspend(self, kill_jobs):
