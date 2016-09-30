@@ -30,7 +30,7 @@ def logged(log_args=False, level="debug", skip_arg_count=0):
     def inner(func):
         def inner(*args, **kwargs):
             if log_args:
-                args_ = args[skip_arg_count:]
+                args_ = args[skip_arg_count:] \
                     if skip_arg_count else args
 
                 if args_ and kwargs:
