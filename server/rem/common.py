@@ -30,15 +30,15 @@ def logged(log_args=False, level="debug", skip_arg_count=0):
     def inner(func):
         def inner(*args, **kwargs):
             if log_args:
-                if skip_arg_count:
-                    args = args[skip_arg_count:]
+                args_ = args[skip_arg_count:]
+                    if skip_arg_count else args
 
-                if args and kwargs:
-                    args_to_log = (args, kwargs)
+                if args_ and kwargs:
+                    args_to_log = (args_, kwargs)
                 elif kwargs:
                     args_to_log = kwargs
                 else:
-                    args_to_log = args
+                    args_to_log = args_
 
                 prefix = 'function "%s(%s)" ' % (func.__name__, str(args_to_log)[:4096])
             else:
