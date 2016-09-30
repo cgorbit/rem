@@ -736,6 +736,8 @@ prev_task: {prev_task}
         def reschedule_if_need():
             if pck._state != RemotePacketState.STARTED:
                 return
+            if pck._target_stop_mode > stop_mode:
+                return
 
             assert not pck._sched
 
