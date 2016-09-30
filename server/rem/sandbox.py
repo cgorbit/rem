@@ -132,10 +132,10 @@ class Client(object):
                          kill_timeout=None, description=None, host=None):
             params = {
             }
-            priority = priority or self.default_priority
+            priority = priority or self._api.default_priority
             if priority is not None:
                 params['priority'] = {'class': priority[0], 'subclass': priority[1]}
-            owner = owner or self.default_owner
+            owner = owner or self._api.default_owner
             if owner is not None:
                 params['owner'] = owner
             if notifications is not None:

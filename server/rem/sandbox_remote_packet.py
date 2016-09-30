@@ -415,22 +415,12 @@ prev_task: {prev_task}
     def _on_rpc_update_graph(self, task_id, peer_addr, state, is_final):
         pck = self._by_task_id.get(task_id)
 
-        logging.debug('_on_rpc_update_graph: task_id=%s, pck_id=%s; status=%s' % (
+        logging.debug('_on_rpc_update_graph: task_id=%s, pck_id=%s; status=%s; is_final=%s' % (
             task_id,
             pck and pck.id,
-            GraphState.str(state['state'])
+            GraphState.str(state['state']),
+            is_final
         ))
-
-        #import pprint
-        #logging.debug('_on_rpc_update_graph[%s]: %s' % (
-            #GraphState.str(state['state']),
-            #pprint.pformat({
-                #'task_id': task_id,
-                #'peer_addr': peer_addr,
-                #'is_final': is_final,
-                #'state': state
-            #})
-        #))
 
         if not pck:
             raise WrongTaskIdError('No packet for sbx:%s' % task_id)
@@ -699,6 +689,7 @@ prev_task: {prev_task}
                 pck._drop_sched_if_need()
                 self._mark_as_finished(pck, '_stop_packet')
 
+            logging.debug("+ set _target_stop_mode to %s for %s" % (pck._target_stop_mode, pck))
             pck._target_stop_mode = stop_mode
 
             state = pck._state

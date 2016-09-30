@@ -15,7 +15,7 @@ import errno
 import json
 
 import rem.common
-from rem.common import parse_network_address
+from rem.common import parse_network_address, logged
 import rem.sandbox_packet
 import rem.delayed_executor
 from rem.profile import ProfiledThread
@@ -63,6 +63,10 @@ def with_task_id(f):
     return impl
 
 
+def logged_rpc(f):
+    return logged(log_args=True, skip_arg_count=1)(f)
+
+
 # XXX FIXME Use queue to execute methods async?
 class RpcMethods(object):
     def __init__(self, pck, task_id):
@@ -76,26 +80,32 @@ class RpcMethods(object):
         if task_id != self.task_id:
             raise WrongTaskIdError("Sandbox task_id == %s, but got request for %s" % (self.task_id, task_id))
 
+    @logged_rpc
     @with_task_id
     def restart(self):
         self.pck.restart()
 
+    @logged_rpc
     @with_task_id
     def resume(self):
         self.pck.resume()
 
+    @logged_rpc
     @with_task_id
     def stop(self, kill_jobs):
         self.pck.stop(kill_jobs)
 
+    @logged_rpc
     @with_task_id
     def cancel(self):
         self.pck.cancel()
 
+    @logged_rpc
     @with_task_id
     def ping(self):
         pass
 
+    @logged_rpc
     @with_task_id
     def list_all_user_processes(self):
         return rem.common.list_all_user_processes()

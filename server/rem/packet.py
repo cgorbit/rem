@@ -261,7 +261,7 @@ class PacketBase(Unpickable(
 
         elif self.do_not_run:
             if self._is_graph_stopping():
-                assert graph.state & GraphState.WORKING, "Got %s" % graph.state
+                #assert graph.state & (GraphState.WORKING | GraphState.TIME_WAIT), "Got %s" % graph.state
                 return ImplState.PAUSING
             else:
                 assert graph.is_null()

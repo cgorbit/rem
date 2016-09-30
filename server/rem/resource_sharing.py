@@ -209,10 +209,20 @@ class Sharer(object):
         #return (job.promise.to_future(), job.id)
         return job.promise.to_future()
 
-    def _set_promise(self, job, val=None, err=None):
+    def _set_promise_value(self, job, val):
         with self.lock:
             self.running.pop(job.id)
-        job.promise.set(val, err)
+        job.promise.set(val)
+
+    def _set_promise_error(self, job, err=None):
+        with self.lock:
+            self.running.pop(job.id)
+
+        p = job.promise
+        if err:
+            p.raise_and_set(err)
+        else:
+            p.set_from_current_exception()
 
     def _share_loop(self):
         in_progress = set()
@@ -237,9 +247,8 @@ class Sharer(object):
                 # TODO better checks or collect STDERR
                 for file in job.files:
                     if not os.path.exists(job.directory + '/' + file):
-                        self._set_promise(job, None,
-                            OSError(errno.ENOENT,
-                                    'Failed to share %s/%s: %s' % (job.directory, job.files, e)))
+                        msg = 'Failed to share %s/%s: %s' % (job.directory, job.files, e)
+                        self._set_promise_error(job, OSError(errno.ENOENT, msg))
                         return
 
                 schedule_retry(job)
@@ -309,7 +318,7 @@ class Sharer(object):
             try:
                 task.update(description=job.description)
             except Exception as e:
-                logging.warning('Failed to update task: %s' % (job, e))
+                logging.warning('Failed to update task %s: %s' % (job, e))
                 return
 
         try:
@@ -339,8 +348,8 @@ class Sharer(object):
             try:
                 with Timing('sbx_create_upload_task for %d' % job.id):
                     task = self._try_create_upload_task(job)
-            except Exception as e:
-                self._set_promise(job, None, e)
+            except Exception:
+                self._set_promise_error(job)
                 continue
 
             if not task:
@@ -428,8 +437,7 @@ class Sharer(object):
 
                 else:
                     logging.error("Unknown task status %s for task=%d, %s" % (status, task_id, job))
-                    self._set_promise(job, None,
-                        RuntimeError("Unknown task status %s for task_id=%d" % (status, task_id)))
+                    self._set_promise_error(job, RuntimeError("Unknown task status %s for task_id=%d" % (status, task_id)))
 
             T('after_process_all_wait1_statuses')
 
@@ -484,7 +492,7 @@ class Sharer(object):
             except Exception as e:
                 logging.warning("Failed to get resource %s from task %d: %s" \
                     % (job.resource_type, job.upload_task_id, e))
-                self._set_promise(job, None, e)
+                self._set_promise_error(job)
                 del job
                 continue
 
@@ -492,7 +500,7 @@ class Sharer(object):
                 self._schedule_retry(job, self.Action.FETCH_RESOURCE_ID, delay=3.0)
             else:
                 logging.debug('Done with %s, resource_id = %d' % (job, resource_id))
-                self._set_promise(job, resource_id)
+                self._set_promise_value(job, resource_id)
 
             del job
 

@@ -29,18 +29,12 @@ class _ExecutorOps(object):
 
     def on_state_change(self):
         pck = self.pck
-        graph = pck._graph_executor
 
-        pck._update_state(graph.state)
+        pck._update_state()
         logging.debug('pck._has_updates = True')
         pck._has_updates = True
 
-        if graph.state in [GraphState.SUCCESSFULL, GraphState.ERROR] \
-            or graph.state == GraphState.TIME_WAIT \
-                and graph.get_nearest_retry_deadline() - time.time() > pck._MAX_TIME_WAIT \
-            or pck._do_not_run and graph.is_null():
-
-            pck._finished = True
+        pck._mark_as_finished_if_need()
 
         logging.debug('pck._something_changed.notify()')
         pck._something_changed.notify()
@@ -75,10 +69,22 @@ class Packet(object):
         with self._lock:
             self._graph_executor.init()
 
-    def _update_state(self, state):
-        self.state = state
-        self.history.append((state, time.time()))
-        logging.info("new state %s" % state)
+    def _mark_as_finished_if_need(self):
+        graph = self._graph_executor
+
+        self._finished = \
+            graph.state in [GraphState.SUCCESSFULL, GraphState.ERROR] \
+            or graph.state == GraphState.TIME_WAIT \
+                and graph.get_nearest_retry_deadline() - time.time() > self._MAX_TIME_WAIT \
+            or (self._do_not_run or self._cancelled) and graph.is_null()
+
+    def _update_state(self):
+        new_state = self._calc_state()
+        if new_state == self.state:
+            return
+        self.state = new_state
+        self.history.append((new_state, time.time()))
+        logging.info("new state %s" % new_state)
 
     def _init_non_persistent(self):
         self._lock = threading.RLock()
@@ -167,6 +173,7 @@ class Packet(object):
 
             if kill_jobs:
                 self._graph_executor.cancel()
+                self._mark_as_finished_if_need()
 
             self._something_changed.notify()
 
@@ -181,6 +188,7 @@ class Packet(object):
             if self._do_not_run:
                 self._do_not_run = False
                 self._graph_executor.reset_tries()
+                self._mark_as_finished_if_need()
                 self._something_changed.notify()
 
     def cancel(self):
@@ -189,6 +197,7 @@ class Packet(object):
                 raise RuntimeError("Already finished")
             self._cancelled = True
             self._graph_executor.cancel()
+            self._mark_as_finished_if_need()
             self._something_changed.notify()
 
     def is_cancelled(self):
@@ -229,7 +238,7 @@ class Packet(object):
             with self._lock:
                 logging.debug('_before_job_start_loop')
 
-                if not self._do_not_run:
+                if not (self._do_not_run or self._cancelled):
                     logging.debug('_graph_executor.state == %s' \
                         % GraphState.str(self._graph_executor.state))
 
@@ -252,13 +261,20 @@ class Packet(object):
         logging.debug('+ exiting Packet.run')
 
     def _calc_state(self):
-        if self._do_not_run and self._graph_executor.is_null():
-            return GraphState.SUSPENDED
-        return self._graph_executor.get_state()
+        graph = self._graph_executor
+        return graph.state # FIXME
+
+        if graph.is_null():
+            if self._do_not_run:
+                return GraphState.SUSPENDED
+            elif self._cancelled:
+                return GraphState.CANCELLED
+
+        return graph.state
 
     def _stop_waiting(self, stop_id):
         with self._lock:
-            if self._cancelled or self._finished: # FIXME
+            if self._cancelled or self._finished: # FIXME _do_not_run
                 return
             self._graph_executor.stop_waiting(stop_id)
 
