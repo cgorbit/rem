@@ -397,6 +397,7 @@ prev_task: {prev_task}
 
     # must be called under lock
     def _schedule(self, pck, impl, timeout=None):
+        logging.debug("++ ._schedule(%s, %s, timeout=%s)" % (pck, impl, timeout))
         wrap = lambda id: self._execute_scheduled(pck, id, impl)
         pck._sched = delayed_executor.schedule(wrap, timeout=timeout)
 
@@ -739,7 +740,9 @@ prev_task: {prev_task}
             if pck._target_stop_mode > stop_mode:
                 return
 
-            assert not pck._sched
+            if pck._sched:
+                # TODO Assert that we have another _do_stop_packet in pck._sched
+                return
 
             self._schedule(
                 pck,
@@ -747,7 +750,7 @@ prev_task: {prev_task}
                 timeout=self._RPC_RESEND_INTERVAL)
 
         with pck._lock:
-            if not pck._peer_addr:
+            if not pck._peer_addr: # FIXME _do_stop_packet must not be called on this condition
                 reschedule_if_need()
                 return
 

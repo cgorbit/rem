@@ -55,6 +55,7 @@ def logged(log_args=False, level="debug", skip_arg_count=0):
             except:
                 logging.exception('%s call failed', prefix)
                 raise
+        inner.__name__ = func.__name__
         return inner
     return inner
 
