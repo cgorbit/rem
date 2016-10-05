@@ -624,6 +624,7 @@ class PacketBase(Unpickable(
             if self.is_broken:
                 return
             self.is_broken = True
+            self._graph_executor = DUMMY_GRAPH_EXECUTOR # Hack # FIXME Don't remember
             self._update_state()
 
     def _try_recover_directory(self, ctx):
