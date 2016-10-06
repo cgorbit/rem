@@ -140,7 +140,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False, depth=0, max_depth=
             if job.state == "working":
                 print "%sexec_shell=%s" % (
                     " " * len(pck.pck_id),
-                    color_job_command(job.shell),
+                    color_job_command(job.shell.encode('utf-8')),
                 )
 
     if extended:
@@ -183,7 +183,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False, depth=0, max_depth=
             fields = dict(
                 descr=job.desc,
                 id=color_if_need(job.id, job_state_color),
-                command=color_job_command(job.shell),
+                command=color_job_command(job.shell.encode('utf-8')),
             )
 
             format = "\n[{id}]\t{command}" \
