@@ -186,16 +186,16 @@ class Queue(object):
         """возвращает список пакетов из очереди, подпадающих под действие фильтра
         возможные значения парметра filter:
             all       - все пакеты
-            errored   - пакеты, находящиеся в ошибочном статусе
+            error     - пакеты, находящиеся в ошибочном статусе
             suspended - приостановленные пакеты
-            worked    - отработавшие пакеты
+            successfull - успешно отработавшие пакеты
             pending   - пакеты с готовыми для выполнения задачами
             waiting   - пакеты, ожидающие таймаут, после возникшей ошибки
-            working   - пакеты, работающие в данный момент
+            workable  - пакеты, работающие в данный момент
         возвращается список объектов типа JobPacketInfo"""
         assert filter in [
-            "errored", "suspended", "worked", "waiting", "pending", "working", "all",
-            "error", "successfull", "workable"
+            "errored", "worked", "working", # legacy
+            "suspended", "waiting", "pending", "all", "error", "successfull", "workable"
         ]
 
         args = [self.name, filter, name_regex, prefix]
