@@ -218,22 +218,28 @@ def print_pck_info(pck, extended=False, show_all_tags=False, depth=0, max_depth=
 class CommandExecutionError(Exception): pass
 
 
+def list_queue_packets(rem, opts):
+    q = rem.Queue(opts.queue)
+    return q.ListPackets(
+        opts.filter,
+        opts.name,
+        opts.prefix,
+        opts.min_mtime,
+        opts.max_mtime,
+        opts.min_ctime,
+        opts.max_ctime,
+        opts.labels
+    )
+
+
 class ListCommander(ICommander):
     def __call__(self):
         opts = self.options
         rem = self.conn
 
         if self.options.queue:
-            q = self.conn.Queue(self.options.queue)
-            pckList = q.ListPackets(self.options.filter,
-                                    self.options.name,
-                                    self.options.prefix,
-                                    self.options.min_mtime,
-                                    self.options.max_mtime,
-                                    self.options.min_ctime,
-                                    self.options.max_ctime,
-                                    self.options.labels)
-            pckList = remclient.JobPacketInfo.multiupdate(pckList)
+            pckList = list_queue_packets(rem, opts)
+            remclient.JobPacketInfo.multiupdate(pckList)
             for pck in sorted(pckList, key=lambda p : p.name):
                 print_pck_info(pck, show_all_tags=self.options.show_all_dep_tags)
 
@@ -391,6 +397,23 @@ class MoveCommander(ICommander):
         pck.MoveToQueue(src_q, dest_q)
 
 
+class ResourcesCommander(ICommander):
+    def __call__(self):
+        opts = self.options
+        rem = self.conn
+
+        if opts.packet:
+            pck = self.conn.PacketInfo(opts.packet)
+            pck.ResolveResources()
+
+        elif opts.queue:
+            packets = list_queue_packets(rem, opts)
+            remclient.JobPacketInfo.ResolveResourcesBulk(packets)
+
+        else:
+            raise CommandExecutionError("not enough parameters for resolve-resources command")
+
+
 _DISP_COMMANDS = {
     "list":     (ListCommander,     "list rem objects (queues (by default), packets (if --queue set) or tags(if --tags set))"),
     "status":   (StatusCommander,   "print object status (--queue, --packet or --tag have to been set)"),
@@ -405,6 +428,7 @@ _DISP_COMMANDS = {
     "set":      (TagManipCommander, "set tag (--tag have to been set)"),
     "unset":    (TagManipCommander, "unset tag (--tag have to been set)"),
     "reset":    (TagManipCommander, "reset tag (--tag have to been set)"),
+    "resolve-resources": (ResourcesCommander, "re-resolve Sandbox packet resources"),
 }
 
 def rem_url_from_cfg(path):

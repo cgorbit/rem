@@ -604,6 +604,36 @@ class JobPacketInfo(object):
             visitList.reverse()
         return visitList
 
+    def ResolveResources(self):
+        self.proxy.pck_resolve_resources(self.pck_id)
+
+    @staticmethod
+    def ResolveResourcesBulk(packets):
+        if not isinstance(packets, list):
+            packets = list(packets)
+
+        if not packets:
+            return
+
+        proxy = packets[0].proxy
+
+        call = xmlrpclib.MultiCall(proxy)
+
+        for pck in packets:
+            call.pck_resolve_resources(pck.pck_id)
+
+        resps = call()
+
+        errors = []
+        for idx, pck in enumerate(packets):
+            try:
+                resps[idx]
+            except xmlrpclib.Fault as e:
+                errors.append("%s: %s" % (pck.pck_id, e))
+
+        if errors:
+            raise RuntimeError("Some packets failed:\n\t" + '\n\t'.join(errors))
+
 
 class JobInfo(object):
     """объект, инкапсулирующий информацию о задаче REM"""
