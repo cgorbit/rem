@@ -1259,9 +1259,8 @@ class SandboxJobGraphExecutorProxy(Unpickable(
                 self._update_state()
                 return
 
-            self.cancelled = True
-
             if self._remote_packet:
+                self.cancelled = True
                 self._remote_packet.cancel()
 
             self._update_state()
