@@ -1373,6 +1373,8 @@ class SandboxPacket(PacketBase):
     # force re-resolve
     def rpc_resolve_resources(self):
         with self.lock:
+            if self._will_never_be_executed():
+                return
             for descr, res_id in self.resolved_releases.items():
                 if res_id is not None:
                     resolve = self._start_resolve_release(descr)
