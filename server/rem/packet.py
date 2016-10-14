@@ -153,6 +153,7 @@ class PacketBase(Unpickable(
 
                            req_sandbox_host=_value_or_None,
                            user_labels=_value_or_None,
+                           oauth_token=_value_or_None,
                           ),
                 CallbackHolder,
                 ICallbackAcceptor):
@@ -187,7 +188,7 @@ class PacketBase(Unpickable(
     def __init__(self, name, priority, context, notify_emails, wait_tags=(),
                  set_tag=None, kill_all_jobs_on_error=True, is_resetable=True,
                  notify_on_reset=False, notify_on_skipped_reset=True, sandbox_host=None,
-                 user_labels=None):
+                 user_labels=None, oauth_token=None):
         super(PacketBase, self).__init__()
         self.name = name
         self.id = None
@@ -197,6 +198,7 @@ class PacketBase(Unpickable(
         self._saved_jobs_status = None
         self.last_sandbox_task_id = None
         self.user_labels = user_labels
+        self.oauth_token = oauth_token
 
         self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
@@ -1475,6 +1477,7 @@ class SandboxPacket(PacketBase):
             self.make_job_graph(),
             resources,
             host=self.req_sandbox_host,
+            oauth_token=self.oauth_token,
             #self.make_sandbox_task_params()
         )
 

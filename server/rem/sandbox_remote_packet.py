@@ -22,9 +22,6 @@ remote_packets_dispatcher = None
 USE_DUMMY_JOBS = False
 
 
-# XXX This code is not ready for production
-
-
 class WrongTaskIdError(RuntimeError):
     pass
 
@@ -88,7 +85,8 @@ class RemotePacketsDispatcher(object):
         self._sbx_task_owner = ctx.sandbox_task_owner
         self._sbx_python_resource_id = ctx.sandbox_python_resource_id
 
-        self._sandbox = ctx.sandbox_client
+        self._default_sandbox_client = ctx.default_sandbox_client
+        self._create_sandbox_client = ctx.create_sandbox_client
 
         self._rpc_invoker = ActionQueue(
             thread_count=ctx.sandbox_rpc_invoker_thread_pool_size,
@@ -96,7 +94,7 @@ class RemotePacketsDispatcher(object):
 
         self._sbx_invoker = ctx.sandbox_action_queue
 
-        self._tasks_status_awaiter = self.TasksAwaiter(self._sandbox, self)
+        self._tasks_status_awaiter = self.TasksAwaiter(self._default_sandbox_client, self)
 
         self._vivify_packets(alloc_guard)
 
@@ -144,6 +142,8 @@ class RemotePacketsDispatcher(object):
     # loading old backup (after server's fail)
 
     def register_packet(self, pck):
+        pck._sandbox = self._create_sandbox_client(pck._oauth_token) if pck._oauth_token \
+            else self._default_sandbox_client
         self._start_create_sandbox_task(pck)
 
         # FIXME We can't identify packet by pck_id in async/delayed calls
@@ -157,7 +157,7 @@ class RemotePacketsDispatcher(object):
         self._sbx_invoker.invoke(lambda : self._do_start_sandbox_task(pck))
 
     #def _start_delete_task(self, task_id):
-        #self._sbx_invoker.invoke(lambda : self._sandbox.delete_task(task_id)) # no retries
+        #self._sbx_invoker.invoke(lambda : pck._sandbox.delete_task(task_id)) # no retries
 
     # TODO Consider following options:
     #   max_restarts=0
@@ -171,7 +171,7 @@ class RemotePacketsDispatcher(object):
         if isinstance(files_setup, PacketResources):
             files_setup, resource_ids = files_setup.files_setup, files_setup.resource_ids
 
-        return self._sandbox.create_task(
+        return pck._sandbox.create_task(
             'RUN_REM_JOBPACKET',
             {
                 'rem_server_addr': ('%s:%d' % self._rpc_listen_addr),
@@ -329,7 +329,7 @@ prev_task: {prev_task}
 
     def _do_start_sandbox_task(self, pck):
         try:
-            self._sandbox.start_task(pck._sandbox_task_id)
+           pck._sandbox.start_task(pck._sandbox_task_id)
 
         # Possible events before lock will be acquired in this func:
         # - not final GRAPH_UPDATE
@@ -480,7 +480,7 @@ prev_task: {prev_task}
     # FIXME From which task state resources are really ready?
     def _fetch_resource_list(self, pck):
         try:
-            ans = self._sandbox.list_task_resources(pck._sandbox_task_id)
+            ans = pck._sandbox.list_task_resources(pck._sandbox_task_id)
         except:
             logging.exception('Failed to fetch task resources for %s' % pck)
 
@@ -844,9 +844,11 @@ class SandboxRemotePacket(Unpickable(
                             _is_error_permanent=bool,
                             _reset_tries_at_start=bool,
                             _host=_value_or_None,
+                            _oauth_token=_value_or_None,
                          )):
     def __init__(self, ops, pck_id, run_guard, snapshot_data,
-                 snapshot_resource_id, custom_resources, reset_tries, host):
+                 snapshot_resource_id, custom_resources, reset_tries, host,
+                 oauth_token=None):
         self.id = pck_id
         self._run_guard = run_guard
         self._ops = ops
@@ -857,6 +859,8 @@ class SandboxRemotePacket(Unpickable(
         self._custom_resources = custom_resources
         self._reset_tries_at_start = reset_tries
         self._host = host
+        self._oauth_token = oauth_token
+        self._sandbox = None
 
         self._target_stop_mode = StopMode.NONE
         self._sent_stop_mode   = StopMode.NONE # at least helpfull for backup loading
@@ -959,17 +963,20 @@ class PacketResources(object):
 class SandboxJobGraphExecutorProxy(Unpickable(
                                     _tries=_value_or(5),
                                     _has_pending_reset_tries=bool,
+                                    _host=_value_or_None,
+                                    _oauth_token=_value_or_None,
                                   )):
     MAX_TRY_COUNT = 5
     RETRY_INTERVALS = [15, 300, 900, 3600]
 
-    def __init__(self, ops, pck_id, graph, custom_resources, host=None):
+    def __init__(self, ops, pck_id, graph, custom_resources, host=None, oauth_token=None):
         self._ops = ops
         self.lock = self._ops.lock
         self.pck_id = pck_id
         self._graph = graph
         self._custom_resources = custom_resources
         self._host = host
+        self._oauth_token = oauth_token
 
         self._remote_packet = None
         self._prev_task_id = None
@@ -1013,6 +1020,7 @@ class SandboxJobGraphExecutorProxy(Unpickable(
             custom_resources=self._custom_resources,
             reset_tries=reset_tries,
             host=self._host,
+            oauth_token=self._oauth_token,
         )
 
     def produce_detailed_status(self):

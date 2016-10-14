@@ -40,6 +40,7 @@ import rem.resource_sharing
 import rem.queue
 from rem.action_queue import ActionQueue
 from rem.sandbox_releases import SandboxReleasesResolver
+from rem.oauth import get_oauth_from_header, TokenStatus as OAuthTokenStatus
 
 
 try:
@@ -55,6 +56,18 @@ class DuplicatePackageNameException(Exception):
         self.message = 'DuplicatePackageNameException: Packet with name %s already exists in REM[%s]' % (pck_name, serv_name)
 
 
+def get_oauth_checked(header):
+    oauth = get_oauth_from_header(header)
+
+    if oauth.token_status != OAuthTokenStatus.VALID:
+        raise RuntimeError("Token has %s status" % oauth.token_status)
+
+    if oauth.client_id != _context.server_oauth_application_id:
+        raise RuntimeError("Got token for wrong application %s" % oauth.client_id)
+
+    return oauth
+
+
 class AuthRequestHandler(SimpleXMLRPCRequestHandler):
     def _dispatch(self, method, params):
         timings = self.server._timings.pop(id(self.request))
@@ -65,12 +78,21 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
         func = self.server.funcs.get(method)
         if not func:
             raise Exception('method "%s" is not supported' % method)
+
         username = self.headers.get("X-Username", "Unknown")
 
         log_level = 'debug' if is_multicall else getattr(func, "log_level", None)
         log_func = getattr(logging, log_level, None) if log_level else None
 
         try:
+            authorization = self.headers.get("Authorization")
+            get_oauth = lambda : get_oauth_checked(authorization) \
+                if authorization and _context.server_oauth_application_id \
+                else lambda : None
+
+            if getattr(func, '_need_oauth', False):
+                params = (get_oauth,) + params
+
             return func(*params)
 
         finally:
@@ -121,8 +143,17 @@ def MakeDuplicatePackageNameException(pck_name):
     return RpcUserError(xmlrpclib.Fault(1, e.message))
 
 
+def need_oauth(f):
+    def impl(*args):
+        return f(*args)
+    impl.__name__ = f.__name__
+    impl._need_oauth = True
+    return impl
+
+@need_oauth
 @traced_rpc_method("info")
-def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
+def create_packet(get_oauth,
+                  packet_name, priority, notify_emails, wait_tagnames, set_tag,
                   kill_all_jobs_on_error=True,
                   packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY,
                   resetable=True, notify_on_reset=False, notify_on_skipped_reset=True,
@@ -139,6 +170,8 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
         or _context.all_packets_in_sandbox \
         or _context.random_packet_sandboxness and random() < 0.5
 
+    oauth_token = get_oauth().token if is_sandbox else None
+
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck_cls = SandboxPacket if is_sandbox else LocalPacket
     pck = pck_cls(packet_name, priority, _context, notify_emails,
@@ -147,7 +180,8 @@ def create_packet(packet_name, priority, notify_emails, wait_tagnames, set_tag,
                     notify_on_reset=notify_on_reset,
                     notify_on_skipped_reset=notify_on_skipped_reset,
                     sandbox_host=sandbox_host,
-                    user_labels=user_labels)
+                    user_labels=user_labels,
+                    oauth_token=oauth_token)
     _scheduler.RegisterNewPacket(pck, wait_tags)
     logging.info('packet %s registered as %s', packet_name, pck.id)
     return pck.id
@@ -553,11 +587,24 @@ def daemon_list_job_workers():
 @traced_rpc_method("debug")
 def get_config():
     NoneType = type(None)
-    return {
+    ret = {
         key: value
             for key, value in _context.__dict__.items()
                 if isinstance(value, (int, str, float, bool, NoneType))
     }
+    if _context.sandbox_api_token:
+        ret['sandbox_api_token'] = 'X' * 39
+    if _context.cloud_tags_nanny_token:
+        ret['cloud_tags_nanny_token'] = 'Y' * 39
+    return ret
+
+
+@traced_rpc_method("debug")
+def get_oauth_redirect_url():
+    app_id = _context.server_oauth_application_id
+    if not app_id:
+        raise RuntimeError("REM Server has not OAuth application ID set")
+    return 'https://oauth.yandex-team.ru/authorize?response_type=token&client_id=' + app_id
 
 
 class ApiServer(object):
@@ -632,6 +679,7 @@ class ApiServer(object):
             update_tags,
             set_python_resource_id,
             get_python_resource_id,
+            get_oauth_redirect_url,
         ]
 
         if self.allow_debug_rpc_methods:
@@ -1049,7 +1097,7 @@ def _init_sandbox(ctx):
 
     shr = rem.resource_sharing.Sharer(
         subproc=ctx.resource_sharing_subproc,
-        sandbox=ctx.sandbox_client,
+        sandbox=ctx.default_sandbox_client,
         task_owner=ctx.sandbox_task_owner,
         task_priority=ctx.sandbox_task_priority,
     )
@@ -1136,10 +1184,15 @@ def create_context(config):
 
 # TODO Join all sandbox initializations
     if ctx.sandbox_api_url:
-        ctx.sandbox_client = rem.sandbox.Client(
-            ctx.sandbox_api_url,
-            ctx.sandbox_api_token,
-            timeout=ctx.sandbox_api_timeout)
+        def create_sbx_client(token):
+            return rem.sandbox.Client(
+                ctx.sandbox_api_url,
+                token,
+                timeout=ctx.sandbox_api_timeout
+            )
+
+        ctx.default_sandbox_client = create_sbx_client(ctx.sandbox_api_token)
+        ctx.create_sandbox_client = create_sbx_client
 
     # FIXME Separate queues for task creation and release resolve?
         ctx.sandbox_action_queue = ActionQueue(
@@ -1147,7 +1200,7 @@ def create_context(config):
             thread_name_prefix='SbxIO')
 
         ctx.sandbox_release_resolver = SandboxReleasesResolver(
-            ctx.sandbox_action_queue, ctx.sandbox_client)
+            ctx.sandbox_action_queue, ctx.default_sandbox_client)
 
     return ctx
 
