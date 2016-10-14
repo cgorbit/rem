@@ -14,6 +14,14 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <limits.h>
+#include <pwd.h>
+#include <grp.h>
+
+#ifdef PGRPGUARD_SUID
+    #undef  PGRPGUARD_ALLOW_USER_CHANGE
+#else
+    #define PGRPGUARD_ALLOW_USER_CHANGE
+#endif
 
 #define PREVENT_WAITPID_KILL_RACE
 #define BLOCK_COMMON_TERM_SIGNALS_IN_WRAPPER
@@ -25,7 +33,9 @@ enum {
     EXIT_NOT_SUPER_USER = 202,
     EXIT_FAILED_REPORT  = 203,
     EXIT_BAD_REPORT_FD  = 204,
-    EXIT_MAX            = 204,
+    EXIT_USER_CHANGE_NOT_ALLOWED = 205,
+    EXIT_BAD_NEW_UID_GID = 206,
+    EXIT_MAX            = 220, // with reserve
 };
 
 enum {
@@ -59,6 +69,9 @@ static int* child_error_errno = NULL;
 static int child_status = 0;
 static int report_fd = -1;
 
+static uid_t tgt_uid = -1;
+static gid_t tgt_gid = -1;
+
 static int set_cloexec(int fd) {
     int flags;
 
@@ -76,8 +89,14 @@ static void change_signal_mask(int sig, int how) {
     sigprocmask(how, &blocked, NULL);
 }
 
-static int run_child_inner(uid_t ruid, int, char *argv[]) {
-    if (setreuid(ruid, ruid) == -1) {
+static int run_child_inner(int, char *argv[]) {
+    if (tgt_gid != (tgt_gid)-1) {
+        if (setregid(tgt_gid, tgt_gid) == -1) {
+            return ERROR_SETRESUID; // FIXME ERROR_SETREGID
+        }
+    }
+
+    if (setreuid(tgt_uid, tgt_uid) == -1) {
         return ERROR_SETRESUID;
     }
 
@@ -100,8 +119,8 @@ static int run_child_inner(uid_t ruid, int, char *argv[]) {
     return ERROR_EXECVE;
 }
 
-static void run_child(uid_t ruid, int argc, char *argv[]) {
-    *child_error_type = run_child_inner(ruid, argc, argv);
+static void run_child(int argc, char *argv[]) {
+    *child_error_type = run_child_inner(argc, argv);
     *child_error_errno = errno;
 }
 
@@ -276,7 +295,7 @@ static int init_shared_memory() {
     return ERROR_OK;
 }
 
-static int run(int ruid, int argc, char *argv[]) {
+static int run(int argc, char *argv[]) {
     {
         int err = init_shared_memory();
         if (err != ERROR_OK) {
@@ -295,7 +314,7 @@ static int run(int ruid, int argc, char *argv[]) {
     }
 
     if (!child_pid) {
-        run_child(ruid, argc, argv);
+        run_child(argc, argv);
         _exit(0);
     }
 
@@ -404,6 +423,48 @@ static int parse_report_fd_number(const char* str) {
     return ret;
 }
 
+static int parse_new_credentials(const char* descr, uid_t* uid, gid_t* gid) {
+    if (!*descr) {
+        return -1;
+    }
+
+    const char* sep = strchrnul(descr, ':');
+
+    if (descr == sep) {
+        return -1;
+    }
+
+    {
+        const size_t user_name_len = sep - descr;
+        char user_name[user_name_len + 1];
+        strncpy(user_name, descr, user_name_len); // TODO check return value
+
+        struct passwd* user = getpwnam(user_name);
+        if (!user) {
+            return -1;
+        }
+
+        *uid = user->pw_uid;
+    }
+
+    *gid = -1;
+
+    if (!*sep) {
+        return 0;
+    }
+
+    {
+        struct group* group = getgrnam(sep + 1);
+        if (!group) {
+            return -1;
+        }
+
+        *gid = group->gr_gid;
+    }
+
+    return 0;
+}
+
 int main(int argc, char *argv[]) {
     ++argv;
     --argc;
@@ -419,10 +480,6 @@ int main(int argc, char *argv[]) {
     change_signal_mask(SIGQUIT, SIG_BLOCK);
 #endif
 
-    if (argc < 2) {
-        return EXIT_NO_ARGV;
-    }
-
     uid_t ruid;
     {
         uid_t euid, suid;
@@ -431,6 +488,25 @@ int main(int argc, char *argv[]) {
         if (euid != 0) {
             return EXIT_NOT_SUPER_USER;
         }
+    }
+
+    if (argc && argv[0][0] == '@') {
+#ifdef PGRPGUARD_SUID
+        return EXIT_USER_CHANGE_NOT_ALLOWED;
+#endif
+        if (parse_new_credentials(argv[0] + 1, &tgt_uid, &tgt_gid) == -1) {
+            return EXIT_BAD_NEW_UID_GID;
+        }
+
+        ++argv;
+        --argc;
+    } else {
+        tgt_uid = ruid;
+        tgt_gid = -1;
+    }
+
+    if (argc < 2) {
+        return EXIT_NO_ARGV;
     }
 
     if ((report_fd = parse_report_fd_number(argv[0])) == -1) {
@@ -443,7 +519,7 @@ int main(int argc, char *argv[]) {
         return EXIT_BAD_REPORT_FD;
     }
 
-    int error = run(ruid, argc, argv);
+    int error = run(argc, argv);
     int saved_errno = errno;
 
 #ifndef PREVENT_WAITPID_KILL_RACE
