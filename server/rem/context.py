@@ -80,7 +80,14 @@ class Context(object):
         self.pgrpguard_binary = config.safe_get("run", "pgrpguard_binary", None)
         self.pgrpguard_binary = config.safe_get("run", "process_wrapper", self.pgrpguard_binary)
         self.sandbox_api_url = config.safe_get("run", "sandbox_api_url", None)
+
         self.sandbox_api_token = config.safe_get("run", "sandbox_api_token", None)
+        sandbox_api_token_file = config.safe_get("run", "sandbox_api_token_file", None)
+        if sandbox_api_token_file is not None:
+            self.sandbox_api_token = open(sandbox_api_token_file).read().strip()
+            if not self.sandbox_api_token:
+                raise ValueError("Empty token in %s" % sandbox_api_token_file)
+
         self.sandbox_api_timeout = config.safe_getint("run", "sandbox_api_timeout", 15)
         self.sandbox_task_owner = config.safe_get("run", "sandbox_task_owner", None)
         self.sandbox_task_priority = config.safe_get("run", "sandbox_task_priority", None)
@@ -107,6 +114,7 @@ class Context(object):
             and self.sandbox_task_priority \
             and self.sandbox_task_max_count \
             and self.sandbox_python_resource_id \
+            and self.sandbox_api_token \
             and self.sandbox_rpc_listen_addr):
             raise ValueError("Sandbox setup is incomplete")
 
@@ -118,6 +126,18 @@ class Context(object):
         self.cloud_tags_masks = config.safe_get("store", "cloud_tags_masks", None)
         self.cloud_tags_masks_reload_interval = config.safe_getint("store", "cloud_tags_masks_reload_interval", 300)
         self.cloud_tags_release_delay = 7200
+
+        cloud_tags_nanny_token_file = config.safe_get('store', 'cloud_tags_nanny_token_file', None)
+        if cloud_tags_nanny_token_file:
+            self.cloud_tags_nanny_token = open(cloud_tags_nanny_token_file).read().strip()
+            if not self.cloud_tags_nanny_token:
+                raise ValueError("Empty token in %s" % cloud_tags_nanny_token_file)
+            self.cloud_tags_server = self.cloud_tags_server.format(token=self.cloud_tags_nanny_token) # hack?
+        else:
+            if '{token}' in self.cloud_tags_server:
+                raise RuntimeError("No store.cloud_tags_nanny_token_file for cloud_tags_server")
+            self.cloud_tags_nanny_token = None
+
         self.tags_random_cloudiness = config.safe_getboolean("store", "tags_random_cloudiness", False)
         self.all_tags_in_cloud = config.safe_getboolean("store", "all_tags_in_cloud", False)
         self.allow_startup_tags_conversion = config.safe_getboolean("store", "allow_startup_tags_conversion", True)
@@ -140,8 +160,10 @@ class Context(object):
         self.network_name = config.safe_get("server", "network_hostname", None)
 
         if not self.disable_remote_tags and not (
-            self.system_port and self.remote_tags_db_file
-            and self.network_topology and self.network_name):
+            self.system_port
+            and self.remote_tags_db_file
+            and self.network_topology
+            and self.network_name):
             raise ValueError("Incomplete setup for remote tags")
 
         self.send_emails = config.getboolean("server", "send_emails")
