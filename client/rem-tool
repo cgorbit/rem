@@ -1,11 +1,9 @@
 #!/usr/bin/env python
 
 import os
-import sys
 import time
 import optparse
 import ConfigParser
-import json
 import re
 import datetime
 
@@ -414,6 +412,11 @@ class ResourcesCommander(ICommander):
             raise CommandExecutionError("not enough parameters for resolve-resources command")
 
 
+class OAuthCommander(ICommander):
+    def __call__(self):
+        print self.conn.proxy.get_oauth_redirect_url()
+
+
 _DISP_COMMANDS = {
     "list":     (ListCommander,     "list rem objects (queues (by default), packets (if --queue set) or tags(if --tags set))"),
     "status":   (StatusCommander,   "print object status (--queue, --packet or --tag have to been set)"),
@@ -429,6 +432,7 @@ _DISP_COMMANDS = {
     "unset":    (TagManipCommander, "unset tag (--tag have to been set)"),
     "reset":    (TagManipCommander, "reset tag (--tag have to been set)"),
     "resolve-resources": (ResourcesCommander, "re-resolve Sandbox packet resources"),
+    "oauth": (OAuthCommander, "Display OAuth redirect url"),
 }
 
 def rem_url_from_cfg(path):
@@ -459,7 +463,7 @@ def init_color_mode(opt_color_mode):
 
     color_mode = color_mode_map.get(opt_color_mode)
     if color_mode is None:
-        raise MalformedOption("Bad value for --color")
+        raise CommandExecutionError("Bad value for --color")
 
     global USE_COLOR
     USE_COLOR = bool(

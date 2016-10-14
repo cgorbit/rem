@@ -758,10 +758,14 @@ class TagsBulk(object):
 class Connector(object):
     """объект коннектор, для работы с REM"""
 
-    def __init__(self, url, conn_retries=10, verbose=False, checksumDbPath=None, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY, logger_name=None):
+    def __init__(self, url, conn_retries=10, verbose=False, checksumDbPath=None,
+                 packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
+                 logger_name=None, oauth_token=None):
         """конструктор коннектора
         принимает один параметр - url REM сервера"""
-        self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose, allow_none=True)
+        self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose,
+                                          allow_none=True,
+                                          oauth_token=oauth_token)
         self.verbose = verbose
         self.checksumDbPath = checksumDbPath
         self.packet_name_policy = packet_name_policy
@@ -850,8 +854,10 @@ class ServerInfo(object):
 
 
 class AdminConnector(object):
-    def __init__(self, url, conn_retries=10, verbose=False):
-        self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose, allow_none=True)
+    def __init__(self, url, conn_retries=10, verbose=False, oauth_token=None):
+        self.proxy = RetriableXMLRPCProxy(url, tries=conn_retries, verbose=verbose,
+                                          allow_none=True,
+                                          oauth_token=oauth_token)
 
     def GetURL(self):
         return self.proxy._RetriableXMLRPCProxy__uri
@@ -922,14 +928,26 @@ class _RetriableMethod:
         raise lastExc
 
 
+def _send_content(connection, request_body, oauth_token=None):
+    connection.putheader("X-Username", getpass.getuser())
+    connection.putheader("Content-Type", "text/xml")
+    connection.putheader("Content-Length", str(len(request_body)))
+    if oauth_token:
+        connection.putheader("Authorization", 'OAuth oauth_token="%s"' % oauth_token)
+
+    connection.endheaders()
+
+    if request_body:
+        connection.send(request_body)
+
+
 class AuthTransport(xmlrpclib.Transport):
+    def __init__(self, oauth_token=None):
+        self.__oauth_token = oauth_token
+        xmlrpclib.Transport.__init__(self)
+
     def send_content(self, connection, request_body):
-        connection.putheader("X-Username", getpass.getuser())
-        connection.putheader("Content-Type", "text/xml")
-        connection.putheader("Content-Length", str(len(request_body)))
-        connection.endheaders()
-        if request_body:
-            connection.send(request_body)
+        _send_content(connection, request_body, self.__oauth_token)
 
 
 class RetriableXMLRPCProxy(xmlrpclib.ServerProxy):
@@ -938,7 +956,8 @@ class RetriableXMLRPCProxy(xmlrpclib.ServerProxy):
         self.__maxTries = tries
         self.__verbose = kws.pop("verbose")
         self.__uri = uri
-        kws["transport"] = AuthTransport()
+        oauth_token = kws.pop("oauth_token")
+        kws["transport"] = AuthTransport(oauth_token)
         xmlrpclib.ServerProxy.__init__(self, uri, **kws)
 
     def __getattr__(self, name):
