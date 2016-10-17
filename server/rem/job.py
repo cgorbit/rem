@@ -4,6 +4,7 @@ import os
 import time
 import datetime
 import sys
+import copy
 
 from common import SerializableFunction, Unpickable, safeint
 import osspec
@@ -16,6 +17,9 @@ import subprocsrv
 DUMMY_COMMAND_CREATOR = None
 _DEFAULT_STDERR_SUMMAY_LEN = 2000
 
+# TODO Move to common
+def _value_or_None(*args):
+    return args[0] if args else None
 
 # XXX #1
 def _RunnerWithFallbackFunctor(self, main, fallback):
@@ -143,11 +147,18 @@ class Job(Unpickable(results=list,
                      max_working_time=(int, constants.KILL_JOB_DEFAULT_TIMEOUT),
                      notify_timeout=(int, constants.NOTIFICATION_TIMEOUT),
                      cached_working_time=int,
-                     output_to_status=bool)):
+                     output_to_status=bool,
+                     vault_files=_value_or_None,
+                     vault_vars=_value_or_None,
+                    )):
     ERR_PENALTY_FACTOR = 6
 
-    def __init__(self, pck_id, shell, parents, pipe_parents, max_try_count, max_err_len=None,
-                 retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
+    def __init__(self, pck_id, shell, parents, pipe_parents, max_try_count,
+                 max_err_len=None, retry_delay=None, pipe_fail=False,
+                 description="", notify_timeout=constants.NOTIFICATION_TIMEOUT,
+                 max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT,
+                 output_to_status=False,
+                 vault_files=None, vault_vars=None):
         super(Job, self).__init__()
         self.id = id(self)
         self.pck_id = pck_id
@@ -162,6 +173,8 @@ class Job(Unpickable(results=list,
         self.notify_timeout = notify_timeout
         self.max_working_time = max_working_time
         self.output_to_status = output_to_status
+        self.vault_files = vault_files
+        self.vault_vars = vault_vars
 
     def __repr__(self):
         return "<Job(id: %s; pck: %s)>" % (self.id, self.pck_id)
@@ -213,7 +226,7 @@ class Job(Unpickable(results=list,
 
 
 class JobRunner(object):
-    def __init__(self, ops, job):
+    def __init__(self, ops, job, env_update):
         self._ops = ops
         self._job = job
         self._cancelled = False
@@ -225,6 +238,11 @@ class JobRunner(object):
 
         self._environment_error = None
         self._process_start_error = None
+
+        env_update = copy.copy(env_update) or {}
+        env_update['REM_PACKET_ID'] = job.pck_id
+        env_update['REM_JOB_TRY']   = str(job.tries)
+        self._env_update = env_update
 
         self._stderr_summary = None
         self._stdout_summary = None
@@ -264,10 +282,7 @@ class JobRunner(object):
                 stdin=stdin,
                 stderr=stderr,
                 cwd=ops.get_working_directory(),
-                env_update=[
-                    ('REM_PACKET_ID', job.pck_id),
-                    ('REM_JOB_TRY',   str(job.tries)),
-                ],
+                env_update=self._env_update.items(),
             )
 
         except pgrpguard.Error as e:

@@ -249,7 +249,7 @@ class JobPacket(object):
     def __init__(self, connector, name, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
                  kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
                  notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None,
-                 labels=None):
+                 labels=None, vault_files=None, vault_vars=None):
         self.conn = connector
         self.proxy = connector.proxy
         if check_tag_uniqueness and self.proxy.check_tag(set_tag):
@@ -260,19 +260,31 @@ class JobPacket(object):
             kill_all_jobs_on_error, packet_name_policy, resetable,
         ]
 
-        if notify_on_reset or not notify_on_skipped_reset or is_sandbox or labels:
-            args.extend([notify_on_reset, notify_on_skipped_reset])
+        new_args = []
 
-        if is_sandbox or labels:
-            args.extend([is_sandbox, sandbox_host])
+        if vault_files or vault_vars:
+            new_args.append(vault_vars)
+            new_args.append(vault_files)
 
-        if labels:
-            args.append(labels)
+        if labels or new_args:
+            new_args.append(labels)
+
+        if is_sandbox or new_args:
+            new_args.extend([sandbox_host, is_sandbox])
+
+        if notify_on_reset or not notify_on_skipped_reset or new_args:
+            new_args.extend([notify_on_skipped_reset, notify_on_reset])
+
+        args.extend(reversed(new_args))
 
         self.id = self.proxy.create_packet(*args)
 
-    def AddJob(self, shell, parents=None, pipe_parents=None, set_tag=None, tries=DEFAULT_TRIES_COUNT, files=None, \
-               max_err_len=None, retry_delay=None, pipe_fail=False, description="", notify_timeout=NOTIFICATION_TIMEOUT, max_working_time=KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
+    def AddJob(self, shell, parents=None, pipe_parents=None, set_tag=None,
+               tries=DEFAULT_TRIES_COUNT, files=None, max_err_len=None,
+               retry_delay=None, pipe_fail=False, description="",
+               notify_timeout=NOTIFICATION_TIMEOUT,
+               max_working_time=KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False,
+               vault_files=None, vault_vars=None):
         """добавляет задачу в пакет
         shell - коммандная строка, которую следует выполнить
         tries - количество попыток выполнения команды (в случае неуспеха команда перазапускается ограниченное число раз) (по умолчанию: 5)
@@ -288,9 +300,18 @@ class JobPacket(object):
         pipe_parents = [job.id for job in pipe_parents or []]
         if files is not None:
             self.AddFiles(files)
-        return JobInfo(id=self.proxy.pck_add_job(self.id, shell, parents,
-                       pipe_parents, set_tag, tries, max_err_len, retry_delay,
-                       pipe_fail, description, notify_timeout, max_working_time, output_to_status))
+
+        args = [
+            self.id, shell, parents,
+            pipe_parents, set_tag, tries, max_err_len, retry_delay,
+            pipe_fail, description, notify_timeout, max_working_time, output_to_status
+        ]
+
+        if vault_files or vault_vars:
+            args.append(vault_files)
+            args.append(vault_vars)
+
+        return JobInfo(id=self.proxy.pck_add_job(*args))
 
     def AddJobsBulk(self, *jobs):
         """быстрое(batch) добавление задач в пакет
@@ -790,7 +811,7 @@ class Connector(object):
     def Packet(self, pckname, priority=MAX_PRIORITY, notify_emails=[], wait_tags=(), set_tag=None,
                check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True,
                notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None,
-               labels=None):
+               labels=None, vault_files=None, vault_vars=None):
         """создает новый пакет с именем pckname
             priority - приоритет выполнения пакета
             notify_emails - список почтовых адресов, для уведомления об ошибках
@@ -811,7 +832,9 @@ class Connector(object):
                 notify_on_skipped_reset=notify_on_skipped_reset,
                 is_sandbox=is_sandbox,
                 sandbox_host=sandbox_host,
-                labels=labels
+                labels=labels,
+                vault_files=vault_files,
+                vault_vars=vault_vars,
             )
         except xmlrpclib.Fault, e:
             if 'DuplicatePackageNameException' in e.faultString:

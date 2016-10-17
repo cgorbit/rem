@@ -44,6 +44,7 @@ def parse_arguments():
     p.add_argument('--last-update-user-summary-file', dest='last_update_user_summary_file')
     p.add_argument('--listen-port', dest='listen_port')
     p.add_argument('--resume-params', dest='resume_params')
+    p.add_argument('--vaults-config-file', dest='vaults_config_file')
 
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument('--snapshot-data', dest='snapshot_data')
@@ -271,6 +272,7 @@ def _absolutize_fs_options(opts):
         'last_update_message_file',
         'snapshot_file',
         'last_update_user_summary_file',
+        'vaults_config_file',
     ]
 
     for name in names:
@@ -404,11 +406,17 @@ if __name__ == '__main__':
 
         reset_tries = resume_params.get('reset_tries', False)
 
+    vaults = None
+    if opts.vaults_config_file:
+        vaults = json.load(open(opts.vaults_config_file))
+        #vaults = pickle.load(open(opts.vaults_config_file))
+
     pck.start(
         opts.work_dir,
         opts.io_dir,
         rem_notifier.send_update,
         reset_tries=reset_tries,
+        vaults_setup=vaults,
     )
 
     ProfiledThread(target=rpc_server.serve_forever, name_prefix='RpcServer').start()

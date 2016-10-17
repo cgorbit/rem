@@ -154,6 +154,8 @@ class PacketBase(Unpickable(
                            req_sandbox_host=_value_or_None,
                            user_labels=_value_or_None,
                            oauth_token=_value_or_None,
+                           vault_files=_value_or_None,
+                           vault_vars=_value_or_None,
                           ),
                 CallbackHolder,
                 ICallbackAcceptor):
@@ -188,7 +190,7 @@ class PacketBase(Unpickable(
     def __init__(self, name, priority, context, notify_emails, wait_tags=(),
                  set_tag=None, kill_all_jobs_on_error=True, is_resetable=True,
                  notify_on_reset=False, notify_on_skipped_reset=True, sandbox_host=None,
-                 user_labels=None, oauth_token=None):
+                 user_labels=None, oauth_token=None, vault_files=None, vault_vars=None):
         super(PacketBase, self).__init__()
         self.name = name
         self.id = None
@@ -199,6 +201,8 @@ class PacketBase(Unpickable(
         self.last_sandbox_task_id = None
         self.user_labels = user_labels
         self.oauth_token = oauth_token
+        self.vault_files = vault_files
+        self.vault_vars = vault_vars
 
         self._graph_executor = DUMMY_GRAPH_EXECUTOR
 
@@ -749,7 +753,8 @@ class PacketBase(Unpickable(
 
     def rpc_add_job(self, shell, parents, pipe_parents, set_tag, tries,
                     max_err_len, retry_delay, pipe_fail, description, notify_timeout,
-                    max_working_time, output_to_status):
+                    max_working_time, output_to_status,
+                    vault_files, vault_vars):
         with self.lock:
             if self.queue or self._will_never_be_executed():
                 raise RpcUserError(RuntimeError("Can't add jobs in %s state" % self._repr_state))
@@ -771,7 +776,8 @@ class PacketBase(Unpickable(
                       pipe_fail=pipe_fail, description=description,
                       notify_timeout=notify_timeout,
                       max_working_time=max_working_time,
-                      output_to_status=output_to_status)
+                      output_to_status=output_to_status,
+                      vault_files=vault_files, vault_vars=vault_vars)
 
             self.jobs[job.id] = job
 
@@ -1465,6 +1471,15 @@ class SandboxPacket(PacketBase):
 
         return sandbox_remote_packet.PacketResources(files, list(resources))
 
+    def _make_vaults_setup(self):
+        return {
+            "global": [self.vault_files, self.vault_vars],
+            "jobs": {
+                str(job.id): [job.vault_files, job.vault_vars]
+                    for job in self.jobs.values()
+            }
+        }
+
     def _create_job_graph_executor(self):
         assert not self.files_modified
         resources = self._produce_job_graph_executor_custom_resources()
@@ -1478,7 +1493,7 @@ class SandboxPacket(PacketBase):
             resources,
             host=self.req_sandbox_host,
             oauth_token=self.oauth_token,
-            #self.make_sandbox_task_params()
+            vaults_setup=self._make_vaults_setup(),
         )
 
     def _check_can_move_beetwen_queues(self):
