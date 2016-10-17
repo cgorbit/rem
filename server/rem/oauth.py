@@ -39,6 +39,7 @@ def get_token_info(token):
     resp = resp.json()
 
     ret = OAuthInfo()
+    ret.token = token
 
     error = resp['error']
     if error != 'OK':
