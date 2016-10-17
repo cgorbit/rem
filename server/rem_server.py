@@ -88,7 +88,7 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
 
         try:
             authorization = self.headers.get("Authorization")
-            get_oauth = (lambda : get_oauth_checked(authorization).token) \
+            get_oauth = (lambda : get_oauth_checked(authorization)) \
                 if authorization and _context.server_oauth_application_id \
                 else lambda : None
 
@@ -192,7 +192,7 @@ def create_packet(get_oauth,
         or _context.all_packets_in_sandbox \
         or _context.random_packet_sandboxness and random() < 0.5
 
-    oauth_token = get_oauth() if is_sandbox else None
+    oauth = get_oauth() if is_sandbox else None
 
     if vault_files is not None:
         vault_files = vault_files.items()
@@ -214,7 +214,8 @@ def create_packet(get_oauth,
                     notify_on_skipped_reset=notify_on_skipped_reset,
                     sandbox_host=sandbox_host,
                     user_labels=user_labels,
-                    oauth_token=oauth_token,
+                    oauth_token=oauth.token if oauth else None,
+                    oauth_login=oauth.login if oauth else None,
                     vault_files=vault_files,
                     vault_vars=vault_vars)
     _scheduler.RegisterNewPacket(pck, wait_tags)

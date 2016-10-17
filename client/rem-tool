@@ -110,6 +110,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False, depth=0, max_depth=
         last_sandbox_task_id=last_sandbox_task_id,
         user_labels=(getattr(pck, 'labels', []) or []),
         queue=getattr(pck, 'queue', None),
+        oauth_login=getattr(pck, 'oauth_login', None),
     )
 
     if USE_NEW_OUTPUT_FORMAT:
@@ -117,7 +118,7 @@ def print_pck_info(pck, extended=False, show_all_tags=False, depth=0, max_depth=
             "  wait={dep_tags},priority={pck_priority};working_time={working_time}" \
             ";result_tag={done_tag};last_update='{history_mtime}'" \
             ";notify_emails={notify_emails_short};is_sandbox={is_sandbox};" \
-            "last_sandbox_task={last_sandbox_task_id};labels={user_labels},queue={queue}"
+            "last_sandbox_task={last_sandbox_task_id};labels={user_labels},queue={queue},oauth_login={oauth_login}"
     else:
         format = "packet '{pck_id}':\tname={pck_name},state={pck_state_old};wait={dep_tags}" \
             ",priority={pck_priority};working_time={working_time}" \

@@ -7,6 +7,7 @@ class OAuthInfo(object):
         self.token = None
         self.client_id = None
         self.login = None
+        self.token_status = None
 
 
 class TokenStatus(object):
@@ -47,7 +48,7 @@ def get_token_info(token):
 
     oauth = resp['oauth']
 
-    ret.status = resp['status']['value']
+    ret.token_status = resp['status']['value']
 
     ret.client_id = oauth['client_id']
 

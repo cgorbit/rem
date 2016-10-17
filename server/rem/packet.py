@@ -190,7 +190,8 @@ class PacketBase(Unpickable(
     def __init__(self, name, priority, context, notify_emails, wait_tags=(),
                  set_tag=None, kill_all_jobs_on_error=True, is_resetable=True,
                  notify_on_reset=False, notify_on_skipped_reset=True, sandbox_host=None,
-                 user_labels=None, oauth_token=None, vault_files=None, vault_vars=None):
+                 user_labels=None, oauth_token=None, oauth_login=None,
+                 vault_files=None, vault_vars=None):
         super(PacketBase, self).__init__()
         self.name = name
         self.id = None
@@ -201,6 +202,7 @@ class PacketBase(Unpickable(
         self.last_sandbox_task_id = None
         self.user_labels = user_labels
         self.oauth_token = oauth_token
+        self.oauth_login = oauth_login
         self.vault_files = vault_files
         self.vault_vars = vault_vars
 
@@ -854,6 +856,7 @@ class PacketBase(Unpickable(
                       waiting_time=waiting_time,
                       queue=self.queue.name if self.queue else None,
                       labels=self.user_labels,
+                      oauth_login=self.oauth_login,
                      )
 
         extra_flags = set()
