@@ -133,7 +133,7 @@ class Context(object):
                 raise ValueError("Empty token in %s" % cloud_tags_nanny_token_file)
             self.cloud_tags_server = self.cloud_tags_server.format(token=self.cloud_tags_nanny_token) # hack?
         else:
-            if '{token}' in self.cloud_tags_server:
+            if self.cloud_tags_server and '{token}' in self.cloud_tags_server:
                 raise RuntimeError("No store.cloud_tags_nanny_token_file for cloud_tags_server")
             self.cloud_tags_nanny_token = None
 
