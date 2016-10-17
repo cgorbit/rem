@@ -1,6 +1,6 @@
-import sys
 import time
 import threading
+import copy
 
 import rem.job
 import rem.job_graph
@@ -44,7 +44,8 @@ class _ExecutorOps(object):
         self.pck._something_changed.notify()
 
     def create_job_runner(self, job):
-        return rem.job.JobRunner(self.pck, job) # brain damage
+        pck = self.pck
+        return rem.job.JobRunner(pck, job, pck._get_vaults_for(job.id)) # brain damage
 
 
 class Packet(object):
@@ -68,6 +69,18 @@ class Packet(object):
     # TODO Better
         with self._lock:
             self._graph_executor.init()
+
+    def _get_vaults_for(self, job_id):
+        vaults = self._vaults_setup
+        if not vaults:
+            return None
+
+        env = copy.copy(vaults['global']) or {}
+        env.update(vaults['jobs'].get(job_id, {}))
+
+        logging.debug('Vaults for %d: %s' % (job_id, env))
+
+        return env
 
     def _mark_as_finished_if_need(self):
         graph = self._graph_executor
@@ -123,17 +136,30 @@ class Packet(object):
         self.__dict__.update(sdict)
         self._init_non_persistent()
 
-    def start(self, working_directory, io_directory, on_update, reset_tries=False):
+    def start(self, working_directory, io_directory, on_update, reset_tries=False,
+              vaults_setup=None):
         self._on_update = on_update
         self._working_directory = working_directory
         self._io_directory = io_directory
         #self._init_non_persistent()
         self._proc_runner = rem.job.create_job_runner(None, None)
 
-        print >>sys.stderr, self._graph_executor.__dict__
-        print >>sys.stderr, self._graph_executor.state
+        if vaults_setup:
+            def dictify(pairs):
+                if pairs is None:
+                    return None
+                return dict(pairs)
 
-# FIXME
+            vaults_setup = {
+                'global': dictify(vaults_setup['global']),
+                'jobs': {
+                    int(job_id): dictify(setup)
+                        for job_id, setup in vaults_setup['jobs'].items()
+                }
+            }
+
+        self._vaults_setup = vaults_setup
+
         with self._lock:
             if reset_tries:
                 self._graph_executor.reset_tries()

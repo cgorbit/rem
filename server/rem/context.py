@@ -114,7 +114,6 @@ class Context(object):
             and self.sandbox_task_priority \
             and self.sandbox_task_max_count \
             and self.sandbox_python_resource_id \
-            and self.sandbox_api_token \
             and self.sandbox_rpc_listen_addr):
             raise ValueError("Sandbox setup is incomplete")
 

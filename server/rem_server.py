@@ -43,6 +43,8 @@ from rem.sandbox_releases import SandboxReleasesResolver
 from rem.oauth import get_oauth_from_header, TokenStatus as OAuthTokenStatus
 
 
+VAULT_ENV_VAR_NAME_RE = re.compile('^\w+$')
+
 try:
     import requests.packages.urllib3
     requests.packages.urllib3.disable_warnings()
@@ -86,7 +88,7 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
 
         try:
             authorization = self.headers.get("Authorization")
-            get_oauth = lambda : get_oauth_checked(authorization) \
+            get_oauth = (lambda : get_oauth_checked(authorization).token) \
                 if authorization and _context.server_oauth_application_id \
                 else lambda : None
 
@@ -150,6 +152,25 @@ def need_oauth(f):
     impl._need_oauth = True
     return impl
 
+
+def check_vault_setup(setup):
+    for (env_var, vault_name) in setup:
+        if not isinstance(env_var, str):
+            raise RpcUserError(ValueError("Environment variable name must be a string, got: %s" % env_var))
+
+        if not VAULT_ENV_VAR_NAME_RE.match(env_var):
+            raise RpcUserError(ValueError("Environment variable name '%s' doesn't match '%s'" % (
+                env_var, VAULT_ENV_VAR_NAME_RE.pattern)))
+
+        if not (isinstance(vault_name, str) or (
+                isinstance(vault_name, (tuple, list)) \
+                and len(vault_name) == 2
+                and isinstance(vault_name[0], str)
+                and isinstance(vault_name[1], str)
+            )):
+            raise RpcUserError(ValueError("Vault name must be str or tuple(str, str), got %s" % vault_name))
+
+
 @need_oauth
 @traced_rpc_method("info")
 def create_packet(get_oauth,
@@ -157,7 +178,8 @@ def create_packet(get_oauth,
                   kill_all_jobs_on_error=True,
                   packet_name_policy=constants.DEFAULT_DUPLICATE_NAMES_POLICY,
                   resetable=True, notify_on_reset=False, notify_on_skipped_reset=True,
-                  is_sandbox=False, sandbox_host=None, user_labels=None):
+                  is_sandbox=False, sandbox_host=None, user_labels=None,
+                  vault_files=None, vault_vars=None):
 
     if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
         raise MakeDuplicatePackageNameException(packet_name)
@@ -170,7 +192,18 @@ def create_packet(get_oauth,
         or _context.all_packets_in_sandbox \
         or _context.random_packet_sandboxness and random() < 0.5
 
-    oauth_token = get_oauth().token if is_sandbox else None
+    oauth_token = get_oauth() if is_sandbox else None
+
+    if vault_files is not None:
+        vault_files = vault_files.items()
+    if vault_vars is not None:
+        vault_vars = vault_vars.items()
+
+    for setup in [vault_files, vault_vars]:
+        if setup is not None:
+            if not is_sandbox:
+                raise RpcUserError(RuntimeError("Vaults may be added only to Sandbox packets"))
+            check_vault_setup(setup)
 
     wait_tags = [_scheduler.tagRef.AcquireTag(tagname) for tagname in wait_tagnames]
     pck_cls = SandboxPacket if is_sandbox else LocalPacket
@@ -181,7 +214,9 @@ def create_packet(get_oauth,
                     notify_on_skipped_reset=notify_on_skipped_reset,
                     sandbox_host=sandbox_host,
                     user_labels=user_labels,
-                    oauth_token=oauth_token)
+                    oauth_token=oauth_token,
+                    vault_files=vault_files,
+                    vault_vars=vault_vars)
     _scheduler.RegisterNewPacket(pck, wait_tags)
     logging.info('packet %s registered as %s', packet_name, pck.id)
     return pck.id
@@ -192,18 +227,36 @@ def MakeNonExistedPacketException(pck_id):
 
 @traced_rpc_method()
 def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
-                max_err_len=None, retry_delay=None, pipe_fail=False, description="", notify_timeout=constants.NOTIFICATION_TIMEOUT, max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False):
+                max_err_len=None, retry_delay=None, pipe_fail=False, description="",
+                notify_timeout=constants.NOTIFICATION_TIMEOUT,
+                max_working_time=constants.KILL_JOB_DEFAULT_TIMEOUT,
+                output_to_status=False,
+                vault_files=None, vault_vars=None):
     pck = _scheduler.tempStorage.GetPacket(pck_id)
     if pck is not None:
         if isinstance(shell, unicode):
             shell = shell.encode('utf-8')
         parents = map(int, parents)
         pipe_parents = map(int, pipe_parents)
+
+        is_sandbox = isinstance(pck, SandboxPacket)
+
+        if vault_files is not None:
+            vault_files = vault_files.items()
+        if vault_vars is not None:
+            vault_vars = vault_vars.items()
+
+        for setup in [vault_files, vault_vars]:
+            if setup is not None:
+                if not is_sandbox:
+                    raise RpcUserError(RuntimeError("Vaults may be added only to Sandbox packets"))
+                check_vault_setup(setup)
+
         job = pck.rpc_add_job(shell, parents, pipe_parents,
                               set_tag and _scheduler.tagRef.AcquireTag(set_tag),
                               tries, max_err_len, retry_delay, pipe_fail,
                               description, notify_timeout, max_working_time,
-                              output_to_status)
+                              output_to_status, vault_files, vault_vars)
         return str(job.id)
     raise MakeNonExistedPacketException(pck_id)
 

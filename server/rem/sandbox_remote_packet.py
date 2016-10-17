@@ -183,6 +183,7 @@ class RemotePacketsDispatcher(object):
                 'snapshot_resource_id': pck._start_snapshot_resource_id,
                 # '=' to prevent '[object Object]' rendering of parameter on Sandbox task page
                 'custom_resources': '=' + json.dumps(files_setup, indent=3),
+                'vaults_setup': json.dumps(pck._vaults_setup, indent=3),
                 'custom_resources_list': map(str, resource_ids),
                 'python_resource': self._sbx_python_resource_id,
                 'resume_params': json.dumps({
@@ -845,10 +846,11 @@ class SandboxRemotePacket(Unpickable(
                             _reset_tries_at_start=bool,
                             _host=_value_or_None,
                             _oauth_token=_value_or_None,
+                            _vaults_setup=_value_or_None,
                          )):
     def __init__(self, ops, pck_id, run_guard, snapshot_data,
                  snapshot_resource_id, custom_resources, reset_tries, host,
-                 oauth_token=None):
+                 oauth_token=None, vaults_setup=None):
         self.id = pck_id
         self._run_guard = run_guard
         self._ops = ops
@@ -860,6 +862,7 @@ class SandboxRemotePacket(Unpickable(
         self._reset_tries_at_start = reset_tries
         self._host = host
         self._oauth_token = oauth_token
+        self._vaults_setup = vaults_setup
         self._sandbox = None
 
         self._target_stop_mode = StopMode.NONE
@@ -965,11 +968,13 @@ class SandboxJobGraphExecutorProxy(Unpickable(
                                     _has_pending_reset_tries=bool,
                                     _host=_value_or_None,
                                     _oauth_token=_value_or_None,
+                                    _vaults_setup=_value_or_None,
                                   )):
     MAX_TRY_COUNT = 5
     RETRY_INTERVALS = [15, 300, 900, 3600]
 
-    def __init__(self, ops, pck_id, graph, custom_resources, host=None, oauth_token=None):
+    def __init__(self, ops, pck_id, graph, custom_resources, host=None,
+                 oauth_token=None, vaults_setup=None):
         self._ops = ops
         self.lock = self._ops.lock
         self.pck_id = pck_id
@@ -977,6 +982,7 @@ class SandboxJobGraphExecutorProxy(Unpickable(
         self._custom_resources = custom_resources
         self._host = host
         self._oauth_token = oauth_token
+        self._vaults_setup = vaults_setup
 
         self._remote_packet = None
         self._prev_task_id = None
@@ -1021,6 +1027,7 @@ class SandboxJobGraphExecutorProxy(Unpickable(
             reset_tries=reset_tries,
             host=self._host,
             oauth_token=self._oauth_token,
+            vaults_setup=self._vaults_setup,
         )
 
     def produce_detailed_status(self):
