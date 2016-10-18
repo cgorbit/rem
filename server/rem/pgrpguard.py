@@ -16,6 +16,8 @@ _EXIT_NO_ARGV        = 201
 _EXIT_NOT_SUPER_USER = 202
 _EXIT_FAILED_REPORT  = 203
 _EXIT_BAD_REPORT_FD  = 204
+_EXIT_USER_CHANGE_NOT_ALLOWED = 205
+_EXIT_BAD_NEW_UID_GID = 206
 
 _RT_ERROR        = 1
 _RT_CHILD_STATUS = 2
@@ -152,6 +154,12 @@ def _real_status_from_report(report_fd, wrapper_status, wrapper_filename):
 
     elif wrapper_status == _EXIT_NOT_SUPER_USER:
         return WrapperUsageError("No set-uid root on %s" % wrapper_filename)
+
+    elif wrapper_status == _EXIT_USER_CHANGE_NOT_ALLOWED:
+        return WrapperUsageError("User change allowed only in non-SUID version %s" % wrapper_filename)
+
+    elif wrapper_status == _EXIT_BAD_NEW_UID_GID:
+        return WrapperUsageError("Malformed or non-existed user/group to change %s" % wrapper_filename)
 
     elif wrapper_status == _EXIT_STATUS_IN_FILE:
         try:

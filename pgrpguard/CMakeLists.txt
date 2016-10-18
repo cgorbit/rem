@@ -2,10 +2,8 @@ PROGRAM(pgrpguard)
 
 OWNER(trofimenkov)
 
-BUILD_ONLY_IF(LINUX)
+CFLAGS(-DPGRPGUARD_SUID)
 
-SRCS(
-    main.cpp
-)
+INCLUDE(CMakeLists.txt.inc)
 
 END()
