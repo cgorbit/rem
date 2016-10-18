@@ -76,9 +76,12 @@ def create_job_runner(runner, pgrpguard_binary=None, oom_adj=None):
         else ordinal_backend
 
 
+_TIME_FORMAT = "%Y/%m/%d %H:%M:%S"
+
+
 class IResult(Unpickable(type=str,
                          code=safeint,
-                         message=str)):
+                         message=lambda *args: '' if not args else args[0])):
     def __init__(self, type, code, message):
         self.type = type
         self.code = code
@@ -94,26 +97,47 @@ class IResult(Unpickable(type=str,
         return True
 
     def __str__(self):
-        return "%s: %s" % (self.type, self.code) + (", \"%s\"" % self.message if self.message else "")
+        return self.to_str()
+
+    def _get_message(self, long=True):
+        return self.message
+
+    def to_str(self, long=True):
+        ret = "%s: %s" % (self.type, self.code)
+        if self.message:
+            ret += ', "%s"' % self._get_message(long)
+        return ret
 
 
 class CommandLineResult(IResult):
-    time_format = "%Y/%m/%d %H:%M:%S"
-
     def __init__(self, code, start_time, finish_time, err):
         def format_time(t):
             if t is None:
                 return None
-            return time.strftime(self.time_format, time.localtime(t))
+            return time.strftime(_TIME_FORMAT, time.localtime(t))
 
-        IResult.__init__(self, "OS exit code", code, "started: %s; finished: %s;%s" \
-            % (format_time(start_time), format_time(finish_time), "\n" + (err or "")))
+        IResult.__init__(self,
+            "OS exit code",
+            code,
+            (
+                "started: %s; finished: %s" % (format_time(start_time), format_time(finish_time)),
+                ";\n" + (err or "")
+            ),
+        )
+
+    def _get_message(self, long=True):
+        if isinstance(self.message, tuple):
+            message, appendix = self.message
+        else:
+            message, appendix = (self.message, '')
+
+        return message + appendix if long else message
 
 
-class JobStartErrorResult(CommandLineResult):
+class JobStartErrorResult(IResult):
     def __init__(self, jobId, exception_message):
         ts = datetime.datetime.fromtimestamp(time.time())
-        IResult.__init__(self, "Job start error", 1, "Job %s start error at %s, error message: %s" % (jobId, ts.strftime(self.time_format), exception_message))
+        IResult.__init__(self, "Job start error", 1, "Job %s start error at %s, error message: %s" % (jobId, ts.strftime(_TIME_FORMAT), exception_message))
 
 
 class TriesExceededResult(IResult):
@@ -125,11 +149,9 @@ class TriesExceededResult(IResult):
 
 
 class TimeOutExceededResult(IResult):
-    time_format = CommandLineResult.time_format
-
     def __init__(self, jobId):
         ts = datetime.datetime.fromtimestamp(time.time())
-        IResult.__init__(self, "Timeout exceeded", 1, "Job %s timelimit exceeded at %s" % (jobId, ts.strftime(self.time_format)))
+        IResult.__init__(self, "Timeout exceeded", 1, "Job %s timelimit exceeded at %s" % (jobId, ts.strftime(_TIME_FORMAT)))
 
 
 class PackedExecuteResult(object): # for old backups
@@ -350,21 +372,22 @@ class JobRunner(object):
             append_result(JobStartErrorResult(job.id, str(as_legacy_start_error)))
 
         elif self._finish_time:
+            message = self._stderr_summary or ""
+            if job.output_to_status and self._stdout_summary: # FIXME Second check what for?
+                message += self._stdout_summary
+
             append_result(
-                CommandLineResult(self._process.returncode,
-                                    self._start_time,
-                                    self._finish_time,
-                                    self._stderr_summary)
+                CommandLineResult(
+                    self._process.returncode,
+                    self._start_time,
+                    self._finish_time,
+                    message
+                )
             )
 
         if self.returncode_robust != 0 and job.tries >= job.max_try_count:
             logging.info("%s result: TriesExceededResult", job)
             append_result(TriesExceededResult(job.tries))
-
-        if job.output_to_status and job.results and self._stdout_summary:
-            last = job.results[-1]
-            last.message = last.message or ""
-            last.message += self._stdout_summary
 
     def run(self):
         job = self._job
