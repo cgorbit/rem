@@ -345,7 +345,7 @@ class StatusCommander(ICommander):
             print "queue '%s':\t%r" % (opts.queue, q.Status())
 
         if opts.packet:
-            pck = rem.PacketInfo(opts.packet)
+            pck = rem.PacketInfoByAnyIdentity(opts.packet)
 
             print_pck_info(
                 pck,

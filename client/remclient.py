@@ -118,9 +118,7 @@ def _get_prefix(regexp):
 
 
 class DuplicatePackageNameException(Exception):
-    def __init__(self, message, *args, **kwargs):
-        super(DuplicatePackageNameException, self).__init__(*args, **kwargs)
-        self.message = message
+    pass
 
 
 class REMServerTemporaryError(Exception):
@@ -161,15 +159,12 @@ class Queue(object):
         """добавляет в очередь созданный пакет, см. класс JobPacket"""
         try:
             self.proxy.pck_addto_queue(pck.id, self.name, self.conn.packet_name_policy)
-        except xmlrpclib.Fault, e:
-            if 'DuplicatePackageNameException' in e.faultString:
-                if self.conn.packet_name_policy & DENY_DUPLICATE_NAMES_POLICY:
-                    self.conn.logger.error(DuplicatePackageNameException(e.faultString).message)
-                    raise DuplicatePackageNameException(e.faultString)
-                else:
-                    self.conn.logger.warning(e.faultString)
+        except DuplicatePackageNameException as e:
+            if self.conn.packet_name_policy & DENY_DUPLICATE_NAMES_POLICY:
+                self.conn.logger.error(e.message)
+                raise
             else:
-                raise RuntimeError(e.faultString)
+                self.conn.logger.warning(e.message)
 
     def Suspend(self):
         """приостанавливает выполнение новых задач из очереди"""
@@ -868,12 +863,9 @@ class Connector(object):
                 vault_vars=vault_vars,
                 vaults=vaults,
             )
-        except xmlrpclib.Fault, e:
-            if 'DuplicatePackageNameException' in e.faultString:
-                self.logger.error(DuplicatePackageNameException(e.faultString).message)
-                raise DuplicatePackageNameException(e.faultString)
-            else:
-                raise
+        except DuplicatePackageNameException as e:
+            self.logger.error(e.message)
+            raise
 
     def Tag(self, tagname):
         """возвращает объект для работы с тэгом tagname (см. класс Tag)"""
@@ -898,6 +890,14 @@ class Connector(object):
         if pck_id is None:
             raise RuntimeError("can't create PacketInfo instance from %r" % packet)
         return JobPacketInfo(self, pck_id)
+
+    def PacketInfoByAnyIdentity(self, identity):
+        pck_id = identity if identity.startswith('pck-') else self.proxy.get_pck_id_by_name(identity)
+        return self.PacketInfo(pck_id)
+
+    def PacketInfoByName(self, name):
+        pck_id = self.proxy.get_pck_id_by_name(name)
+        return self.PacketInfo(pck_id)
 
     def TagsBulk(self, *args, **kws):
         return TagsBulk(self, *args, **kws)
@@ -975,8 +975,11 @@ class _RetriableMethod:
                 try:
                     return self.method(*args)
                 except xmlrpclib.Fault as e:
-                    if 'REMServerTemporaryError' in e.faultString:
-                        raise REMServerTemporaryError(e.faultString)
+                    msg = e.faultString
+                    if 'REMServerTemporaryError' in msg:
+                        raise REMServerTemporaryError(msg)
+                    elif 'DuplicatePackageNameException' in msg:
+                        raise DuplicatePackageNameException(msg)
                     else:
                         raise
             except self.IgnoreExcType as lastExc:

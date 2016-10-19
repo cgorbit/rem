@@ -54,9 +54,9 @@ except:
 
 
 class DuplicatePackageNameException(Exception):
-    def __init__(self, pck_name, serv_name, *args, **kwargs):
+    def __init__(self, pck, serv_name, *args, **kwargs):
         super(DuplicatePackageNameException, self).__init__(*args, **kwargs)
-        self.message = 'DuplicatePackageNameException: Packet with name %s already exists in REM[%s]' % (pck_name, serv_name)
+        self.message = 'DuplicatePackageNameException: Packet with name %s already exists as %s in REM[%s]' % (pck.name, pck.id, serv_name)
 
 
 class REMServerTemporaryError(Exception):
@@ -171,9 +171,14 @@ def rpc_assert(cond, msg):
     if not cond:
         raise RpcUserError(AssertionError(msg))
 
-def MakeDuplicatePackageNameException(pck_name):
-    e = DuplicatePackageNameException(pck_name, _context.network_name)
+def MakeDuplicatePackageNameException(pck):
+    e = DuplicatePackageNameException(pck, _context.network_name)
     return RpcUserError(xmlrpclib.Fault(1, e.message))
+
+def _raise_on_duplicate_packet(pck_name):
+    pck = _scheduler.packets_by_name.Get(pck_name)
+    if pck:
+        raise MakeDuplicatePackageNameException(pck)
 
 
 def need_oauth(f):
@@ -230,8 +235,9 @@ def create_packet(get_oauth,
                   is_sandbox=False, sandbox_host=None, user_labels=None,
                   vault_files=None, vault_vars=None):
 
-    if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY and _scheduler.packetNamesTracker.Exist(packet_name):
-        raise MakeDuplicatePackageNameException(packet_name)
+    if packet_name_policy & constants.DENY_DUPLICATE_NAMES_POLICY:
+        _raise_on_duplicate_packet(packet_name)
+
     if notify_emails is not None:
         rpc_assert(isinstance(notify_emails, list), "notify_emails must be list or None")
         for email in notify_emails:
@@ -322,11 +328,11 @@ def pck_addto_queue(pck_id, queue_name, packet_name_policy=constants.IGNORE_DUPL
     #if isinstance(queue, SandboxQueue) != isinstance(pck, SandboxPacket):
         #raise RpcUserError(RuntimeError("Packet and Queue types mismatched"))
 
-    _scheduler.tempStorage.PickPacket(pck_id) # pop packet
-
     packet_name = pck.name
-    if packet_name_policy & (constants.DENY_DUPLICATE_NAMES_POLICY | constants.WARN_DUPLICATE_NAMES_POLICY) and _scheduler.packetNamesTracker.Exist(packet_name):
-        raise MakeDuplicatePackageNameException(packet_name)
+    if packet_name_policy & (constants.DENY_DUPLICATE_NAMES_POLICY | constants.WARN_DUPLICATE_NAMES_POLICY):
+        _raise_on_duplicate_packet(packet_name)
+
+    _scheduler.tempStorage.PickPacket(pck_id) # pop packet
 
     _scheduler.AddPacketToQueue(pck, queue)
 
@@ -507,6 +513,13 @@ def pck_status(pck_id):
     if pck is not None:
         return pck.Status()
     raise MakeNonExistedPacketException(pck_id)
+
+
+@readonly_method
+@traced_rpc_method()
+def get_pck_id_by_name(pck_name):
+    pck = _scheduler.packets_by_name.Get(pck_name)
+    return pck and pck.id
 
 
 @traced_rpc_method("info")
@@ -763,6 +776,7 @@ class ApiServer(object):
             pck_resume,
             pck_status,
             pck_suspend,
+            get_pck_id_by_name,
             queue_change_limit,
             queue_delete,
             queue_list,

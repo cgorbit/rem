@@ -4,32 +4,28 @@ import rem.fork_locking as fork_locking
 
 
 class PacketNamesStorage(ICallbackAcceptor):
-    def __init__(self, *args, **kwargs):
-        self.names = set(kwargs.get('names_list', []))
-        self.lock = fork_locking.Lock()
+    def __init__(self):
+        self.packets = {}
 
     def __getstate__(self):
         return {}
 
-    def Add(self, pck_name):
-        with self.lock:
-            self.names.add(pck_name)
-
-    def Update(self, names_list=None):
-        with self.lock:
-            self.names.update(names_list or [])
+    def Add(self, pck):
+        self.packets[pck.name] = pck
+        pck.AddCallbackListener(self)
 
     def Exist(self, pck_name):
-        return pck_name in self.names
+        return pck_name in self.packets
 
     def Delete(self, pck_name):
-        with self.lock:
-            if pck_name in self.names:
-                self.names.remove(pck_name)
+        self.packets.pop(pck_name, None)
 
-    def OnChange(self, packet_ref):
-        if isinstance(packet_ref, PacketBase) and packet_ref.state == PacketState.HISTORIED:
-            self.Delete(packet_ref.name)
+    def Get(self, pck_name):
+        return self.packets.get(pck_name)
+
+    def OnChange(self, pck):
+        if isinstance(pck, PacketBase) and pck.state == PacketState.HISTORIED:
+            self.Delete(pck.name)
 
     def OnJobDone(self, job_ref):
         pass

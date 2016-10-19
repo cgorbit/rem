@@ -266,12 +266,12 @@ class Scheduler(Unpickable(lock=PickableRLock,
                            queues_with_jobs=QueueList,
                            binStorage=BinaryStorage.create,
                            #storage with knowledge about saved binary objects (files for packets)
-                           packStorage=GlobalPacketStorage, #storage of all known packets
+                           packets_by_id=GlobalPacketStorage, #storage of all known packets
                            tempStorage=ShortStorage,
                            #storage with knowledge about nonassigned packets (packets that was created but not yet assigned to appropriate queue)
                            schedWatcher=SchedWatcher, #watcher for time scheduled events
                            connManager=copy_ctor_or_none(ConnectionManager),
-                           packetNamesTracker=PacketNamesStorage,
+                           packets_by_name=PacketNamesStorage,
                            _remote_packets_dispatcher=sandbox_remote_packet.RemotePacketsDispatcher,
                         ),
                 ICallbackAcceptor):
@@ -799,7 +799,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.binStorage.cleanup_fs()
 
     def cleanup_packet_storage_fs(self):
-        to_keep = set(self.packStorage.ids())
+        to_keep = set(self.packets_by_id.ids())
         to_keep |= set(self.tempStorage.ids())
         cleanup_directory(self.context.packets_directory, to_keep)
 
@@ -819,20 +819,18 @@ class Scheduler(Unpickable(lock=PickableRLock,
             pck.try_recover_after_backup_loading(ctx)
             q.relocate_packet(pck) # j.i.c force?
 
-            self.packStorage.Add(pck)
+            self.packets_by_id.Add(pck)
 
             if pck.state != PacketState.HISTORIED:
-                self.packetNamesTracker.Add(pck.name)
-                pck.AddCallbackListener(self.packetNamesTracker)
+                self.packets_by_name.Add(pck)
 
         if isinstance(q, CombinedQueue):
             self._add_queue_as_non_empty_if_need(q)
 
     def AddPacketToQueue(self, pck, queue):
-        self.packStorage.Add(pck)
+        self.packets_by_id.Add(pck)
         pck._attach_to_queue(queue)
-        self.packetNamesTracker.Add(pck.name)
-        pck.AddCallbackListener(self.packetNamesTracker)
+        self.packets_by_name.Add(pck)
 
     def RegisterNewPacket(self, pck, wait_tags):
         if self.connManager:
@@ -841,7 +839,7 @@ class Scheduler(Unpickable(lock=PickableRLock,
         self.tempStorage.StorePacket(pck)
 
     def GetPacket(self, pck_id):
-        return self.packStorage.GetPacket(pck_id)
+        return self.packets_by_id.GetPacket(pck_id)
 
     def ScheduleTaskD(self, deadline, fn, *args, **kws):
         self.schedWatcher.AddTaskD(deadline, fn, *args, **kws)
