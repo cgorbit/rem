@@ -93,14 +93,31 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
 
         log_level = 'debug' if is_multicall else getattr(func, "log_level", None)
         log_func = getattr(logging, log_level, None) if log_level else None
+        need_oauth = getattr(func, '_need_oauth', False)
+
+        params_orig = params
+
+        def wrap_get(holder, getter):
+            def impl():
+                try:
+                    holder[0] = getter()
+                    return holder[0]
+                except Exception as e:
+                    holder[0] = e
+                    raise
+            return impl
 
         try:
             authorization = self.headers.get("Authorization")
+            oauth = [None]
+
             get_oauth = (lambda : get_oauth_checked(authorization)) \
                 if authorization and _context.server_oauth_application_id \
                 else lambda : None
 
-            if getattr(func, '_need_oauth', False):
+            get_oauth = wrap_get(oauth, get_oauth)
+
+            if need_oauth:
                 params = (get_oauth,) + params
 
             return func(*params)
@@ -117,22 +134,28 @@ class AuthRequestHandler(SimpleXMLRPCRequestHandler):
                 if callable(log_func):
                     if is_multicall:
                         call_count = {}
-                        for r in params[0]:
+                        for r in params_orig[0]:
                             call_count.setdefault(r['methodName'], [0])[0] += 1
                         params_descr = call_count
                     else:
-                        params_descr = params
+                        params_descr = params_orig
 
                     params_descr = str(params_descr)
                     if len(params_descr) > 4096:
                         params_descr = params_descr[:4096] + '...'
 
-                    log_record = "RPC method\t%s\t(user: %s, host: %s):\t%s\t" % (
-                        ','.join(delays), username, self.address_string(), method)
+                    if oauth[0]:
+                        oauth_login = '__error__' if isinstance(oauth[0], Exception) \
+                            else oauth[0].login
+                    else:
+                        oauth_login = None
+
+                    log_record = "RPC method\t%s\t(user: %s, host: %s, oauth: %s):\t%s\t" % (
+                        ','.join(delays), username, self.address_string(), oauth_login, method)
 
                     log_func(log_record + params_descr)
-            except:
-                pass
+            except Exception as e:
+                logging.error("Can't log RPC: %s" % e)
 
 
 _scheduler = None
@@ -157,6 +180,7 @@ def need_oauth(f):
     def impl(*args):
         return f(*args)
     impl.__name__ = f.__name__
+    impl.log_level = getattr(f, 'log_level', None)
     impl._need_oauth = True
     return impl
 
@@ -220,9 +244,9 @@ def create_packet(get_oauth,
     oauth = get_oauth() if is_sandbox else None
 
     if vault_files is not None:
-        vault_files = vault_files.items()
+        vault_files = vault_files.items() # from dict
     if vault_vars is not None:
-        vault_vars = vault_vars.items()
+        vault_vars = vault_vars.items() # from dict
 
     for setup in [vault_files, vault_vars]:
         if setup is not None:
@@ -268,9 +292,9 @@ def pck_add_job(pck_id, shell, parents, pipe_parents, set_tag, tries,
         is_sandbox = isinstance(pck, SandboxPacket)
 
         if vault_files is not None:
-            vault_files = vault_files.items()
+            vault_files = vault_files.items() # from dict
         if vault_vars is not None:
-            vault_vars = vault_vars.items()
+            vault_vars = vault_vars.items() # from dict
 
         for setup in [vault_files, vault_vars]:
             if setup is not None:
