@@ -181,6 +181,23 @@ def check_vault_setup(setup):
 
 @need_oauth
 @traced_rpc_method("info")
+def pck_update_token(get_oauth, pck_id):
+    pck = _scheduler.tempStorage.GetPacket(pck_id)
+    if not pck:
+        pck = _scheduler.GetPacket(pck_id)
+
+    if not pck:
+        raise MakeNonExistedPacketException(pck_id)
+
+    oauth = get_oauth()
+    if oauth is None:
+        raise RpcUserError(RuntimeError("No OAuth from user"))
+
+    pck.rpc_update_oauth(oauth)
+
+
+@need_oauth
+@traced_rpc_method("info")
 def create_packet(get_oauth,
                   packet_name, priority, notify_emails, wait_tagnames, set_tag,
                   kill_all_jobs_on_error=True,
@@ -699,6 +716,7 @@ class ApiServer(object):
             check_binary_exist,
             check_tag,
             check_tags,
+            pck_update_token,
             create_packet,
             get_backupable_state,
             get_config,

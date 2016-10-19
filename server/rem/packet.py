@@ -233,6 +233,19 @@ class PacketBase(Unpickable(
 
         self._update_state()
 
+    def rpc_update_oauth(self, oauth):
+        with self.lock:
+            if self.oauth_token is None:
+                raise RpcUserError(RuntimeError("Can't update oauth on packet with no oauth initially set"))
+
+            if oauth.login != self.oauth_login:
+                raise RpcUserError(
+                    RuntimeError(
+                        "New OAuth token login (%s) mismatch packet's one (%s)" % (
+                            oauth.login, self.oauth_login)))
+
+            self.oauth_token = oauth.token
+
     def _will_never_be_executed(self):
         return self.is_broken or self.destroying
 
