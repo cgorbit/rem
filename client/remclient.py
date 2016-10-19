@@ -123,6 +123,10 @@ class DuplicatePackageNameException(Exception):
         self.message = message
 
 
+class REMServerTemporaryError(Exception):
+    pass
+
+
 def create_connection_nodelay(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
     """source_address argument used only for python2.7 compatibility"""
     msg = "getaddrinfo returns an empty list"
@@ -940,8 +944,14 @@ class _RetriableMethod:
         lastExc = None
         for trying in itertools.count(1):
             try:
-                return self.method(*args)
-            except self.IgnoreExcType, lastExc:
+                try:
+                    return self.method(*args)
+                except xmlrpclib.Fault as e:
+                    if 'REMServerTemporaryError' in e.faultString:
+                        raise REMServerTemporaryError(e.faultString)
+                    else:
+                        raise
+            except self.IgnoreExcType as lastExc:
                 if self.verbose:
                     name = getattr(self.method, '_Method__name', None) or getattr(self.method, 'im_func', None)
                     logging.getLogger('remclient.default').error("%s: execution for method %s failed [try: %d]\t%s", time.time(), name, trying, lastExc)
@@ -984,7 +994,8 @@ class RetriableXMLRPCProxy(xmlrpclib.ServerProxy):
         xmlrpclib.ServerProxy.__init__(self, uri, **kws)
 
     def __getattr__(self, name):
-        return _RetriableMethod(xmlrpclib.ServerProxy.__getattr__(self, name), self.__maxTries, self.__verbose, socket.error)
+        return _RetriableMethod(xmlrpclib.ServerProxy.__getattr__(self, name),
+            self.__maxTries, self.__verbose, (socket.error, REMServerTemporaryError))
 
 
 def _InitializeDefaultLogger():

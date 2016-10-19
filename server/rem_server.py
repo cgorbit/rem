@@ -41,6 +41,7 @@ import rem.queue
 from rem.action_queue import ActionQueue
 from rem.sandbox_releases import SandboxReleasesResolver
 from rem.oauth import get_oauth_from_header, TokenStatus as OAuthTokenStatus
+import rem.oauth
 
 
 VAULT_ENV_VAR_NAME_RE = re.compile('^\w+$')
@@ -58,14 +59,21 @@ class DuplicatePackageNameException(Exception):
         self.message = 'DuplicatePackageNameException: Packet with name %s already exists in REM[%s]' % (pck_name, serv_name)
 
 
+class REMServerTemporaryError(Exception):
+    pass
+
+
 def get_oauth_checked(header):
-    oauth = get_oauth_from_header(header)
+    try:
+        oauth = get_oauth_from_header(header)
+    except rem.oauth.TemporaryError as e:
+        raise RpcUserError(REMServerTemporaryError(str(e))) # not user error actually
 
     if oauth.token_status != OAuthTokenStatus.VALID:
-        raise RuntimeError("Token has %s status" % oauth.token_status)
+        raise RpcUserError(RuntimeError("Token has %s status" % oauth.token_status))
 
     if oauth.client_id != _context.server_oauth_application_id:
-        raise RuntimeError("Got token for wrong application %s" % oauth.client_id)
+        raise RpcUserError(RuntimeError("Got token for wrong application %s" % oauth.client_id))
 
     return oauth
 
