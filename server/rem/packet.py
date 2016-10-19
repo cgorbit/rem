@@ -1150,7 +1150,7 @@ class _LocalPacketJobGraphOps(object):
         self.pck._on_job_done_successfully(job_id)
 
     def create_job_runner(self, job):
-        return JobRunner(self, job)
+        return JobRunner(self, job, None)
 
     def on_job_done(self, runner):
         self.pck.on_job_done(runner)
