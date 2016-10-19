@@ -246,6 +246,26 @@ class Queue(object):
         self._set_lifetime(self.proxy.queue_set_suspended_lifetime, lifetime)
 
 
+class VaultType(object):
+    File = 0
+    Var  = 1
+
+
+def FileVault(id):
+    return (VaultType.File, id)
+
+def VarVault(id):
+    return (VaultType.Var, id)
+
+def _split_vaults(vaults):
+    ret = ({}, {})
+
+    for var_name, (type, id) in vaults.items():
+        ret[type][var_name] = id
+
+    return ret
+
+
 class JobPacket(object):
     """прокси объект для создания пакетов задач REM"""
     DEFAULT_TRIES_COUNT = 5
@@ -253,11 +273,14 @@ class JobPacket(object):
     def __init__(self, connector, name, priority, notify_emails, wait_tags, set_tag, check_tag_uniqueness, resetable,
                  kill_all_jobs_on_error=True, packet_name_policy=DEFAULT_DUPLICATE_NAMES_POLICY,
                  notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None,
-                 labels=None, vault_files=None, vault_vars=None):
+                 labels=None, vault_files=None, vault_vars=None, vaults=None):
         self.conn = connector
         self.proxy = connector.proxy
         if check_tag_uniqueness and self.proxy.check_tag(set_tag):
             raise RuntimeError("result tag %s already set for packet %s" % (set_tag, name))
+
+        if vaults:
+            vault_files, vault_vars = _split_vaults(vaults)
 
         args = [
             name, priority, notify_emails, wait_tags, set_tag,
@@ -288,7 +311,7 @@ class JobPacket(object):
                retry_delay=None, pipe_fail=False, description="",
                notify_timeout=NOTIFICATION_TIMEOUT,
                max_working_time=KILL_JOB_DEFAULT_TIMEOUT, output_to_status=False,
-               vault_files=None, vault_vars=None):
+               vault_files=None, vault_vars=None, vaults=None):
         """добавляет задачу в пакет
         shell - коммандная строка, которую следует выполнить
         tries - количество попыток выполнения команды (в случае неуспеха команда перазапускается ограниченное число раз) (по умолчанию: 5)
@@ -302,6 +325,10 @@ class JobPacket(object):
                в рабочий каталог задания (реально в рабочем каталоге создаются symlink'и на файлы, располагающиеся в одной общей директории, куда копируются все бинарники)"""
         parents = [job.id for job in parents or []]
         pipe_parents = [job.id for job in pipe_parents or []]
+
+        if vaults:
+            vault_files, vault_vars = _split_vaults(vaults)
+
         if files is not None:
             self.AddFiles(files)
 
@@ -815,7 +842,7 @@ class Connector(object):
     def Packet(self, pckname, priority=MAX_PRIORITY, notify_emails=[], wait_tags=(), set_tag=None,
                check_tag_uniqueness=False, resetable=True, kill_all_jobs_on_error=True,
                notify_on_reset=False, notify_on_skipped_reset=True, is_sandbox=False, sandbox_host=None,
-               labels=None, vault_files=None, vault_vars=None):
+               labels=None, vault_files=None, vault_vars=None, vaults=None):
         """создает новый пакет с именем pckname
             priority - приоритет выполнения пакета
             notify_emails - список почтовых адресов, для уведомления об ошибках
@@ -839,6 +866,7 @@ class Connector(object):
                 labels=labels,
                 vault_files=vault_files,
                 vault_vars=vault_vars,
+                vaults=vaults,
             )
         except xmlrpclib.Fault, e:
             if 'DuplicatePackageNameException' in e.faultString:
