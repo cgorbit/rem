@@ -156,6 +156,7 @@ class PacketBase(Unpickable(
                            oauth_token=_value_or_None,
                            vault_files=_value_or_None,
                            vault_vars=_value_or_None,
+                           oauth_login=_value_or_None,
                           ),
                 CallbackHolder,
                 ICallbackAcceptor):

@@ -107,6 +107,8 @@ class RemotePacketsDispatcher(object):
 
         for pck in self._by_task_id.itervalues():
             logging.debug('VIVIFY %s' % pck.id)
+            if pck._sandbox is None:
+                pck._sandbox = self._default_sandbox_client
             pck._run_guard = alloc_guard()
             self._await_task_status(pck)
             self._reschedule_packet(pck)
@@ -847,6 +849,7 @@ class SandboxRemotePacket(Unpickable(
                             _host=_value_or_None,
                             _oauth_token=_value_or_None,
                             _vaults_setup=_value_or_None,
+                            _sandbox=_value_or_None,
                          )):
     def __init__(self, ops, pck_id, run_guard, snapshot_data,
                  snapshot_resource_id, custom_resources, reset_tries, host,
