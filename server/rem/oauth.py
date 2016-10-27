@@ -100,15 +100,17 @@ def get_token_info(token):
 
     ret = OAuthInfo()
     ret.token = token
+    ret.error = resp.get('error')
 
-    ret.token_status = resp['status']['value']
+    if 'status' in resp:
+        ret.token_status = resp['status']['value']
 
-    if ret.token_status == TokenStatus.VALID:
-        ret.login = resp['login']
-        oauth = resp['oauth']
-        ret.client_id = oauth['client_id']
+        if ret.token_status == TokenStatus.VALID:
+            ret.login = resp['login']
+            oauth = resp['oauth']
+            ret.client_id = oauth['client_id']
     else:
-        ret.error = resp['error']
+        raise RuntimeError(ret.error)
 
     return ret
 
